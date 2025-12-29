@@ -1,0 +1,1 @@
+[ ] create tests that clearly run entire process of open , type in, close shell
