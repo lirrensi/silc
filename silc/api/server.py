@@ -64,4 +64,14 @@ def create_app(session: SilcSession) -> FastAPI:
         await session.force_kill()
         return {"status": "killed"}
 
+    @app.post("/tui/activate")
+    async def activate_tui() -> dict:
+        session.tui_active = True
+        return {"status": "tui_active"}
+
+    @app.post("/tui/deactivate")
+    async def deactivate_tui() -> dict:
+        session.tui_active = False
+        return {"status": "tui_inactive"}
+
     return app

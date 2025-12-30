@@ -13,10 +13,7 @@ def _load_winpty_module() -> Any:
     try:
         import winpty as module
     except ImportError:
-        try:
-            import pywinpty as module
-        except ImportError:
-            pytest.skip("winpty/pywinpty bindings are required on Windows")
+        pytest.skip("winpty/pywinpty bindings are required on Windows")
     return module
 
 

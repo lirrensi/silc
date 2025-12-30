@@ -1,4 +1,4 @@
-[ ] create tests that clearly run entire process of open , type in, close shell
+[?] create tests that clearly run entire process of open , type in, close shell
     1️⃣ tests/test_new_process.py – basic sanity check (start → run → in → close)  
     2️⃣ tests/process_test.py – uses a free‑port helper and explicit wait for the server  
     3️⃣ tests/integration_test.py – adds a short sleep and checks each step’s return code  
@@ -18,3 +18,10 @@
 [?] ensure TUI forwards terminal resize events to PTY
     => needed? as pty is engine, and tui would be just for rendering;
     => decided not worth it;
+
+
+[ ] pyz package for quick testing
+[ ] pyinstall for entire app for both;
+
+
+cmd> ./.venv-win/Scripts/activate.ps1

@@ -1,5 +1,26 @@
 """Command-line interface entrypoint for SILC."""
 
+# Adjust sys.path to include a sibling virtual environment (venv or venv-win) when running from a .pyz.
+import sys
+import pathlib
+import sysconfig
+
+script_path = pathlib.Path(sys.argv[0]).resolve()
+repo_root = script_path.parent.parent
+venv_name = "venv-win" if sys.platform.startswith("win") else "venv"
+venv_path = repo_root / venv_name
+if sys.platform.startswith("win"):
+    site_pkg = venv_path / "Lib" / "site-packages"
+else:
+    site_pkg = (
+        venv_path
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+if site_pkg.is_dir():
+    sys.path.insert(0, str(site_pkg))
+
 from __future__ import annotations
 
 import asyncio
@@ -9,10 +30,10 @@ import click
 import requests
 import uvicorn
 
-from .api.server import create_app
-from .core.session import SilcSession
-from .tui.app import launch_tui
-from .utils.ports import find_available_port
+from silc.api.server import create_app
+from silc.core.session import SilcSession
+from silc.tui.app import launch_tui
+from silc.utils.ports import find_available_port
 from .utils.shell_detect import detect_shell
 
 

@@ -20,20 +20,16 @@ class PTYBase(ABC):
         self.pid: int | None = None
 
     @abstractmethod
-    async def read(self, size: int = 1024) -> bytes:
-        ...
+    async def read(self, size: int = 1024) -> bytes: ...
 
     @abstractmethod
-    async def write(self, data: bytes) -> None:
-        ...
+    async def write(self, data: bytes) -> None: ...
 
     @abstractmethod
-    def resize(self, rows: int, cols: int) -> None:
-        ...
+    def resize(self, rows: int, cols: int) -> None: ...
 
     @abstractmethod
-    def kill(self) -> None:
-        ...
+    def kill(self) -> None: ...
 
 
 class StubPTY(PTYBase):
@@ -132,9 +128,7 @@ class WindowsPTY(PTYBase):
             self._pty_handle = winpty_module.PTY(cols=120, rows=30)
             self._process = self._pty_handle.spawn(command, env=self.env)
         else:
-            raise RuntimeError(
-                "winpty/pywinpty does not expose a usable PTY backend."
-            )
+            raise RuntimeError("winpty/pywinpty does not expose a usable PTY backend.")
         self.pid = getattr(self._process, "pid", None)
 
     async def read(self, size: int = 1024) -> bytes:
@@ -198,17 +192,16 @@ class WindowsPTY(PTYBase):
         try:
             import winpty as module
         except ImportError as winpty_error:
-            try:
-                import pywinpty as module
-            except ImportError as pywinpty_error:
-                raise RuntimeError(
-                    "pywinpty or winpty is required on Windows to run SILC."
-                ) from pywinpty_error
-            return module
+            raise RuntimeError(
+                "winpty is required on Windows to run SILC."
+            ) from winpty_error
+        return module
         return module
 
 
-def create_pty(shell_cmd: Optional[str] = None, env: Optional[Mapping[str, str]] = None) -> PTYBase:
+def create_pty(
+    shell_cmd: Optional[str] = None, env: Optional[Mapping[str, str]] = None
+) -> PTYBase:
     """Factory that returns the best available PTY implementation."""
 
     env = dict(env or os.environ.copy())

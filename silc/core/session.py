@@ -14,7 +14,6 @@ from ..core.pty_manager import create_pty, PTYBase
 from ..utils.shell_detect import ShellInfo
 
 
-
 class SilcSession:
     def __init__(self, port: int, shell_info: ShellInfo):
         self.port = port
@@ -33,6 +32,7 @@ class SilcSession:
         self._read_task: Optional[asyncio.Task[None]] = None
         self._gc_task: Optional[asyncio.Task[None]] = None
         self._closed = False
+        self.tui_active = False
 
     async def start(self) -> None:
         if self._read_task is not None:
@@ -55,10 +55,15 @@ class SilcSession:
                 break
 
     async def _garbage_collect(self) -> None:
+        # GC runs every 60s; closes session if:
+        # - idle > 1800s (30min)
+        # - not actively used (tui_active is False)
+        # - not currently running a command (run_lock not locked)
+        # - no TUI connection
         while not self._closed:
             await asyncio.sleep(60)
             idle = (datetime.utcnow() - self.last_access).total_seconds()
-            if idle > 3600:
+            if idle > 1800 and not self.tui_active and not self.run_lock.locked():
                 await self.close()
                 break
 
@@ -77,7 +82,10 @@ class SilcSession:
 
     async def run_command(self, cmd: str, timeout: int = 60) -> dict:
         if self.run_lock.locked():
-            return {"error": "Another run command is already executing", "status": "busy"}
+            return {
+                "error": "Another run command is already executing",
+                "status": "busy",
+            }
 
         async with self.run_lock:
             sentinel_uuid = str(uuid.uuid4())[:8]
@@ -138,6 +146,7 @@ class SilcSession:
         if self._closed:
             return
         self._closed = True
+        self.tui_active = False
         if self._read_task:
             self._read_task.cancel()
         if self._gc_task:
