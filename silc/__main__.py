@@ -1,5 +1,7 @@
 """Command-line interface entrypoint for SILC."""
 
+from __future__ import annotations
+
 # Adjust sys.path to include a sibling virtual environment (venv or venv-win) when running from a .pyz.
 import sys
 import pathlib
@@ -21,7 +23,6 @@ else:
 if site_pkg.is_dir():
     sys.path.insert(0, str(site_pkg))
 
-from __future__ import annotations
 
 import asyncio
 from typing import Optional
@@ -90,7 +91,11 @@ def out(port: int, lines: int) -> None:
 def in_(port: int, text: tuple[str, ...]) -> None:
     """Send raw input to the session."""
     text_str = " ".join(text)
-    resp = requests.post(f"http://127.0.0.1:{port}/in", json={"text": text_str})
+    resp = requests.post(
+        f"http://127.0.0.1:{port}/in",
+        data=text_str.encode("utf-8"),
+        headers={"Content-Type": "text/plain; charset=utf-8"},
+    )
     print(resp.json().get("status"))
 
 

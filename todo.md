@@ -25,3 +25,14 @@
 
 
 cmd> ./.venv-win/Scripts/activate.ps1
+
+Status:
+- api cli + rest works mostly - all commands operational?
+    => start/in/out/run works in win + wsl ok;
+
+=> test cmd win shell + unix shells;
+- test build
+[] - start should create persistent sessions, run in background;
+=> detached process even with python main.py <cmd>
+- add new `shutdown` that `close` all existing shells, `killall` does same + parent process
+- ./silc should start keeping all sessions right at creation

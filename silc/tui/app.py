@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from textual import events
 from textual.app import App, ComposeResult
-from textual.containers import Vertical
+from rich.text import Text
 from textual.widgets import Footer, Header, Input, Static
 
 import requests
@@ -24,6 +25,10 @@ class SilcTUI(App):
 
     Input {
         dock: bottom;
+        padding: 0 1;
+        background: #111;
+        color: white;
+        min-height: 1;
     }
     """
 
@@ -31,33 +36,60 @@ class SilcTUI(App):
         super().__init__()
         self.port = port
         self.base_url = f"http://127.0.0.1:{port}"
+        self._input_widget: Input | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield TerminalOutput(id="output")
-        yield Input(placeholder="Type command and press Enter")
+        yield Input(placeholder="Type command and press Enter", id="prompt")
         yield Footer()
 
     async def on_mount(self) -> None:
         self.set_interval(0.5, self._update_output)
+        self._input_widget = self.query_one("#prompt", Input)
+        if self._input_widget is not None:
+            self.set_focus(self._input_widget)
 
     async def _update_output(self) -> None:
         try:
-            resp = requests.get(f"{self.base_url}/out?raw=true&lines=50")
+            resp = requests.get(f"{self.base_url}/raw?lines=50")
             output = resp.json().get("output", "")
-            self.query_one("#output", TerminalOutput).update(output)
+            rendered = Text.from_ansi(output)
+            self.query_one("#output", TerminalOutput).update(rendered)
+        except requests.RequestException:
+            pass
+
+    async def _post_to_input(self, payload: str, nonewline: bool = False) -> None:
+        params = {"nonewline": "true"} if nonewline else {}
+        headers = {"Content-Type": "text/plain; charset=utf-8"}
+        try:
+            requests.post(
+                f"{self.base_url}/in",
+                params=params,
+                data=payload,
+                headers=headers,
+            )
         except requests.RequestException:
             pass
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
-        text = event.value.strip()
-        if not text:
-            return
-        try:
-            requests.post(f"{self.base_url}/in", json={"text": text + "\n"})
-        except requests.RequestException:
-            pass
+        payload = event.value
         event.input.value = ""
+        await self._post_to_input(payload)
+
+    async def on_key(self, event: events.Key) -> None:
+        if self._input_widget is None or not self._input_widget.has_focus:
+            return
+
+        if event.character == "\x03":
+            await self._post_to_input("\x03", nonewline=True)
+            event.stop()
+            return
+
+        if event.character == "\x04":
+            await self._post_to_input("\x04", nonewline=True)
+            event.stop()
+            return
 
 
 async def launch_tui(port: int) -> None:

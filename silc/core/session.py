@@ -4,14 +4,37 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+import sys
 import uuid
 from datetime import datetime
 from typing import Optional
 
+try:
+    import pyte
+except ImportError:  # pragma: no cover
+    pyte = None  # type: ignore[assignment]
+
 from ..core.buffer import RingBuffer
-from ..core.cleaner import clean_output
+from ..core.cleaner import ANSI_ESCAPE, clean_output
 from ..core.pty_manager import create_pty, PTYBase
 from ..utils.shell_detect import ShellInfo
+
+
+OSC_SEQUENCE = re.compile(r"\x1b\][^\x1b]*(?:\x1b\\|\x07)")
+
+
+def _strip_control(line: str) -> str:
+    cleaned = OSC_SEQUENCE.sub("", line)
+    cleaned = ANSI_ESCAPE.sub("", cleaned)
+    return cleaned.replace("\r", "")
+
+
+def _is_prompt_line(line: str, prompt_pattern: re.Pattern[str]) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    return bool(prompt_pattern.match(stripped))
 
 
 class SilcSession:
@@ -28,6 +51,14 @@ class SilcSession:
 
         self.run_lock = asyncio.Lock()
         self.input_lock = asyncio.Lock()
+
+        self.screen_columns = 120
+        self.screen_rows = 30
+        self.screen: "pyte.screen.Screen" | None = None
+        self.stream: "pyte.Stream" | None = None
+        if pyte:
+            self.screen = pyte.Screen(self.screen_columns, self.screen_rows)
+            self.stream = pyte.Stream(self.screen)
 
         self._read_task: Optional[asyncio.Task[None]] = None
         self._gc_task: Optional[asyncio.Task[None]] = None
@@ -47,6 +78,9 @@ class SilcSession:
                 if data:
                     self.buffer.append(data)
                     self.last_output = datetime.utcnow()
+                    if self.stream:
+                        decoded = data.decode("utf-8", errors="replace")
+                        self.stream.feed(decoded)
                 else:
                     await asyncio.sleep(0.1)
             except asyncio.CancelledError:
@@ -75,10 +109,24 @@ class SilcSession:
 
     def get_output(self, lines: int = 100, raw: bool = False) -> str:
         self.last_access = datetime.utcnow()
-        snapshot = self.buffer.get_last(lines)
         if raw:
+            snapshot = self.buffer.get_last(lines)
             return "\n".join(snapshot)
-        return clean_output(snapshot)
+        return self.get_rendered_output(lines)
+
+    def get_rendered_output(self, lines: int | None = None) -> str:
+        if self.screen is None:
+            snapshot = self.buffer.get_last(lines or 100)
+            return clean_output(snapshot)
+
+        rows = list(self.screen.display)
+        rendered_lines = [line.rstrip() for line in rows]
+        if not any(line.strip() for line in rendered_lines):
+            snapshot = self.buffer.get_last(lines or 100)
+            return clean_output(snapshot)
+        if lines is not None and lines < len(rendered_lines):
+            rendered_lines = rendered_lines[-lines:]
+        return "\n".join(rendered_lines).rstrip()
 
     async def run_command(self, cmd: str, timeout: int = 60) -> dict:
         if self.run_lock.locked():
@@ -90,29 +138,33 @@ class SilcSession:
         async with self.run_lock:
             sentinel_uuid = str(uuid.uuid4())[:8]
             sentinel = f"__SILC_DONE_{sentinel_uuid}__"
-            full_cmd = cmd + self.shell_info.get_sentinel_command(sentinel_uuid)
             cursor = self.buffer.cursor
+            suffix = self.shell_info.get_sentinel_command(sentinel_uuid)
+            full_cmd = cmd + suffix
 
-            await self.write_input(full_cmd + "\n")
+            newline = "\r\n" if sys.platform == "win32" else "\n"
+            await self.write_input(full_cmd + newline)
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout
 
+            output_lines: list[str] = []
+            sentinel_matcher = re.compile(rf"^{re.escape(sentinel)}\s*:\s*(-?\d+)")
             while loop.time() < deadline:
                 new_lines, cursor = self.buffer.get_since(cursor)
-                chunk = "\n".join(new_lines)
-                if sentinel in chunk:
-                    output_before, after = chunk.split(sentinel, 1)
-                    exit_code = 0
-                    for token in after.strip().split():
-                        token = token.lstrip(":")
-                        if token.lstrip("-").isdigit():
-                            exit_code = int(token)
-                            break
-                    return {
-                        "output": clean_output(output_before.splitlines()),
-                        "exit_code": exit_code,
-                        "status": "completed",
-                    }
+                for line in new_lines:
+                    clean_line = _strip_control(line)
+                    stripped = clean_line.lstrip()
+                    match = sentinel_matcher.match(stripped)
+                    if match:
+                        exit_code = int(match.group(1))
+                        return {
+                            "output": clean_output(output_lines),
+                            "exit_code": exit_code,
+                            "status": "completed",
+                        }
+                    if _is_prompt_line(clean_line, self.shell_info.prompt_pattern):
+                        continue
+                    output_lines.append(clean_line)
                 await asyncio.sleep(0.25)
 
             new_lines, _ = self.buffer.get_since(cursor)
