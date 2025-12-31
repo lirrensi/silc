@@ -197,21 +197,56 @@ class SilcSession:
     async def close(self) -> None:
         if self._closed:
             return
+
         self._closed = True
         self.tui_active = False
+
+        tasks: list[asyncio.Task[None]] = []
         if self._read_task:
             self._read_task.cancel()
+            tasks.append(self._read_task)
         if self._gc_task:
             self._gc_task.cancel()
+            tasks.append(self._gc_task)
+
+        # Kill the PTY first to unblock any pending reads.
         self.pty.kill()
+
+        # Best-effort wait for tasks to unwind. Never hang forever.
+        for task in tasks:
+            try:
+                await asyncio.wait_for(task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            except Exception:
+                pass
+
+        self._read_task = None
+        self._gc_task = None
 
     async def force_kill(self) -> None:
         self._closed = True
+
+        tasks: list[asyncio.Task[None]] = []
         if self._read_task:
             self._read_task.cancel()
+            tasks.append(self._read_task)
         if self._gc_task:
             self._gc_task.cancel()
+            tasks.append(self._gc_task)
+
         self.pty.kill()
+
+        for task in tasks:
+            try:
+                await asyncio.wait_for(task, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            except Exception:
+                pass
+
+        self._read_task = None
+        self._gc_task = None
 
 
 __all__ = ["SilcSession"]

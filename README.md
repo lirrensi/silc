@@ -6,7 +6,7 @@ SILC bridges an interactive terminal session with an HTTP API so both humans and
 
 1. `pip install -e .`
 2. `silc start` to launch a new session.
-3. Use `silc out`, `silc run`, or `silc status` from another terminal, or open the TUI with `silc open <port>`.
+ 3. Use `silc <port> out`, `silc <port> run`, or `silc <port> status` from another terminal, or open the TUI with `silc <port> open`.
 
 ## Current implementation
 

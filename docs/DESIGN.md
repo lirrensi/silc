@@ -1,3 +1,5 @@
+[initial design and idea]
+
 silc (Shared Interactive Linked CMD) - give your agent a terminal to work with!
 
 Problem: coding agents cant attach to any existing shell, only open new and even that is in the background.

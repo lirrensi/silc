@@ -6,7 +6,7 @@ import asyncio
 import json
 import sys
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..core.cleaner import clean_output
@@ -16,22 +16,34 @@ from ..core.session import SilcSession
 def create_app(session: SilcSession) -> FastAPI:
     app = FastAPI(title=f"SILC Session {session.session_id}")
 
+    def _check_alive() -> None:
+        """Check if session is alive, raise exception if not."""
+        if not session.get_status()["alive"]:
+            raise HTTPException(status_code=410, detail="Session has ended")
+
     @app.get("/status")
     async def get_status() -> dict:
-        return session.get_status()
+        status = session.get_status()
+        if not status["alive"]:
+            raise HTTPException(status_code=410, detail="Session has ended")
+        return status
 
     @app.get("/out")
     async def get_output(lines: int = 100) -> dict:
+        _check_alive()
         output = session.get_output(lines)
         return {"output": output, "lines": len(output.splitlines())}
 
     @app.get("/raw")
     async def get_raw_output(lines: int = 100) -> dict:
+        _check_alive()
         output = session.get_output(lines, raw=True)
         return {"output": output, "lines": len(output.splitlines())}
 
     @app.get("/stream")
     async def stream_output() -> StreamingResponse:
+        _check_alive()
+
         async def generator():
             cursor = session.buffer.cursor
             while True:
@@ -44,19 +56,17 @@ def create_app(session: SilcSession) -> FastAPI:
 
     @app.post("/in")
     async def send_input(request: Request, nonewline: bool = False) -> dict:
+        _check_alive()
         body = await request.body()
         text = body.decode("utf-8", errors="replace")
-        if (
-            not nonewline
-            and text
-            and not text.endswith(("\r\n", "\n"))
-        ):
+        if not nonewline and text and not text.endswith(("\r\n", "\n")):
             text += "\r\n" if sys.platform == "win32" else "\n"
         await session.write_input(text)
         return {"status": "sent"}
 
     @app.post("/run")
     async def run_command(request: Request, timeout: int = 60) -> dict:
+        _check_alive()
         body = await request.body()
         if not body:
             return {
@@ -78,11 +88,13 @@ def create_app(session: SilcSession) -> FastAPI:
 
     @app.post("/interrupt")
     async def interrupt() -> dict:
+        _check_alive()
         await session.interrupt()
         return {"status": "interrupted"}
 
     @app.post("/clear")
-    async def clear() -> dict:
+    async def clear_buffer() -> dict:
+        _check_alive()
         await session.clear_buffer()
         return {"status": "cleared"}
 

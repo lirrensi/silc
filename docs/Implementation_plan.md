@@ -1,3 +1,5 @@
+[initial design implementation plan, potentially outdated]
+
 # SILC Implementation Plan 🚀
 
 ## Project Structure
@@ -573,31 +575,40 @@ def start(port, is_global):
     # Run server
     uvicorn.run(app, host=host, port=port)
 
-@cli.command()
+@cli.group()
 @click.argument('port', type=int)
+def port(port):
+    """Session-specific commands"""
+    pass
+
+@port.command()
 @click.argument('lines', default=100)
-def out(port, lines):
+def out(lines):
     """Get output from session"""
+    ctx = click.get_current_context()
+    port = ctx.parent.params['port']
     import requests
     resp = requests.get(f"http://localhost:{port}/out?lines={lines}")
     print(resp.json()['output'])
 
-@cli.command()
-@click.argument('port', type=int)
+@port.command(name='in')
 @click.argument('text', nargs=-1)
-def in_(port, text):
+def in_(text):
     """Send input to session"""
+    ctx = click.get_current_context()
+    port = ctx.parent.params['port']
     import requests
     text_str = ' '.join(text)
     resp = requests.post(f"http://localhost:{port}/in", json={'text': text_str})
     print(resp.json()['status'])
 
-@cli.command()
-@click.argument('port', type=int)
+@port.command()
 @click.argument('command', nargs=-1)
 @click.option('--timeout', default=60)
-def run(port, command, timeout):
+def run(command, timeout):
     """Run command and wait for result"""
+    ctx = click.get_current_context()
+    port = ctx.parent.params['port']
     import requests
     cmd = ' '.join(command)
     resp = requests.post(
@@ -609,10 +620,11 @@ def run(port, command, timeout):
     if result.get('error'):
         click.echo(f"Error: {result['error']}", err=True)
 
-@cli.command()
-@click.argument('port', type=int)
-def status(port):
+@port.command()
+def status():
     """Get session status"""
+    ctx = click.get_current_context()
+    port = ctx.parent.params['port']
     import requests
     resp = requests.get(f"http://localhost:{port}/status")
     status = resp.json()
@@ -631,10 +643,11 @@ def list():
     for port, info in sessions.items():
         click.echo(f"{port}: {info['session_id']} ({info['shell']})")
 
-@cli.command()
-@click.argument('port', type=int)
-def open(port):
+@port.command()
+def open():
     """Open TUI for session"""
+    ctx = click.get_current_context()
+    port = ctx.parent.params['port']
     asyncio.run(launch_tui(port))
 
 if __name__ == '__main__':
