@@ -102,6 +102,7 @@ def _get_error_detail(response: requests.Response | None) -> str:
         msg = str(data)
     return msg or "unknown error"
 
+
 SESSION_REGISTRY: dict[int, SilcSession] = {}
 
 
@@ -193,9 +194,7 @@ def start(port: Optional[int], is_global: bool, no_detach: bool) -> None:
     # Daemon is running, create session
     try:
         payload = {"port": port} if port else {}
-        resp = requests.post(
-            _daemon_url("/sessions"), json=payload, timeout=5
-        )
+        resp = requests.post(_daemon_url("/sessions"), json=payload, timeout=5)
         resp.raise_for_status()
         session = resp.json()
         click.echo(f"✨ SILC session started at port {session['port']}")
@@ -208,7 +207,7 @@ def start(port: Optional[int], is_global: bool, no_detach: bool) -> None:
         if port and response and response.status_code == 400:
             existing = _get_session_entry(port)
             if existing:
-                detail += f" (existing session id {existing['session_id']})"
+                detail = f"Port {port} is already in use (existing session id {existing['session_id']})"
         click.echo(f"❌ Failed to create session: {detail}", err=True)
     except requests.RequestException as e:
         click.echo(f"❌ Failed to create session: {e}", err=True)
@@ -358,6 +357,92 @@ def status(ctx: click.Context) -> None:
         click.echo(f"❌ Session on port {port} does not exist", err=True)
 
 
+@cli.port_subcommands.command()
+@click.pass_context
+def clear(ctx: click.Context) -> None:
+    """Clear the session buffer."""
+    port = ctx.parent.params["port"]
+    try:
+        resp = requests.post(f"http://127.0.0.1:{port}/clear", timeout=5)
+        if resp.status_code == 410:
+            click.echo(f"❌ Session on port {port} has ended", err=True)
+            return
+        resp.raise_for_status()
+        click.echo("✨ Session buffer cleared")
+    except requests.RequestException:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+def interrupt(ctx: click.Context) -> None:
+    """Send interrupt signal (Ctrl+C) to the session."""
+    port = ctx.parent.params["port"]
+    try:
+        resp = requests.post(f"http://127.0.0.1:{port}/interrupt", timeout=5)
+        if resp.status_code == 410:
+            click.echo(f"❌ Session on port {port} has ended", err=True)
+            return
+        resp.raise_for_status()
+        click.echo("✨ Interrupt signal sent")
+    except requests.RequestException:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+@click.option("--rows", type=int, default=24, help="Number of rows")
+@click.option("--cols", type=int, default=80, help="Number of columns")
+def resize(ctx: click.Context, rows: int, cols: int) -> None:
+    """Resize the session terminal."""
+    port = ctx.parent.params["port"]
+    try:
+        resp = requests.post(
+            f"http://127.0.0.1:{port}/resize",
+            params={"rows": rows, "cols": cols},
+            timeout=5,
+        )
+        if resp.status_code == 410:
+            click.echo(f"❌ Session on port {port} has ended", err=True)
+            return
+        resp.raise_for_status()
+        click.echo(f"✨ Terminal resized to {rows}x{cols}")
+    except requests.RequestException:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+def close(ctx: click.Context) -> None:
+    """Close the session gracefully."""
+    port = ctx.parent.params["port"]
+    try:
+        resp = requests.post(f"http://127.0.0.1:{port}/close", timeout=5)
+        if resp.status_code == 410:
+            click.echo(f"❌ Session on port {port} has already ended", err=True)
+            return
+        resp.raise_for_status()
+        click.echo("✨ Session closed")
+    except requests.RequestException:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+def kill(ctx: click.Context) -> None:
+    """Force kill the session."""
+    port = ctx.parent.params["port"]
+    try:
+        resp = requests.post(f"http://127.0.0.1:{port}/kill", timeout=5)
+        if resp.status_code == 410:
+            click.echo(f"❌ Session on port {port} has already ended", err=True)
+            return
+        resp.raise_for_status()
+        click.echo("💀 Session killed")
+    except requests.RequestException:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
+
+
 @cli.command(name="list")
 def list_sessions() -> None:
     """List all active sessions."""
@@ -393,6 +478,7 @@ def shutdown() -> None:
 
     if _wait_for_daemon_stop(timeout=30):
         click.echo("✨ SILC daemon shut down (all sessions closed)")
+        click.echo("SILC daemon is no longer running")
         return
 
     # If the daemon is wedged, enforce a hard stop.
@@ -400,6 +486,7 @@ def shutdown() -> None:
     kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
     _wait_for_daemon_stop(timeout=5)
     click.echo("💀 SILC daemon and all sessions killed")
+    click.echo("SILC daemon is no longer running")
 
 
 @cli.command()
