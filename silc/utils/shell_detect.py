@@ -24,6 +24,9 @@ class ShellInfo:
         if self.type == "pwsh":
             return (
                 "function __silc_exec($cmd, $token) { "
+                '$prompt = "PS $($PWD.Path)> "; '  # Build prompt string
+                'Write-Host -NoNewline $prompt; '  # Print prompt
+                'Write-Host $cmd; '  # Print command
                 'Write-Host "__SILC_BEGIN_${token}__"; '
                 "Invoke-Expression $cmd; "
                 "$exitCode = $LASTEXITCODE; "

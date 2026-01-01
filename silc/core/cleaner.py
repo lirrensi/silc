@@ -5,9 +5,12 @@ from __future__ import annotations
 import re
 from typing import Iterable, List
 
-# OSC sequences commonly used to set terminal title, e.g. "\x1b]0;title\x07".
-OSC_SEQUENCE = re.compile(r"\x1b\][^\x1b]*(?:\x1b\\\\|\x07)")
-ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+ANSI_CONTROL_SEQUENCE = re.compile(
+    r"\x1b\[[0-9;]*[a-zA-Z]|"
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|"
+    r"\x1b[PX^_].*?\x1b\\|"
+    r"\x1b[@-Z\\-_]"
+)
 PROGRESS_RE = re.compile(r"\d{1,3}%")
 
 
@@ -20,9 +23,13 @@ def clean_output(raw_lines: Iterable[str]) -> str:
         if "\r" in line:
             line = line.split("\r")[-1]
 
-        # Strip terminal-title / OSC noise before removing ANSI escapes.
-        line = OSC_SEQUENCE.sub("", line)
-        line = ANSI_ESCAPE.sub("", line)
+        # Remove ANSI/OSC/control sequences while preserving tabs.
+        line = ANSI_CONTROL_SEQUENCE.sub("", line)
+        line = "".join(
+            char if char == "\t" or char >= " " else ""
+            for char in line
+        )
+        line = line.rstrip()
         line = line.replace("\r\n", "\n").replace("\r", "\n")
 
         cleaned.append(line)

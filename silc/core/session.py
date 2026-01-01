@@ -24,10 +24,15 @@ from ..core.pty_manager import create_pty, PTYBase
 from ..utils.shell_detect import ShellInfo
 
 
-OSC_SEQUENCE = re.compile(r"\x1b\][^\x1b]*(?:\x1b\\|\x07)")
-
-
+OSC_BYTE_PATTERN = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 SILC_SENTINEL_PATTERN = re.compile(r"__SILC_(?:BEGIN|END)_\w+__")
+HELPER_ECHO_FRAGMENTS = (
+    "__silc_exec",
+    "__SILC_BEGIN_",
+    "__SILC_END_",
+    'Write-Host "__SILC_',
+    "Invoke-Expression $cmd",
+)
 
 
 class SilcSession:
@@ -179,15 +184,10 @@ class SilcSession:
         # Filter out empty lines, sentinel lines, and wrapper command echoes
         filtered_lines = []
         for line in rendered_lines:
-            if "__silc_exec" in line and "function" in line:
+            if any(fragment in line for fragment in HELPER_ECHO_FRAGMENTS):
                 continue
             if SILC_SENTINEL_PATTERN.search(line):
                 continue
-
-            # Skip wrapper command echoes (PowerShell's Write-Host + command structure)
-            if "Write-Host '__SILC_" in line or "echo __SILC_" in line:
-                continue
-
             filtered_lines.append(line)
 
         # Remove trailing empty lines
@@ -299,6 +299,7 @@ class SilcSession:
                         exit_code = 0
 
                 output_bytes = bytes(collected[:end_index])
+                output_bytes = OSC_BYTE_PATTERN.sub(b"", output_bytes)
                 output_text = output_bytes.decode("utf-8", errors="replace")
                 output_text = output_text.replace("\r\n", "\n").replace("\r", "\n")
                 raw_lines = [
