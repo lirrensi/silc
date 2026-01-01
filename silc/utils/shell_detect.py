@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import sys
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Pattern
 
 
@@ -15,28 +18,71 @@ class ShellInfo:
     path: str
     prompt_pattern: Pattern[str]
 
-    def wrap_command(self, command: str, token: str, newline: str) -> str:
-        """Build a wrapper that prints BEGIN/END markers around a command.
-
-        Uses Write-Host/echo to mark output boundaries in the PTY stream so run()
-        can extract just the command's output (not prompts, echoes, or shell noise).
-        """
+    def get_helper_function(self) -> str | None:
+        """Return a shell-specific helper definition that prints SILC markers."""
 
         if self.type == "pwsh":
-            begin = f"echo '__SILC_BEGIN_{token}__'"
-            # For PowerShell cmdlets, use $? to check success; for external commands, use $LASTEXITCODE
-            end = f'if ($?) {{ echo "__SILC_END_{token}__:0" }} else {{ echo "__SILC_END_{token}__:1" }}'
-            return f"{begin}; {command}; {end}"
+            return (
+                "function __silc_exec($cmd, $token) { "
+                'Write-Host "__SILC_BEGIN_${token}__"; '
+                "Invoke-Expression $cmd; "
+                "$exitCode = $LASTEXITCODE; "
+                "if ($null -eq $exitCode) { $exitCode = 0 }; "
+                'Write-Host "__SILC_END_${token}__:${exitCode}" '
+                "}"
+            )
+
+        if self.type in {"bash", "zsh", "sh"}:
+            return (
+                "__silc_exec() { "
+                'printf "__SILC_BEGIN_$2__\\n"; '
+                "eval \"$1\"; "
+                'printf "__SILC_END_$2__:%d\\n" $?; '
+                "}"
+            )
 
         if self.type == "cmd":
-            begin = f"echo __SILC_BEGIN_{token}__"
-            end = f"echo __SILC_END_{token}__:%ERRORLEVEL%"
-            return newline.join([begin, command, end])
+            helper_path = self._ensure_cmd_helper()
+            return f'doskey __silc_exec=call "{helper_path}" $1 $2'
 
-        # POSIX shells (bash/zsh/sh/unknown)
-        begin = f'echo "__SILC_BEGIN_{token}__"'
-        end = f'ec=$?; echo "__SILC_END_{token}__:$ec"'
-        return f"{begin}; {command}; {end}"
+        # Default to POSIX helper for any other shell type.
+        return (
+            "__silc_exec() { "
+            'printf "__SILC_BEGIN_$2__\\n"; '
+            "eval \"$1\"; "
+            'printf "__SILC_END_$2__:%d\\n" $?; '
+            "}"
+        )
+
+    def build_helper_invocation(self, command: str, token: str) -> str:
+        """Construct the single-line invocation that calls the helper."""
+
+        if self.type == "pwsh":
+            escaped = command.replace("'", "''")
+            return f"__silc_exec '{escaped}' '{token}'"
+
+        if self.type in {"bash", "zsh", "sh"}:
+            return f"__silc_exec {shlex.quote(command)} {shlex.quote(token)}"
+
+        if self.type == "cmd":
+            escaped = command.replace('"', '""')
+            return f'__silc_exec "{escaped}" {token}'
+
+        return f"__silc_exec {shlex.quote(command)} {shlex.quote(token)}"
+
+    def _ensure_cmd_helper(self) -> str:
+        script_path = Path(tempfile.gettempdir()) / "__silc_exec.bat"
+        if script_path.exists():
+            return str(script_path)
+
+        script_content = (
+            "@echo off\r\n"
+            "echo __SILC_BEGIN_%2__\r\n"
+            "call %1\r\n"
+            "echo __SILC_END_%2__:%ERRORLEVEL%\r\n"
+        )
+        script_path.write_text(script_content, encoding="utf-8")
+        return str(script_path)
 
 
 def detect_shell() -> ShellInfo:

@@ -58,11 +58,14 @@ class SilcSession:
         self._gc_task: Optional[asyncio.Task[None]] = None
         self._closed = False
         self.tui_active = False
+        self._helper_injected = False
 
     async def start(self) -> None:
         if self._read_task is not None:
             return
         self._read_task = asyncio.create_task(self._read_loop())
+        await asyncio.sleep(0.5)
+        await self._inject_helper()
         self._gc_task = asyncio.create_task(self._garbage_collect())
 
     async def _read_loop(self) -> None:
@@ -94,6 +97,43 @@ class SilcSession:
             if idle > 1800 and not self.tui_active and not self.run_lock.locked():
                 await self.close()
                 break
+
+    async def _ensure_helper_ready(self) -> None:
+        if not self._helper_injected:
+            await self._inject_helper()
+
+    async def _inject_helper(self) -> None:
+        if self._helper_injected:
+            return
+        helper = self.shell_info.get_helper_function()
+        if helper:
+            helper_text = helper if helper.endswith("\n") else helper + "\n"
+            await self.pty.write(helper_text.encode("utf-8", errors="replace"))
+            await self._wait_for_prompt()
+            await asyncio.sleep(0.1)
+            self.buffer.clear()
+            if screens and Stream:
+                self.screen = screens.HistoryScreen(self.screen_columns, self.screen_rows)
+                self.stream = Stream(self.screen)
+        self._helper_injected = True
+
+    async def _wait_for_prompt(self, timeout: float = 2.0) -> None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        cursor = self.buffer.cursor
+        accumulator = ""
+        pattern = self.shell_info.prompt_pattern
+
+        while loop.time() < deadline:
+            chunk, cursor = self.buffer.get_since(cursor)
+            if chunk:
+                decoded = chunk.decode("utf-8", errors="replace")
+                accumulator += decoded
+                if len(accumulator) > 4096:
+                    accumulator = accumulator[-4096:]
+                if pattern.search(accumulator):
+                    return
+            await asyncio.sleep(0.05)
 
     async def write_input(self, text: str) -> None:
         async with self.input_lock:
@@ -139,17 +179,13 @@ class SilcSession:
         # Filter out empty lines, sentinel lines, and wrapper command echoes
         filtered_lines = []
         for line in rendered_lines:
-            # Skip lines that are just sentinel markers
-            if SILC_SENTINEL_PATTERN.search(line) and not any(
-                c for c in line if c not in " _" and not c.isalnum()
-            ):
+            if "__silc_exec" in line and "function" in line:
+                continue
+            if SILC_SENTINEL_PATTERN.search(line):
                 continue
 
             # Skip wrapper command echoes (PowerShell's Write-Host + command structure)
             if "Write-Host '__SILC_" in line or "echo __SILC_" in line:
-                continue
-            # Skip lines that look like part of the wrapper command being typed
-            if "'__SILC_" in line or "__SILC_END_" in line:
                 continue
 
             filtered_lines.append(line)
@@ -196,30 +232,23 @@ class SilcSession:
             }
 
         async with self.run_lock:
+            await self._ensure_helper_ready()
             run_token = str(uuid.uuid4())[:8]
             cursor = self.buffer.cursor
             newline = "\r\n" if sys.platform == "win32" else "\n"
 
-            # Reset any partial input state
-            await self.pty.write(b"\x03")
-            await asyncio.sleep(0.05)
-
-            # Build the wrapped command
-            wrapped = self.shell_info.wrap_command(cmd, run_token, newline)
-
-            # Write command directly to PTY bypassing write_input
-            # This avoids the echo/line-editing issues with interactive input
-            data = (wrapped + newline).encode("utf-8", errors="replace")
+            invocation = self.shell_info.build_helper_invocation(cmd, run_token)
+            data = (invocation + newline).encode("utf-8", errors="replace")
             await self.pty.write(data)
             await asyncio.sleep(0.05)
 
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout
 
-            begin_marker = f"__SILC_BEGIN_{run_token}__"
-            end_pattern = re.compile(rf"__SILC_END_{run_token}__:(-?\d+)")
+            begin_marker = f"__SILC_BEGIN_{run_token}__".encode("utf-8")
+            end_prefix = f"__SILC_END_{run_token}__:".encode("utf-8")
 
-            collected = ""
+            collected = bytearray()
             started = False
 
             while loop.time() < deadline:
@@ -228,49 +257,77 @@ class SilcSession:
                     await asyncio.sleep(0.05)
                     continue
 
-                decoded = chunk.decode("utf-8", errors="replace")
-                collected += decoded
+                collected.extend(chunk)
 
                 if not started:
-                    index = collected.find(begin_marker)
-                    if index < 0:
-                        # Keep only the tail so a split marker can still be detected.
-                        if len(collected) > len(begin_marker):
-                            collected = collected[-len(begin_marker) :]
+                    begin_index = collected.find(begin_marker)
+                    if begin_index < 0:
+                        excess = len(collected) - len(begin_marker)
+                        if excess > 0:
+                            del collected[:excess]
                         await asyncio.sleep(0.05)
                         continue
 
-                    # Drop everything up to and including the BEGIN marker line.
-                    after = collected[index + len(begin_marker) :].lstrip("\r")
-                    nl = after.find("\n")
-                    if nl == -1:
-                        # Wait for the rest of the BEGIN line to arrive.
-                        collected = after
-                        await asyncio.sleep(0.05)
-                        continue
-
-                    collected = after[nl + 1 :]
+                    del collected[: begin_index + len(begin_marker)]
                     started = True
+                    while collected and collected[0] in (10, 13):
+                        del collected[0]
 
-                match = end_pattern.search(collected)
-                if match:
-                    output_text = collected[: match.start()].rstrip("\r\n")
-                    exit_code = int(match.group(1))
-                    raw_lines = output_text.replace("\r\n", "\n").split("\n")
-                    return {
-                        "output": clean_output(raw_lines),
-                        "exit_code": exit_code,
-                        "status": "completed",
-                    }
+                end_index = collected.find(end_prefix)
+                if end_index < 0:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                tail = collected[end_index + len(end_prefix) :]
+                newline_index: int | None = None
+                for idx, byte in enumerate(tail):
+                    if byte in (10, 13):
+                        newline_index = idx
+                        break
+
+                if newline_index is None:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                exit_text = tail[:newline_index].decode("ascii", errors="ignore")
+                exit_digits = "".join(ch for ch in exit_text if ch.isdigit() or ch == "-")
+                exit_code = 0
+                if exit_digits:
+                    try:
+                        exit_code = int(exit_digits)
+                    except ValueError:
+                        exit_code = 0
+
+                output_bytes = bytes(collected[:end_index])
+                output_text = output_bytes.decode("utf-8", errors="replace")
+                output_text = output_text.replace("\r\n", "\n").replace("\r", "\n")
+                raw_lines = [
+                    line
+                    for line in output_text.split("\n")
+                    if not SILC_SENTINEL_PATTERN.search(line)
+                ]
 
                 await asyncio.sleep(0.05)
+                return {
+                    "output": clean_output(raw_lines),
+                    "exit_code": exit_code,
+                    "status": "completed",
+                }
 
-            # Timeout: best-effort return what we have collected (BEGIN may or may not be present).
             chunk, _ = self.buffer.get_since(cursor)
-            fallback_text = collected
+            fallback_bytes = bytes(collected)
             if chunk:
-                fallback_text += chunk.decode("utf-8", errors="replace")
-            fallback_lines = fallback_text.replace("\r\n", "\n").split("\n")
+                fallback_bytes += chunk
+            fallback_text = (
+                fallback_bytes.decode("utf-8", errors="replace")
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+            )
+            fallback_lines = [
+                line
+                for line in fallback_text.split("\n")
+                if not SILC_SENTINEL_PATTERN.search(line)
+            ]
             return {
                 "output": clean_output(fallback_lines),
                 "status": "timeout",
