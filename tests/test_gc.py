@@ -115,6 +115,3 @@ async def test_garbage_collection_does_not_close_when_active(monkeypatch):
 
     # Session should NOT be closed
     assert not close_called, "Session should stay alive while TUI is active"
-</parameter>
-</write_to_file>
-</tool_call>

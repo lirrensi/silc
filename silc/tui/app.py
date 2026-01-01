@@ -49,15 +49,31 @@ class SilcTUI(App):
         self._input_widget = self.query_one("#prompt", Input)
         if self._input_widget is not None:
             self.set_focus(self._input_widget)
+        rows, cols = self._current_dimensions()
+        await self._send_resize(rows, cols)
 
     async def _update_output(self) -> None:
         try:
-            resp = requests.get(f"{self.base_url}/raw?lines=50")
+            resp = requests.get(f"{self.base_url}/out?lines=50")
             output = resp.json().get("output", "")
             rendered = Text.from_ansi(output)
             self.query_one("#output", TerminalOutput).update(rendered)
         except requests.RequestException:
             pass
+
+    async def on_resize(self, event: events.Resize) -> None:
+        await self._send_resize(event.height, event.width)
+
+    async def _send_resize(self, rows: int, cols: int) -> None:
+        params = {"rows": rows, "cols": cols}
+        try:
+            requests.post(f"{self.base_url}/resize", params=params)
+        except requests.RequestException:
+            pass
+
+    def _current_dimensions(self) -> tuple[int, int]:
+        size = self.console.size
+        return size.height, size.width
 
     async def _post_to_input(self, payload: str, nonewline: bool = False) -> None:
         params = {"nonewline": "true"} if nonewline else {}

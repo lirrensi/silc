@@ -15,14 +15,28 @@ class ShellInfo:
     path: str
     prompt_pattern: Pattern[str]
 
-    def get_sentinel_command(self, uuid: str) -> str:
-        if self.type in {"bash", "zsh", "sh"}:
-            return f'; echo "__SILC_DONE_{uuid}__:$?"'
-        if self.type == "cmd":
-            return f" & echo __SILC_DONE_{uuid}__:%ERRORLEVEL%"
+    def wrap_command(self, command: str, token: str, newline: str) -> str:
+        """Build a wrapper that prints BEGIN/END markers around a command.
+
+        Uses Write-Host/echo to mark output boundaries in the PTY stream so run()
+        can extract just the command's output (not prompts, echoes, or shell noise).
+        """
+
         if self.type == "pwsh":
-            return f'; echo "__SILC_DONE_{uuid}__:$LASTEXITCODE"'
-        return f'; echo "__SILC_DONE_{uuid}__"'
+            begin = f"echo '__SILC_BEGIN_{token}__'"
+            # For PowerShell cmdlets, use $? to check success; for external commands, use $LASTEXITCODE
+            end = f'if ($?) {{ echo "__SILC_END_{token}__:0" }} else {{ echo "__SILC_END_{token}__:1" }}'
+            return f"{begin}; {command}; {end}"
+
+        if self.type == "cmd":
+            begin = f"echo __SILC_BEGIN_{token}__"
+            end = f"echo __SILC_END_{token}__:%ERRORLEVEL%"
+            return newline.join([begin, command, end])
+
+        # POSIX shells (bash/zsh/sh/unknown)
+        begin = f'echo "__SILC_BEGIN_{token}__"'
+        end = f'ec=$?; echo "__SILC_END_{token}__:$ec"'
+        return f"{begin}; {command}; {end}"
 
 
 def detect_shell() -> ShellInfo:

@@ -33,14 +33,15 @@ Status:
 => test cmd win shell + unix shells;
 - test build
 
-[] - start should create persistent sessions, run in background;
+[x] - start should create persistent sessions, run in background;
 => detached process even with python main.py <cmd>
 - add new `shutdown` that `close` all existing shells, `killall` does same + parent process
 - ./silc should start keeping all sessions right at creation
 => daemon is still casing a trillion issues;
 
-[ ] see if possible to imporove sentinel by NOT including it in outputs at all
+[ ] see if possible to improve sentinel by NOT including it in outputs at all
 - so it technically present in raw right buffer but `out` + `run` would skip it from outputs/
+- want: after run command done: - strip sentinel string from ringbuffer so we dont see it when `out`
 
 
 [ ] create exe build.

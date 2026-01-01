@@ -10,6 +10,7 @@ cmd> python main.py 20000 out 50      # fetch last 50 lines
 cmd> python main.py 20000 in "echo hi"
 cmd> python main.py 20000 run "whoami"
 cmd> python main.py 20000 status
+cmd> python main.py 20000 clear
 
 ## Daemon management
 

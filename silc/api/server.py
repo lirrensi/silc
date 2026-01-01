@@ -47,9 +47,11 @@ def create_app(session: SilcSession) -> FastAPI:
         async def generator():
             cursor = session.buffer.cursor
             while True:
-                new_lines, cursor = session.buffer.get_since(cursor)
-                if new_lines:
-                    yield f"data: {clean_output(new_lines)}\n\n"
+                new_bytes, cursor = session.buffer.get_since(cursor)
+                if new_bytes:
+                    decoded = new_bytes.decode("utf-8", errors="replace").splitlines()
+                    if decoded:
+                        yield f"data: {clean_output(decoded)}\n\n"
                 await asyncio.sleep(0.5)
 
         return StreamingResponse(generator(), media_type="text/event-stream")
@@ -97,6 +99,12 @@ def create_app(session: SilcSession) -> FastAPI:
         _check_alive()
         await session.clear_buffer()
         return {"status": "cleared"}
+
+    @app.post("/resize")
+    async def resize(rows: int, cols: int) -> dict:
+        _check_alive()
+        session.resize(rows, cols)
+        return {"status": "resized", "rows": rows, "cols": cols}
 
     @app.post("/close")
     async def close() -> dict:
