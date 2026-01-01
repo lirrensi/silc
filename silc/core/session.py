@@ -117,16 +117,36 @@ class SilcSession:
     def get_rendered_output(self, lines: int | None = None) -> str:
         if self.screen is None:
             snapshot = self.buffer.get_last(lines or 100)
-            return clean_output(snapshot)
+            output = clean_output(snapshot)
+            # Remove sentinel lines
+            return self._remove_sentinels(output)
 
         rows = list(self.screen.display)
         rendered_lines = [line.rstrip() for line in rows]
         if not any(line.strip() for line in rendered_lines):
             snapshot = self.buffer.get_last(lines or 100)
-            return clean_output(snapshot)
+            output = clean_output(snapshot)
+            return self._remove_sentinels(output)
+        
         if lines is not None and lines < len(rendered_lines):
             rendered_lines = rendered_lines[-lines:]
-        return "\n".join(rendered_lines).rstrip()
+        
+        # Filter out sentinel lines before joining
+        filtered_lines = [
+            line for line in rendered_lines
+            if not re.search(r'__SILC_DONE_\w+__', line)
+        ]
+        
+        return "\n".join(filtered_lines).rstrip()
+
+    def _remove_sentinels(self, text: str) -> str:
+        """Remove sentinel marker lines from output."""
+        lines = text.split('\n')
+        filtered = [
+            line for line in lines
+            if not re.search(r'__SILC_DONE_\w+__', line)
+        ]
+        return '\n'.join(filtered)
 
     async def run_command(self, cmd: str, timeout: int = 60) -> dict:
         if self.run_lock.locked():
