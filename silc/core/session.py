@@ -8,20 +8,30 @@ import re
 import sys
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-try:
-    import pyte
-    from pyte import Stream, screens
-except ImportError:  # pragma: no cover
-    pyte = None  # type: ignore[assignment]
-    Stream = None
-    screens = None
+if TYPE_CHECKING:
+    try:
+        import pyte
+        from pyte import Stream, screens
+    except ImportError:
+        pyte = None
+        Stream = None
+        screens = None
+else:
+    try:
+        import pyte
+        from pyte import Stream, screens
+    except ImportError:  # pragma: no cover
+        pyte = None
+        Stream = None
+        screens = None
 
 from ..core.cleaner import clean_output
 from ..core.raw_buffer import RawByteBuffer
 from ..core.pty_manager import create_pty, PTYBase
 from ..utils.shell_detect import ShellInfo
+from ..utils.persistence import rotate_session_log, write_session_log
 
 
 OSC_BYTE_PATTERN = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
@@ -48,12 +58,13 @@ class SilcSession:
         self.last_output = datetime.utcnow()
 
         self.run_lock = asyncio.Lock()
+        self.current_run_cmd: str | None = None
         self.input_lock = asyncio.Lock()
 
         self.screen_columns = 120
         self.screen_rows = 30
-        self.screen: "pyte.screen.Screen" | None = None
-        self.stream: "Stream" | None = None
+        self.screen: Any = None
+        self.stream: Any = None
         if screens and Stream:
             self.screen = screens.HistoryScreen(self.screen_columns, self.screen_rows)
             self.stream = Stream(self.screen)
@@ -83,6 +94,9 @@ class SilcSession:
                     if self.stream:
                         decoded = data.decode("utf-8", errors="replace")
                         self.stream.feed(decoded)
+                    write_session_log(
+                        self.port, f"OUTPUT: {data.decode('utf-8', errors='replace')}"
+                    )
                 else:
                     await asyncio.sleep(0.1)
             except asyncio.CancelledError:
@@ -102,6 +116,7 @@ class SilcSession:
             if idle > 1800 and not self.tui_active and not self.run_lock.locked():
                 await self.close()
                 break
+            self.rotate_logs()
 
     async def _ensure_helper_ready(self) -> None:
         if not self._helper_injected:
@@ -118,7 +133,9 @@ class SilcSession:
             await asyncio.sleep(0.1)
             self.buffer.clear()
             if screens and Stream:
-                self.screen = screens.HistoryScreen(self.screen_columns, self.screen_rows)
+                self.screen = screens.HistoryScreen(
+                    self.screen_columns, self.screen_rows
+                )
                 self.stream = Stream(self.screen)
         self._helper_injected = True
 
@@ -224,11 +241,18 @@ class SilcSession:
         filtered = [line for line in lines if not SILC_SENTINEL_PATTERN.search(line)]
         return "\n".join(filtered)
 
+    def rotate_logs(self) -> None:
+        """Rotate session logs to keep size manageable."""
+        rotate_session_log(self.port, max_lines=1000)
+
     async def run_command(self, cmd: str, timeout: int = 60) -> dict:
+        # Capture the command being run for lock error reporting
+
         if self.run_lock.locked():
             return {
                 "error": "Another run command is already executing",
                 "status": "busy",
+                "running_cmd": self.current_run_cmd,
             }
 
         async with self.run_lock:
@@ -241,6 +265,7 @@ class SilcSession:
             data = (invocation + newline).encode("utf-8", errors="replace")
             await self.pty.write(data)
             await asyncio.sleep(0.05)
+            write_session_log(self.port, f"COMMAND: {cmd}")
 
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout
@@ -290,7 +315,9 @@ class SilcSession:
                     continue
 
                 exit_text = tail[:newline_index].decode("ascii", errors="ignore")
-                exit_digits = "".join(ch for ch in exit_text if ch.isdigit() or ch == "-")
+                exit_digits = "".join(
+                    ch for ch in exit_text if ch.isdigit() or ch == "-"
+                )
                 exit_code = 0
                 if exit_digits:
                     try:

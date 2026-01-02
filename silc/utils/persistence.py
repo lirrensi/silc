@@ -87,6 +87,41 @@ def write_daemon_log(message: str) -> None:
         pass
 
 
+def write_session_log(port: int, message: str) -> None:
+    """Append to session log."""
+    import datetime
+
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_path = get_session_log_path(port)
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except OSError:
+        pass
+
+
+def rotate_session_log(port: int, max_lines: int = 1000) -> None:
+    """Keep only last N lines in session log."""
+    log_path = get_session_log_path(port)
+    if not log_path.exists():
+        return
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    if len(lines) > max_lines:
+        log_path.write_text("\n".join(lines[-max_lines:]) + "\n", encoding="utf-8")
+
+
+def read_session_log(port: int, tail_lines: int | None = None) -> str:
+    """Read session log file."""
+    log_path = get_session_log_path(port)
+    if not log_path.exists():
+        return ""
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    if tail_lines:
+        lines = lines[-tail_lines:]
+    return "\n".join(lines)
+
+
 __all__ = [
     "DATA_DIR",
     "LOGS_DIR",
@@ -95,4 +130,7 @@ __all__ = [
     "rotate_daemon_log",
     "cleanup_session_log",
     "write_daemon_log",
+    "write_session_log",
+    "rotate_session_log",
+    "read_session_log",
 ]

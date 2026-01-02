@@ -1,34 +1,214 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure & Module Organization
-- `silc/` is the Python package that owns the CLI (`__main__.py`), the FastAPI endpoints (`silc/api/`), the session helpers (`silc/core/`), the Textual UI (`silc/tui/`), and utility helpers (`silc/utils/`). Reference `Implementation_plan.md` for a visual tree of how the submodules fit together.
-- `tests/` mirrors production files with `tests/test_session.py` and helper cases that target the buffer, PTY, and session lifecycle behaviors described in `README.md`.
-- Supporting scripts such as `main.py` and `debug_winpty.py` demonstrate entry points or Windows plumbing; treat them as launch aids rather than part of the core package.
-- Metadata and dependency pins live in `pyproject.toml`, so keep build requirements aligned with the `fastapi`, `textual`, and `pywinpty` ranges declared there.
+## Overview
 
-## Build, Test, and Development Commands
-- `pip install -e .` bootstraps the `silc` console script and installs production dependencies so you can run `silc start` directly.
-- `pip install -e .[test]` pulls in `pytest`/`pytest-asyncio` extras referenced in `pyproject.toml` before exercising the test suite.
-- `silc start [--port PORT] [--global]` launches a session, spins up the FastAPI server documented in `silc/api/server.py`, and opens the TUI; use `--global` carefully because it binds to `0.0.0.0`.
-- `silc <PORT> run "<cmd>"`, `silc <PORT> out`, `silc <PORT> in "<text>"`, and `silc <PORT> status` exercise the agent-facing API routes and mimic the HTTP examples in `Implementation_plan.md`.
-- `pytest tests/` validates the session, symlinked PTY, and buffer helpers in `tests/`; rerun after any change to `silc/core/` or `silc/api/`.
+`SharedShell` is a Python‑first CLI and FastAPI service that manages terminal sessions and a Textual UI.
 
-## Coding Style & Naming Conventions
-- Follow standard Python conventions: 4-space indentation, snake_case for functions, camelCase only for Pydantic models if already defined in `silc/api/models.py`, and keep modules small (each file focuses on one responsibility like `session.py`, `buffer.py`, etc.).
-- Prefer explicit return types and type hints because the project already annotates `SilcSession` methods and helper functions; keep docstrings short but descriptive.
-- Sequence logging/debug helpers through `click.echo` or `print` in CLI entry points and avoid excessive inline comments beyond the docstrings provided.
+The repository is centered around the `silc/` package, with tests in `tests/` and documentation in `docs/`.
 
-## Testing Guidelines
-- Tests rely on `pytest` plus `pytest-asyncio` for async session coverage; see `tests/test_session.py` for the canonical patterns.
-- Name new tests `test_*` and keep them grouped with existing ones under `tests/` so runners pick them up automatically.
-- When a test touches the PTY or session lifecycle, reuse fixtures that mirror `silc/core/session.py` behavior (e.g., setting up a `SilcSession` and awaiting `start()`).
-- Document any manual verification (e.g., `silc start` → `curl http://localhost:PORT/status`) inside the relevant test case so reviewers know how you exercised the feature.
+## Build & Install
+
+```bash
+# Editable install with production dependencies
+pip install -e .
+
+# Editable install with test dependencies
+pip install -e .[test]
+```
+
+The console script `silc` is exposed after the editable install.
+
+```bash
+silc start --port 8000   # launches server and TUI
+```
+
+## Linting & Formatting
+
+The project uses **Black**, **isort**, **flake8**, and **mypy**.  All tools are configured via `pyproject.toml` and a `pre‑commit` hook.
+
+```bash
+# Run all linters
+pre-commit run --all-files
+```
+
+### Black
+- 88‑character line width.
+- Hook rewrites files; no `--check`.
+
+### isort
+- Groups: `stdlib`, `thirdparty`, `localfolder`.
+- Alphabetical within groups.
+- Imports sorted before the first non‑import.
+
+### flake8
+- Syntax, unused imports, style.
+- Ignores `E501`.
+
+### mypy
+- Type check `silc/` with `--strict`.
+
+## Type Checking
+
+```bash
+mypy silc/
+```
+
+2011first CLI and FastAPI service that manages terminal sessions and a Textual UI.
+
+The repository is centered around the `silc/` package, with tests in `tests/` and documentation in `docs/`.
+
+## Build & Install
+
+```bash
+# Editable install with production dependencies
+pip install -e .
+
+# Editable install with test dependencies
+pip install -e .[test]
+```
+
+The console script `silc` is exposed after the editable install.
+
+```bash
+silc start --port 8000   # launches server and TUI
+```
+
+## Linting & Formatting
+
+The project uses **Black**, **isort**, **flake8**, and **mypy**.  All tools are configured via `pyproject.toml` and a `pre‑commit` hook.
+
+```bash
+# Run all linters
+pre-commit run --all-files
+```
+
+### Black
+- 88‑character line width.
+- Hook rewrites files; no `--check`.
+
+### isort
+- Groups: `stdlib`, `thirdparty`, `localfolder`.
+- Alphabetical within groups.
+- Imports sorted before the first non‑import.
+
+### flake8
+- Syntax, unused imports, style.
+- Ignores `E501`.
+
+### mypy
+- Type check `silc/` with `--strict`.
+
+## Type Checking
+
+```bash
+mypy silc/
+```
+
+All public functions must have explicit return types.
+
+## Testing
+
+The test suite is powered by **pytest** with **pytest‑asyncio**.
+
+```bash
+pytest tests/
+```
+
+### Running a Single Test
+
+```bash
+# By test path and name
+pytest tests/test_session.py::TestSession::test_start
+
+# By marker
+pytest -m integration
+```
+
+## Code Style Guidelines
+
+### Imports
+1. Order: `stdlib`, `thirdparty`, `local`.
+2. Blank line between groups.
+3. Prefer `from module import Class`.
+
+### Formatting
+- Run `pre-commit` before commits.
+- Single‑line docstrings for simple functions.
+- No trailing whitespace.
+- End files with a single newline.
+
+### Type Hints
+- Use `typing.*` instead of bare types.
+- Avoid `Any` unless necessary.
+
+### Naming
+- Modules: `snake_case`.
+- Functions/Methods: `snake_case`.
+- Classes: `PascalCase`.
+- Constants: `UPPER_SNAKE_CASE`.
+- Pydantic models: `CamelCase`.
+
+### Error Handling
+- Specific exceptions (`ValueError`, custom `SilcError`).
+- Log with `logging.exception`.
+- Do not swallow exceptions without retry.
+
+### Logging
+- Use `logging` module, default `INFO`.
+- Configure a `StreamHandler` in `silc/__init__.py`.
+- Avoid printing directly from library code.
+
+## Development Workflow
+
+1. Branch off `main`.
+2. Keep PRs focused.
+3. Run `pre-commit run --all-files` locally.
+4. Run full test suite before pushing.
+5. `git push --set-upstream origin <branch>`.
 
 ## Commit & Pull Request Guidelines
-- The repository is still empty, so create new commits with concise summaries like `feat: add queueing for run command` or `fix: normalize shell output before API`. Keep bodies brief and reference files touched.
-- Pull requests should describe the change, link to any related issue when available, and list commands you ran (e.g., `pytest tests/`). Include screenshots or terminal output only when the change alters the TUI or CLI behavior.
-- Tag reviewers with context: describe the session/command you tested (`silc start`, `silc <port> run`, etc.) and mention any known limitations (timeouts, locking).
 
-## Security & Configuration Tips
-- The `silc start --global` option exposes the HTTP API on all interfaces; firewall or VPN the host before using it on untrusted networks.
-- Sessions idle for over an hour with no child processes are garbage-collected, so test automation should ping the session periodically or override that behavior in `silc/core/session.py` before relying on long-running commands.
+- Conventional Commits: `feat:`, `fix:`, `chore:`, `refactor:`.
+- Subject < 72 chars.
+- Body explains *why*.
+- Attach test failures or screenshots if relevant.
+
+## Pre‑commit Hooks
+
+```bash
+pre-commit install
+```
+
+## CI Configuration
+
+The CI runs on GitHub Actions:
+1. Checkout.
+2. Python 3.11.
+3. Install dependencies.
+4. `pre-commit run --all-files`.
+5. `pytest tests/`.
+
+## Cursor Rules
+
+No `.cursor` or `.cursorrules` files.
+
+## Copilot Rules
+
+No `.github/copilot‑instructions.md`.
+
+## Useful Commands
+
+```bash
+# Compile all .py files
+python -m compileall .
+
+# Coverage report
+pytest --cov=silc tests/
+
+# Lint single file
+flake8 silc/core/session.py
+```
+
+---
+
+*This file is for internal use by automated agents and developers.  Keep it up‑to‑date as tooling or conventions change.*

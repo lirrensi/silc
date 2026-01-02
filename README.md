@@ -39,6 +39,31 @@ The standalone installer will:
 1. `silc start` to launch a new session.
 2. Use `silc <port> out`, `silc <port> run`, or `silc <port> status` from another terminal, or open the TUI with `silc <port> open`.
 
+## Docker mode: API-first shell access
+
+Run SILC in Docker for a sandboxed shell with HTTP API access. This is useful when you want:
+
+- A clean, isolated shell environment
+- Easy HTTP API without managing host processes
+- Consistent environment across different machines
+- Ability to give agents a disposable workspace
+
+```bash
+# Build and start the SILC daemon in Docker
+docker-compose up -d
+
+# Access sessions via HTTP
+curl http://localhost:19999/sessions
+curl http://localhost:20000/status
+curl http://localhost:20000/out
+
+# Or use the CLI from outside the container
+silc 20000 out
+silc 20000 run "ls -la"
+```
+
+**Note**: In Docker mode, the shell runs inside the container. You won't have access to your host files or environment. This is intentional for isolation and sandboxing.
+
 ## Current implementation
 
 - CLI scaffolding for all planned SILC commands.

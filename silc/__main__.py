@@ -233,9 +233,23 @@ def start(port: Optional[int], is_global: bool, no_detach: bool) -> None:
     """Start a new SILC session (creates daemon if needed)."""
     if is_global:
         click.echo(
-            "⚠️  --global is deprecated for daemon mode. Daemon always binds to 127.0.0.1.",
+            "⚠️  SECURITY WARNING: --global exposes the session to the network.",
             err=True,
+            bold=True,
+            fg="red",
         )
+        click.echo(
+            "   This allows Remote Code Execution (RCE) on your machine!",
+            err=True,
+            bold=True,
+            fg="red",
+        )
+        click.echo(
+            "   Only use this on trusted networks behind a firewall.",
+            err=True,
+            fg="red",
+        )
+        click.echo("", err=True)
 
     daemon_responsive = _daemon_available()
     daemon_running = daemon_responsive or is_daemon_running()
@@ -306,7 +320,7 @@ def start(port: Optional[int], is_global: bool, no_detach: bool) -> None:
     # Daemon is running, create session
     click.echo("Creating new session...", err=False)
     try:
-        payload = {"port": port} if port else {}
+        payload = {"port": port, "is_global": is_global} if port or is_global else {}
         resp = requests.post(_daemon_url("/sessions"), json=payload, timeout=5)
         resp.raise_for_status()
         session = resp.json()
@@ -627,6 +641,27 @@ def killall() -> None:
     click.echo("💀 SILC daemon and all sessions killed")
 
 
+@cli.command()
+@click.option("--tail", default=100, help="Number of lines to show from end")
+def logs(tail: int) -> None:
+    """Show daemon logs."""
+    from silc.utils.persistence import DAEMON_LOG
+
+    if not DAEMON_LOG.exists():
+        click.echo("No daemon log found")
+        return
+
+    try:
+        content = DAEMON_LOG.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        if tail > 0:
+            lines = lines[-tail:]
+        for line in lines:
+            click.echo(line)
+    except Exception as e:
+        click.echo(f"Error reading daemon log: {e}", err=True)
+
+
 @cli.port_subcommands.command()
 @click.pass_context
 def open(ctx: click.Context) -> None:
@@ -643,6 +678,30 @@ def web(ctx: click.Context) -> None:
     web_url = f"http://127.0.0.1:{port}/web"
     webbrowser.open_new_tab(web_url)
     click.echo(f"✨ Opening web UI at {web_url}")
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+@click.option("--tail", default=100, help="Number of lines to show from end")
+def logs(ctx: click.Context, tail: int) -> None:
+    """Show session logs."""
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    try:
+        resp = requests.get(
+            f"http://127.0.0.1:{port}/logs", params={"tail": tail}, timeout=5
+        )
+        if resp.status_code == 410:
+            click.echo(f"❌ Session on port {port} has ended", err=True)
+            return
+        resp.raise_for_status()
+        result = resp.json()
+        log_content = result.get("logs", "")
+        if log_content:
+            click.echo(log_content)
+        else:
+            click.echo("No logs available for this session")
+    except requests.RequestException:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
 
 
 def main() -> None:

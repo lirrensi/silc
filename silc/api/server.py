@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..core.cleaner import clean_output
 from ..core.session import SilcSession
+from ..utils.persistence import read_session_log
 
 
 def create_app(session: SilcSession) -> FastAPI:
@@ -40,6 +41,13 @@ def create_app(session: SilcSession) -> FastAPI:
         _check_alive()
         output = session.get_output(lines, raw=True)
         return {"output": output, "lines": len(output.splitlines())}
+
+    @app.get("/logs")
+    async def get_logs(tail: int = 100) -> dict:
+        _check_alive()
+        log_content = read_session_log(session.port, tail_lines=tail)
+        lines = log_content.splitlines() if log_content else []
+        return {"logs": log_content, "lines": len(lines)}
 
     @app.get("/stream")
     async def stream_output() -> StreamingResponse:

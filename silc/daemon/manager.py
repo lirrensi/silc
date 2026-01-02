@@ -56,6 +56,7 @@ DAEMON_PORT = 19999
 
 class SessionCreateRequest(BaseModel):
     port: int | None = None
+    is_global: bool = False
 
 
 class SilcDaemon:
@@ -94,8 +95,10 @@ class SilcDaemon:
         ):
             """Create a new session."""
             selected_port = port
+            is_global = False
             if selected_port is None and request:
                 selected_port = request.port
+                is_global = request.is_global
             if selected_port is None:
                 selected_port = find_available_port(20000, 21000)
 
@@ -104,7 +107,7 @@ class SilcDaemon:
                     status_code=400, detail=f"Port {selected_port} already in use"
                 )
 
-            session_socket = self._reserve_session_socket(selected_port)
+            session_socket = self._reserve_session_socket(selected_port, is_global)
             try:
                 shell_info = detect_shell()
                 session = SilcSession(selected_port, shell_info)
@@ -115,13 +118,19 @@ class SilcDaemon:
                     selected_port, session.session_id, shell_info.type
                 )
 
-                server = self._create_session_server(session)
+                server = self._create_session_server(session, is_global=is_global)
                 self.servers[selected_port] = server
 
                 # Start session server in background
                 task = asyncio.create_task(server.serve(sockets=[session_socket]))
                 self._session_tasks[selected_port] = task
                 self._attach_session_task(selected_port, task)
+
+                # Log if session is globally accessible
+                if is_global:
+                    write_daemon_log(
+                        f"Session {selected_port} is globally accessible on 0.0.0.0 (RCE RISK)"
+                    )
             except Exception:
                 self._close_session_socket(selected_port)
                 raise
@@ -267,12 +276,14 @@ class SilcDaemon:
 
         return app
 
-    def _create_session_server(self, session: SilcSession) -> uvicorn.Server:
+    def _create_session_server(
+        self, session: SilcSession, is_global: bool = False
+    ) -> uvicorn.Server:
         """Create uvicorn server for a session."""
         app = create_app(session)
         config = uvicorn.Config(
             app,
-            host="127.0.0.1",
+            host="0.0.0.0" if is_global else "127.0.0.1",
             port=session.port,
             log_level="info",
             access_log=True,
@@ -308,9 +319,11 @@ class SilcDaemon:
         task.add_done_callback(lambda t, port=port: self._cleanup_tasks.pop(port, None))
         return task
 
-    def _reserve_session_socket(self, port: int) -> socket.socket:
+    def _reserve_session_socket(
+        self, port: int, is_global: bool = False
+    ) -> socket.socket:
         try:
-            sock = bind_port("127.0.0.1", port)
+            sock = bind_port("0.0.0.0" if is_global else "127.0.0.1", port)
         except OSError as exc:
             raise HTTPException(
                 status_code=400, detail=f"Port {port} already in use"
@@ -488,8 +501,33 @@ class SilcDaemon:
             rotate_daemon_log(max_lines=1000)
 
     async def _watch_shutdown(self) -> None:
-        """Propagate shutdown events to the uvicorn server."""
+        """Propagate shutdown events to the uvicorn server and cleanup sessions."""
         await self._shutdown_event.wait()
+
+        write_daemon_log("Graceful shutdown initiated")
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 30.0
+        ports = list(self.sessions.keys())
+
+        for port in ports:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                write_daemon_log(
+                    "Shutdown exceeded 30s budget; leaving remaining sessions"
+                )
+                break
+            try:
+                await asyncio.wait_for(
+                    self._ensure_cleanup_task(port), timeout=remaining
+                )
+            except asyncio.TimeoutError:
+                write_daemon_log(f"Shutdown timeout closing session: port={port}")
+            except Exception as exc:
+                write_daemon_log(
+                    f"Shutdown error closing session: port={port}, error={exc}"
+                )
+
         if self._daemon_server:
             self._daemon_server.should_exit = True
 
