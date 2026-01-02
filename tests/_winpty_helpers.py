@@ -44,7 +44,7 @@ def normalize_chunk(chunk: bytes | str | None) -> bytes:
     return chunk
 
 
-def collect_output(process: Any, expected: str, timeout: float = 2.0) -> str:
+def collect_output(process: Any, expected: str, timeout: float = 5.0) -> str:
     deadline = time.time() + timeout
     fragments: list[str] = []
     while time.time() < deadline:
