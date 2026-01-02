@@ -84,6 +84,10 @@ class SilcDaemon:
         """Create daemon management API."""
         app = FastAPI(title="Silc Daemon")
 
+        @app.on_event("startup")
+        async def startup_event():
+            write_daemon_log("Daemon API is ready to accept requests")
+
         @app.post("/sessions")
         async def create_session(
             port: int | None = None, request: SessionCreateRequest | None = None

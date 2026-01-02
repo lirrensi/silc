@@ -87,6 +87,72 @@ def _wait_for_daemon_start(timeout: float = 10.0) -> bool:
     return _daemon_available(timeout=0.5)
 
 
+def _wait_for_daemon_start_with_logs(timeout: float = 10.0) -> bool:
+    """Wait until daemon is available, showing startup logs as they appear."""
+    from silc.utils.persistence import DAEMON_LOG, LOGS_DIR
+
+    deadline = time.time() + timeout
+    last_log_size = 0
+
+    if DAEMON_LOG.exists():
+        last_log_size = DAEMON_LOG.stat().st_size
+
+    while time.time() < deadline:
+        if _daemon_available(timeout=0.5):
+            return True
+
+        time.sleep(0.3)
+
+        if DAEMON_LOG.exists():
+            try:
+                current_size = DAEMON_LOG.stat().st_size
+                if current_size > last_log_size:
+                    new_content = DAEMON_LOG.read_bytes()[last_log_size:].decode(
+                        "utf-8", errors="replace"
+                    )
+                    for line in new_content.splitlines():
+                        if line.strip():
+                            click.echo(f"  [daemon] {line}", err=False)
+                    last_log_size = current_size
+            except Exception:
+                pass
+
+    return _daemon_available(timeout=0.5)
+
+
+def _show_daemon_error_details() -> None:
+    """Show available error information from daemon startup."""
+    try:
+        from silc.utils.persistence import DAEMON_LOG, LOGS_DIR
+
+        if DAEMON_LOG.exists():
+            click.echo(f"\n📋 Daemon log: {DAEMON_LOG}", err=True)
+            try:
+                last_lines = DAEMON_LOG.read_text(encoding="utf-8").splitlines()
+                if last_lines:
+                    click.echo("Last 20 log lines:", err=True)
+                    for line in last_lines[-20:]:
+                        click.echo(f"  {line}", err=True)
+            except Exception:
+                click.echo("  (unable to read log)", err=True)
+        else:
+            click.echo(f"\n📋 Daemon log not found at: {DAEMON_LOG}", err=True)
+
+        stderr_log = LOGS_DIR / "daemon_stderr.log"
+        if stderr_log.exists():
+            click.echo(f"\n📋 Daemon stderr: {stderr_log}", err=True)
+            try:
+                stderr_content = stderr_log.read_text(encoding="utf-8")
+                if stderr_content:
+                    click.echo("Last 20 lines:", err=True)
+                    for line in stderr_content.splitlines()[-20:]:
+                        click.echo(f"  {line}", err=True)
+            except Exception:
+                click.echo("  (unable to read stderr)", err=True)
+    except Exception as e:
+        click.echo(f"\n⚠️  Could not fetch daemon error details: {e}", err=True)
+
+
 def _get_session_entry(port: int) -> dict | None:
     """Return daemon session info for a specific port."""
     try:
@@ -175,10 +241,13 @@ def start(port: Optional[int], is_global: bool, no_detach: bool) -> None:
     daemon_running = daemon_responsive or is_daemon_running()
 
     if daemon_running:
-        if not daemon_responsive:
+        if daemon_responsive:
+            click.echo("✓ Daemon is already running and responsive", err=False)
+        else:
             # Try to connect to verify it's responsive
             try:
                 requests.get(_daemon_url("/sessions"), timeout=2)
+                click.echo("✓ Daemon is running and responsive", err=False)
             except requests.RequestException:
                 # Daemon is not responsive
                 click.echo("⚠️  Daemon is running but unresponsive.", err=True)
@@ -200,15 +269,42 @@ def start(port: Optional[int], is_global: bool, no_detach: bool) -> None:
             return
         else:
             # Start detached daemon
+            click.echo("Starting daemon in background...", err=False)
             _start_detached_daemon()
-            if not _wait_for_daemon_start(timeout=10):
+            click.echo("Waiting for daemon to start...", err=False)
+            started = _wait_for_daemon_start_with_logs(timeout=10)
+            if not started:
                 click.echo(
                     "❌ Failed to start daemon (timed out waiting for it to be available)",
                     err=True,
                 )
-                return
+                _show_daemon_error_details()
+                choice = (
+                    input("Kill existing daemon process and restart? [y/N]: ")
+                    .strip()
+                    .lower()
+                )
+                if choice == "y":
+                    kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
+                    time.sleep(1)
+                    click.echo("Restarting daemon...", err=False)
+                    _start_detached_daemon()
+                    started = _wait_for_daemon_start_with_logs(timeout=10)
+                    if not started:
+                        click.echo(
+                            "❌ Failed to start daemon again (timed out)",
+                            err=True,
+                        )
+                        _show_daemon_error_details()
+                        return
+                else:
+                    click.echo("Aborted.")
+                    return
+            else:
+                click.echo("✓ Daemon started successfully", err=False)
 
     # Daemon is running, create session
+    click.echo("Creating new session...", err=False)
     try:
         payload = {"port": port} if port else {}
         resp = requests.post(_daemon_url("/sessions"), json=payload, timeout=5)
@@ -243,12 +339,22 @@ def _get_daemon_python_executable() -> str:
 def _start_detached_daemon() -> None:
     """Start daemon in background (detached)."""
     python_exec = _get_daemon_python_executable()
+
+    stderr_log_path = None
+    try:
+        from silc.utils.persistence import LOGS_DIR
+
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        stderr_log_path = LOGS_DIR / "daemon_stderr.log"
+        stderr_handle = open(stderr_log_path, "a", encoding="utf-8")
+    except Exception:
+        stderr_handle = subprocess.PIPE
+
     cmd = [python_exec, "-m", "silc", "daemon"]
     common_kwargs = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "close_fds": True,
+        "stderr": stderr_handle,
     }
 
     if sys.platform == "win32":
@@ -290,7 +396,7 @@ def port(port: int) -> None:
 @click.argument("lines", default=100, type=int)
 def out(ctx: click.Context, lines: int) -> None:
     """Fetch the latest output."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0 if ctx.parent else 0
     try:
         resp = requests.get(
             f"http://127.0.0.1:{port}/out", params={"lines": lines}, timeout=5
@@ -309,7 +415,7 @@ def out(ctx: click.Context, lines: int) -> None:
 @click.argument("text", nargs=-1)
 def in_(ctx: click.Context, text: tuple[str, ...]) -> None:
     """Send raw input to the session."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0 if ctx.parent else 0
     text_str = " ".join(text)
     try:
         resp = requests.post(
@@ -333,7 +439,7 @@ def in_(ctx: click.Context, text: tuple[str, ...]) -> None:
 @click.option("--timeout", default=60)
 def run(ctx: click.Context, command: tuple[str, ...], timeout: int) -> None:
     """Run a command inside the SILC shell."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0
     cmd = " ".join(command)
     try:
         resp = requests.post(
@@ -357,7 +463,7 @@ def run(ctx: click.Context, command: tuple[str, ...], timeout: int) -> None:
 @click.pass_context
 def status(ctx: click.Context) -> None:
     """Show session status."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0
     try:
         resp = requests.get(f"http://127.0.0.1:{port}/status", timeout=5)
         if resp.status_code == 410:
@@ -378,7 +484,7 @@ def status(ctx: click.Context) -> None:
 @click.pass_context
 def clear(ctx: click.Context) -> None:
     """Clear the session buffer."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0
     try:
         resp = requests.post(f"http://127.0.0.1:{port}/clear", timeout=5)
         if resp.status_code == 410:
@@ -394,7 +500,7 @@ def clear(ctx: click.Context) -> None:
 @click.pass_context
 def interrupt(ctx: click.Context) -> None:
     """Send interrupt signal (Ctrl+C) to the session."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0
     try:
         resp = requests.post(f"http://127.0.0.1:{port}/interrupt", timeout=5)
         if resp.status_code == 410:
@@ -412,7 +518,7 @@ def interrupt(ctx: click.Context) -> None:
 @click.option("--cols", type=int, default=80, help="Number of columns")
 def resize(ctx: click.Context, rows: int, cols: int) -> None:
     """Resize the session terminal."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0
     try:
         resp = requests.post(
             f"http://127.0.0.1:{port}/resize",
@@ -432,7 +538,7 @@ def resize(ctx: click.Context, rows: int, cols: int) -> None:
 @click.pass_context
 def close(ctx: click.Context) -> None:
     """Close the session gracefully."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0
     try:
         resp = requests.post(f"http://127.0.0.1:{port}/close", timeout=5)
         if resp.status_code == 410:
@@ -448,7 +554,7 @@ def close(ctx: click.Context) -> None:
 @click.pass_context
 def kill(ctx: click.Context) -> None:
     """Force kill the session."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0
     try:
         resp = requests.post(f"http://127.0.0.1:{port}/kill", timeout=5)
         if resp.status_code == 410:
@@ -525,7 +631,7 @@ def killall() -> None:
 @click.pass_context
 def open(ctx: click.Context) -> None:
     """Open the Textual TUI."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0
     asyncio.run(launch_tui(port))
 
 
@@ -533,7 +639,7 @@ def open(ctx: click.Context) -> None:
 @click.pass_context
 def web(ctx: click.Context) -> None:
     """Open the web UI in a browser."""
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"] if ctx.parent else 0
     web_url = f"http://127.0.0.1:{port}/web"
     webbrowser.open_new_tab(web_url)
     click.echo(f"✨ Opening web UI at {web_url}")
