@@ -102,11 +102,20 @@ class UnixPTY(PTYBase):
         self._fcntl.ioctl(self._master_fd, self._termios.TIOCSWINSZ, dims)
 
     def kill(self) -> None:
+        import psutil
+
         if self.pid:
             try:
-                os.killpg(os.getpgid(self.pid), signal.SIGTERM)
-            except OSError:
+                proc = psutil.Process(self.pid)
+                try:
+                    proc.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            except psutil.NoSuchProcess:
                 pass
+            except Exception:
+                pass
+
         if hasattr(self, "_master_fd"):
             try:
                 os.close(self._master_fd)
@@ -160,12 +169,45 @@ class WindowsPTY(PTYBase):
                 pass
 
     def kill(self) -> None:
+        import psutil
+
+        pid = getattr(self._process, "pid", None)
+        if pid:
+            try:
+                proc = psutil.Process(pid)
+                children = proc.children(recursive=True)
+                all_procs = [proc] + children
+
+                for p in all_procs:
+                    try:
+                        p.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+                    except Exception:
+                        pass
+
+                gone, alive = psutil.wait_procs(all_procs, timeout=0.5)
+                for p in alive:
+                    try:
+                        p.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+                    except Exception:
+                        pass
+                psutil.wait_procs(alive, timeout=0.3)
+            except psutil.NoSuchProcess:
+                pass
+            except Exception:
+                pass
+
         for method_name in ("kill", "terminate", "close"):
             method = getattr(self._process, method_name, None)
             if callable(method):
                 try:
                     method()
                 except OSError:
+                    pass
+                except Exception:
                     pass
                 break
         if self._pty_handle and hasattr(self._pty_handle, "close"):

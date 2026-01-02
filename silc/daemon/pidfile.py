@@ -147,7 +147,9 @@ def _terminate_process_tree(pid: int, *, timeout: float, force: bool) -> bool:
     return True
 
 
-def kill_daemon(*, timeout: float = 2.0, force: bool = True, port: int | None = None) -> bool:
+def kill_daemon(
+    *, timeout: float = 2.0, force: bool = True, port: int | None = None
+) -> bool:
     """Kill daemon process.
 
     - Prefer PID file.

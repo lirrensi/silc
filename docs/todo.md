@@ -39,14 +39,23 @@ Progress => bringing to production v 0.1
         => maybe use pipx instead?
     [x] create pipx install that can install tool from repo;
 
-[ ] normalizing newlines
+[?] normalizing newlines
 /in always nukes whatever newline + adds platform specific
 in "ls" => adds newlines
 in "" => newliens === enter
 input in web should behave exaclty same - must not add own newlines, server strips and adds
 unless ?nonewline
-
 but in web also commands line ctrlD SEND RAW INPUT WITHOUT NEWLINES, so it does not break anything
+
+
+[ ] pyinstaller still has no normal icon!
+
+[?]
+how daemon start/stop must work:
+1. silc start -> starts daemon if not running
+if unresponsive => waits 10s and ask to kill it and restart + note that (and how much shells would be stopped)
+2. shutdown/killall - goes over each sub proc -> and stops it and then stops daemon 
+- must not leave any zombibie processes (current issue on win?)
 
 
 Progress:

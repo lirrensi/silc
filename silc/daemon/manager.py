@@ -318,6 +318,97 @@ class SilcDaemon:
         self._session_sockets[port] = sock
         return sock
 
+    async def _kill_processes_on_port(self, port: int) -> None:
+        """Kill processes listening on a specific session port.
+
+        This is called during session cleanup to ensure any orphaned shell
+        processes are terminated. Unlike startup cleanup, this targets only
+        the specific session port being cleaned up.
+
+        Safety:
+        - Only kills processes listening on the exact port
+        - Verifies process matches shell patterns
+        - Kills entire process tree (children included)
+        """
+        import psutil
+
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None, lambda: self._kill_processes_on_port_sync(port)
+            )
+        except Exception as exc:
+            write_daemon_log(f"Error killing processes on port {port}: {exc}")
+
+    def _kill_processes_on_port_sync(self, port: int) -> None:
+        """Synchronous version of process killing."""
+        import psutil
+
+        try:
+            conns = psutil.net_connections(kind="inet")
+        except Exception:
+            return
+
+        # Shell patterns to match (case-insensitive)
+        shell_patterns = ["powershell.exe", "pwsh.exe", "cmd.exe", "bash", "sh", "zsh"]
+
+        for conn in conns:
+            try:
+                if not conn.laddr:
+                    continue
+                if conn.status != psutil.CONN_LISTEN:
+                    continue
+                if conn.laddr.port != port:
+                    continue
+                if not conn.pid:
+                    continue
+
+                pid = conn.pid
+
+                try:
+                    proc = psutil.Process(pid)
+
+                    # Verify it's a shell process
+                    try:
+                        cmdline = " ".join(proc.cmdline()).lower()
+                    except Exception:
+                        cmdline = ""
+
+                    is_shell = any(pattern in cmdline for pattern in shell_patterns)
+                    if not is_shell:
+                        continue
+
+                    # Kill process and all children
+                    children = proc.children(recursive=True)
+                    all_procs = [proc] + children
+                    for p in all_procs:
+                        try:
+                            p.terminate()
+                        except psutil.NoSuchProcess:
+                            pass
+                        except Exception:
+                            pass
+
+                    gone, alive = psutil.wait_procs(all_procs, timeout=1.0)
+                    for p in alive:
+                        try:
+                            p.kill()
+                        except psutil.NoSuchProcess:
+                            pass
+                        except Exception:
+                            pass
+                    psutil.wait_procs(alive, timeout=0.3)
+
+                    write_daemon_log(
+                        f"Killed orphaned shell process PID {pid} on port {port}"
+                    )
+                except psutil.NoSuchProcess:
+                    pass
+                except Exception as exc:
+                    write_daemon_log(f"Error killing PID {pid}: {exc}")
+            except Exception:
+                continue
+
     def _close_session_socket(self, port: int) -> None:
         sock = self._session_sockets.pop(port, None)
         if not sock:
@@ -362,7 +453,7 @@ class SilcDaemon:
                     f"Error awaiting session server task during cleanup: port={port}, error={exc}"
                 )
 
-        # Close session
+        # Close session (this should kill PTY processes)
         session = self.sessions.pop(port, None)
         if session:
             try:
@@ -371,6 +462,9 @@ class SilcDaemon:
                 write_daemon_log(f"Timeout closing session PTY: port={port}")
             except Exception as exc:
                 write_daemon_log(f"Error closing session PTY: port={port}, error={exc}")
+
+            # Kill any orphaned processes still listening on this port
+            await self._kill_processes_on_port(port)
 
         # Remove from registry
         self.registry.remove(port)
@@ -438,6 +532,30 @@ class SilcDaemon:
 
         setup_uvicorn_logging()
         write_daemon_log("Starting Silc daemon...")
+
+        from silc.daemon.pidfile import read_pidfile
+        import psutil
+
+        # Check for existing daemon process (skip in test mode)
+        if self._enable_hard_exit:
+            existing_pid = read_pidfile()
+            if existing_pid:
+                try:
+                    proc = psutil.Process(existing_pid)
+                    if proc.is_running():
+                        write_daemon_log(
+                            f"Existing daemon process found (PID {existing_pid}), aborting startup"
+                        )
+                        write_daemon_log("Use 'silc shutdown' or 'silc killall' first")
+                        raise RuntimeError(
+                            f"Daemon already running (PID {existing_pid}). "
+                            "Use 'silc shutdown' or 'silc killall' to stop it."
+                        )
+                except psutil.NoSuchProcess:
+                    write_daemon_log(
+                        f"Stale PID file found (PID {existing_pid}), cleaning up..."
+                    )
+
         write_pidfile(os.getpid())
         self._running = True
         self._setup_signals()
