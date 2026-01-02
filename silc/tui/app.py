@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from textual import events
 from textual.app import App, ComposeResult
 from rich.text import Text
@@ -45,24 +47,26 @@ class SilcTUI(App):
         yield Footer()
 
     async def on_mount(self) -> None:
-        self.set_interval(0.5, self._update_output)
         self._input_widget = self.query_one("#prompt", Input)
         if self._input_widget is not None:
             self.set_focus(self._input_widget)
         rows, cols = self._current_dimensions()
         await self._send_resize(rows, cols)
+        asyncio.create_task(self._stream_output())
 
-    async def _update_output(self) -> None:
-        try:
-            resp = requests.get(f"{self.base_url}/out?lines=50")
-            output = resp.json().get("output", "")
-            rendered = Text.from_ansi(output)
-            self.query_one("#output", TerminalOutput).update(rendered)
-        except requests.RequestException:
-            pass
+    async def _stream_output(self) -> None:
+        while self.is_running:
+            try:
+                resp = requests.get(f"{self.base_url}/out")
+                output = resp.json().get("output", "")
+                output_widget = self.query_one("#output", TerminalOutput)
+                output_widget.update(output)
+                await asyncio.sleep(0.2)
+            except requests.RequestException:
+                await asyncio.sleep(0.2)
 
     async def on_resize(self, event: events.Resize) -> None:
-        await self._send_resize(event.height, event.width)
+        await self._send_resize(event.size.height, event.size.width)
 
     async def _send_resize(self, rows: int, cols: int) -> None:
         params = {"rows": rows, "cols": cols}
@@ -91,21 +95,10 @@ class SilcTUI(App):
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         payload = event.value
         event.input.value = ""
-        await self._post_to_input(payload)
+        await self._post_to_input(payload, nonewline=False)
 
     async def on_key(self, event: events.Key) -> None:
-        if self._input_widget is None or not self._input_widget.has_focus:
-            return
-
-        if event.character == "\x03":
-            await self._post_to_input("\x03", nonewline=True)
-            event.stop()
-            return
-
-        if event.character == "\x04":
-            await self._post_to_input("\x04", nonewline=True)
-            event.stop()
-            return
+        pass
 
 
 async def launch_tui(port: int) -> None:
