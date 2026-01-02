@@ -76,6 +76,17 @@ def _wait_for_daemon_stop(timeout: float = 10.0) -> bool:
     return not _daemon_port_open(timeout=0.15)
 
 
+def _wait_for_daemon_start(timeout: float = 10.0) -> bool:
+    """Wait until daemon is available to accept requests (or deadline reached)."""
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _daemon_available(timeout=0.5):
+            return True
+        time.sleep(0.3)
+    return _daemon_available(timeout=0.5)
+
+
 def _get_session_entry(port: int) -> dict | None:
     """Return daemon session info for a specific port."""
     try:
@@ -190,7 +201,12 @@ def start(port: Optional[int], is_global: bool, no_detach: bool) -> None:
         else:
             # Start detached daemon
             _start_detached_daemon()
-            time.sleep(2)
+            if not _wait_for_daemon_start(timeout=10):
+                click.echo(
+                    "❌ Failed to start daemon (timed out waiting for it to be available)",
+                    err=True,
+                )
+                return
 
     # Daemon is running, create session
     try:

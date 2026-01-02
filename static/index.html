@@ -6,7 +6,7 @@
             name="viewport"
             content="width=device-width, initial-scale=1.0"
         />
-        <title>Cute Terminal ♡</title>
+        <title>SILC terminal GUI</title>
 
         <link
             rel="stylesheet"
@@ -72,6 +72,43 @@
             #send-button:hover {
                 background: #ffb3d9;
             }
+            .controls-container {
+                padding: 15px;
+                background: #252526;
+                border-radius: 12px 12px 0 0;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                justify-content: center;
+            }
+            .control-btn {
+                padding: 8px 16px;
+                background: #3e3e42;
+                border: 1px solid #5e5e62;
+                border-radius: 4px;
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.2s;
+                min-width: 60px;
+            }
+            .control-btn:hover {
+                background: #5e5e62;
+                border-color: #ff80bf;
+            }
+            .control-btn.clear-btn {
+                background: #d94e4e;
+                border-color: #ff6b6b;
+            }
+            .control-btn.clear-btn:hover {
+                background: #ff6b6b;
+            }
+            .arrow-group {
+                display: flex;
+                gap: 4px;
+                align-items: center;
+            }
         </style>
     </head>
     <body>
@@ -91,6 +128,52 @@
             />
             <button id="send-button">Send</button>
         </div>
+        <div class="controls-container">
+            <button
+                class="control-btn"
+                id="ctrlc-btn"
+            >
+                Ctrl+C
+            </button>
+            <button
+                class="control-btn"
+                id="ctrld-btn"
+            >
+                Ctrl+D
+            </button>
+            <div class="arrow-group">
+                <button
+                    class="control-btn arrow-btn"
+                    data-key="up"
+                >
+                    ↑
+                </button>
+                <button
+                    class="control-btn arrow-btn"
+                    data-key="left"
+                >
+                    ←
+                </button>
+                <button
+                    class="control-btn arrow-btn"
+                    data-key="down"
+                >
+                    ↓
+                </button>
+                <button
+                    class="control-btn arrow-btn"
+                    data-key="right"
+                >
+                    →
+                </button>
+            </div>
+            <button
+                class="control-btn clear-btn"
+                id="clear-btn"
+            >
+                Clear
+            </button>
+        </div>
 
         <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
 
@@ -98,7 +181,7 @@
             // Dynamic port/protocol for WS
             const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
             const host = window.location.hostname;
-            const port = window.location.port || "8080"; // fallback if empty
+            const port = window.location.port || "20000"; // fallback if empty
             const wsUrl = `${protocol}//${host}:${port}/ws`;
 
             // Create terminal
@@ -164,9 +247,9 @@
 
             // Send command via input
             function sendCommand() {
-                const text = inputEl.value.trim();
-                if (text && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ event: "type", text: text + "\r" })); // add \r for enter
+                const text = inputEl.value;
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ event: "type", text: text }));
                     inputEl.value = "";
                 }
             }
@@ -175,6 +258,43 @@
             inputEl.addEventListener("keydown", e => {
                 if (e.key === "Enter") {
                     sendCommand();
+                }
+            });
+
+            function sendViaWS(text) {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ event: "type", text, nonewline: true }));
+                }
+            }
+
+            document.getElementById("ctrlc-btn").addEventListener("click", () => {
+                sendViaWS("\x03");
+            });
+
+            document.getElementById("ctrld-btn").addEventListener("click", () => {
+                sendViaWS("\x04");
+            });
+
+            document.querySelectorAll(".arrow-btn").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    const key = btn.dataset.key;
+                    const keyMap = {
+                        up: "\x1b[A",
+                        down: "\x1b[B",
+                        left: "\x1b[D",
+                        right: "\x1b[C",
+                    };
+                    sendViaWS(keyMap[key]);
+                });
+            });
+
+            document.getElementById("clear-btn").addEventListener("click", async () => {
+                try {
+                    const port = window.location.port || "20000";
+                    await fetch(`http://${window.location.hostname}:${port}/clear`, { method: "POST" });
+                    term.clear();
+                } catch (e) {
+                    console.error("Clear failed:", e);
                 }
             });
         </script>

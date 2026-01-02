@@ -62,8 +62,14 @@ def create_app(session: SilcSession) -> FastAPI:
         _check_alive()
         body = await request.body()
         text = body.decode("utf-8", errors="replace")
-        if not nonewline and text and not text.endswith(("\r\n", "\n")):
+
+        # STRIP all line endings first!
+        text = text.rstrip("\r\n")
+
+        # Add platform line ending (unless nonewline flag)
+        if not nonewline:
             text += "\r\n" if sys.platform == "win32" else "\n"
+
         await session.write_input(text)
         return {"status": "sent"}
 
@@ -152,10 +158,15 @@ def create_app(session: SilcSession) -> FastAPI:
                     message = json.loads(data)
                     if message.get("event") == "type":
                         text = message.get("text", "")
-                        if text:
+                        nonewline = message.get("nonewline", False)
+
+                        if nonewline:
+                            await session.write_input(text)
+                        else:
+                            # Match /in endpoint behavior: strip newlines, add platform newline
+                            text = text.rstrip("\r\n")
                             newline = "\r\n" if sys.platform == "win32" else "\n"
-                            if not text.endswith(("\r\n", "\n")):
-                                text += newline
+                            text += newline
                             await session.write_input(text)
                 except json.JSONDecodeError:
                     pass

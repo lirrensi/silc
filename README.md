@@ -2,11 +2,42 @@
 
 SILC bridges an interactive terminal session with an HTTP API so both humans and agents can read, write, and orchestrate commands in the same shell.
 
+## Installation
+
+### Using pipx (recommended)
+
+```bash
+pipx install git+https://github.com/username/repo-name.git
+```
+
+### Using pip
+
+```bash
+pip install -e .
+```
+
+### Using standalone installer (no pip required)
+
+**Windows:**
+```cmd
+install.bat
+```
+
+**Unix/Linux/macOS:**
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+The standalone installer will:
+- Build the executable if not present in `dist/`
+- Copy it to `~/silc` (Windows: `%USERPROFILE%\silc`)
+- Add it to your PATH automatically
+
 ## Getting started
 
-1. `pip install -e .`
-2. `silc start` to launch a new session.
- 3. Use `silc <port> out`, `silc <port> run`, or `silc <port> status` from another terminal, or open the TUI with `silc <port> open`.
+1. `silc start` to launch a new session.
+2. Use `silc <port> out`, `silc <port> run`, or `silc <port> status` from another terminal, or open the TUI with `silc <port> open`.
 
 ## Current implementation
 
