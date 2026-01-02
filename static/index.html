@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        />
+        <title>Cute Terminal ♡</title>
+
+        <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"
+        />
+
+        <style>
+            body {
+                margin: 0;
+                padding: 20px;
+                background: #1e1e1e;
+                font-family: system-ui, sans-serif;
+                height: 100vh;
+                display: flex;
+                flex-direction: column;
+            }
+            #terminal {
+                flex: 1;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            }
+            .status {
+                color: #ffb3d9;
+                text-align: center;
+                padding: 8px;
+                font-size: 14px;
+                background: #2d1b2a;
+                border-radius: 8px 8px 0 0;
+            }
+            .input-container {
+                padding: 15px;
+                background: #252526;
+                border-radius: 0 0 12px 12px;
+                display: flex;
+                gap: 10px;
+                box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.3);
+            }
+            #command-input {
+                flex: 1;
+                padding: 12px 16px;
+                background: #1e1e1e;
+                border: 1px solid #3e3e42;
+                border-radius: 6px;
+                color: #ffffff;
+                font-family: Menlo, Monaco, "Courier New", monospace;
+                font-size: 14px;
+                outline: none;
+            }
+            #command-input:focus {
+                border-color: #ff80bf;
+            }
+            #send-button {
+                padding: 12px 24px;
+                background: #ff80bf;
+                border: none;
+                border-radius: 6px;
+                color: #1e1e1e;
+                font-weight: bold;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
+            #send-button:hover {
+                background: #ffb3d9;
+            }
+        </style>
+    </head>
+    <body>
+        <div
+            class="status"
+            id="status"
+        >
+            Connecting to WebSocket... ♡
+        </div>
+        <div id="terminal"></div>
+        <div class="input-container">
+            <input
+                type="text"
+                id="command-input"
+                placeholder="Type command here..."
+                autocomplete="off"
+            />
+            <button id="send-button">Send</button>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+
+        <script>
+            // Dynamic port/protocol for WS
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const host = window.location.hostname;
+            const port = window.location.port || "8080"; // fallback if empty
+            const wsUrl = `${protocol}//${host}:${port}/ws`;
+
+            // Create terminal
+            const term = new Terminal({
+                cols: 120,
+                rows: 40,
+                theme: {
+                    background: "#1e1e1e",
+                    foreground: "#ffffff",
+                    cursor: "#ff80bf",
+                    selectionBackground: "#ff80bf44",
+                },
+                fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                fontSize: 15,
+                cursorBlink: true,
+            });
+
+            term.open(document.getElementById("terminal"));
+
+            // Completely disable terminal input
+            term.attachCustomKeyEventHandler(() => false);
+
+            // Safely disable/hide the helper textarea
+            if (term.textarea) {
+                term.textarea.setAttribute("disabled", "true");
+                term.textarea.style.display = "none";
+            }
+
+            // WebSocket
+            const socket = new WebSocket(wsUrl);
+            const statusEl = document.getElementById("status");
+            const inputEl = document.getElementById("command-input");
+            const sendButton = document.getElementById("send-button");
+
+            socket.onopen = () => {
+                statusEl.textContent = "Connected! Ready for updates ♡";
+                statusEl.style.background = "#1b2d1e";
+            };
+
+            socket.onmessage = event => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.event === "update") {
+                        term.write(msg.data);
+                    }
+                } catch (e) {
+                    // If not JSON, maybe raw data fallback?
+                    term.write(event.data);
+                }
+            };
+
+            socket.onclose = () => {
+                statusEl.textContent = "Connection closed :(";
+                statusEl.style.background = "#2d1b1b";
+                term.write("\r\n\r\n--- WebSocket closed ---\r\n");
+            };
+
+            socket.onerror = err => {
+                statusEl.textContent = "Connection error :(";
+                statusEl.style.background = "#2d1b1b";
+                console.error("WebSocket error:", err);
+            };
+
+            // Send command via input
+            function sendCommand() {
+                const text = inputEl.value.trim();
+                if (text && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ event: "type", text: text + "\r" })); // add \r for enter
+                    inputEl.value = "";
+                }
+            }
+
+            sendButton.addEventListener("click", sendCommand);
+            inputEl.addEventListener("keydown", e => {
+                if (e.key === "Enter") {
+                    sendCommand();
+                }
+            });
+        </script>
+    </body>
+</html>

@@ -6,8 +6,9 @@ import asyncio
 import json
 import sys
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse, HTMLResponse
+from pathlib import Path
 
 from ..core.cleaner import clean_output
 from ..core.session import SilcSession
@@ -125,5 +126,55 @@ def create_app(session: SilcSession) -> FastAPI:
     async def deactivate_tui() -> dict:
         session.tui_active = False
         return {"status": "tui_inactive"}
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+
+        async def send_updates():
+            cursor = session.buffer.cursor
+            while True:
+                new_bytes, cursor = session.buffer.get_since(cursor)
+                if new_bytes:
+                    await websocket.send_json(
+                        {
+                            "event": "update",
+                            "data": new_bytes.decode("utf-8", errors="replace"),
+                        }
+                    )
+                await asyncio.sleep(0.1)
+
+        sender_task = asyncio.create_task(send_updates())
+        try:
+            while True:
+                data = await websocket.receive_text()
+                try:
+                    message = json.loads(data)
+                    if message.get("event") == "type":
+                        text = message.get("text", "")
+                        if text:
+                            newline = "\r\n" if sys.platform == "win32" else "\n"
+                            if not text.endswith(("\r\n", "\n")):
+                                text += newline
+                            await session.write_input(text)
+                except json.JSONDecodeError:
+                    pass
+        except WebSocketDisconnect:
+            pass
+        finally:
+            sender_task.cancel()
+            try:
+                await sender_task
+            except asyncio.CancelledError:
+                pass
+
+    @app.get("/web", response_class=HTMLResponse)
+    async def web_ui() -> HTMLResponse:
+        static_dir = Path(__file__).parent.parent.parent / "static"
+        index_path = static_dir / "index.html"
+        if index_path.exists():
+            with open(index_path, "r", encoding="utf-8") as f:
+                return HTMLResponse(f.read())
+        return HTMLResponse("<h1>Web UI not found</h1>")
 
     return app

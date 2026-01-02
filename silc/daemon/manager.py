@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import socket
 import sys
 from functools import partial
+from pathlib import Path
 from typing import Dict
 
 import uvicorn
@@ -28,6 +30,26 @@ from silc.utils.persistence import (
 )
 from silc.utils.ports import bind_port, find_available_port
 from silc.utils.shell_detect import detect_shell
+
+
+def setup_uvicorn_logging():
+    """Configure uvicorn logging to write to daemon log file."""
+    logger = logging.getLogger("uvicorn")
+    logger.setLevel(logging.INFO)
+
+    handler = logging.FileHandler(DAEMON_LOG, mode="a", encoding="utf-8")
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        "[%(asctime)s] %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.setLevel(logging.INFO)
+    access_logger.addHandler(handler)
+
 
 DAEMON_PORT = 19999
 
@@ -75,7 +97,7 @@ class SilcDaemon:
 
             if selected_port in self.sessions:
                 raise HTTPException(
-                    status=400, detail=f"Port {selected_port} already in use"
+                    status_code=400, detail=f"Port {selected_port} already in use"
                 )
 
             session_socket = self._reserve_session_socket(selected_port)
@@ -93,9 +115,7 @@ class SilcDaemon:
                 self.servers[selected_port] = server
 
                 # Start session server in background
-                task = asyncio.create_task(
-                    server.serve(sockets=[session_socket])
-                )
+                task = asyncio.create_task(server.serve(sockets=[session_socket]))
                 self._session_tasks[selected_port] = task
                 self._attach_session_task(selected_port, task)
             except Exception:
@@ -152,7 +172,7 @@ class SilcDaemon:
         async def close_session(port: int):
             """Close a specific session."""
             if port not in self.sessions:
-                raise HTTPException(status=404, detail="Session not found")
+                raise HTTPException(status_code=404, detail="Session not found")
 
             await self._ensure_cleanup_task(port)
             return {"status": "closed"}
@@ -178,11 +198,15 @@ class SilcDaemon:
                     )
                     break
                 try:
-                    await asyncio.wait_for(self._ensure_cleanup_task(port), timeout=remaining)
+                    await asyncio.wait_for(
+                        self._ensure_cleanup_task(port), timeout=remaining
+                    )
                 except asyncio.TimeoutError:
                     write_daemon_log(f"Shutdown timeout closing session: port={port}")
                 except Exception as exc:
-                    write_daemon_log(f"Shutdown error closing session: port={port}, error={exc}")
+                    write_daemon_log(
+                        f"Shutdown error closing session: port={port}, error={exc}"
+                    )
 
             self._shutdown_event.set()
             if self._daemon_server:
@@ -210,7 +234,9 @@ class SilcDaemon:
                     try:
                         await asyncio.wait_for(session.force_kill(), timeout=1.0)
                     except asyncio.TimeoutError:
-                        write_daemon_log(f"Timeout force-killing session PTY: port={port}")
+                        write_daemon_log(
+                            f"Timeout force-killing session PTY: port={port}"
+                        )
                     except Exception as exc:
                         write_daemon_log(
                             f"Error force-killing session PTY: port={port}, error={exc}"
@@ -221,7 +247,9 @@ class SilcDaemon:
                 except asyncio.TimeoutError:
                     write_daemon_log(f"Timeout cleaning session: port={port}")
                 except Exception as exc:
-                    write_daemon_log(f"Error cleaning session: port={port}, error={exc}")
+                    write_daemon_log(
+                        f"Error cleaning session: port={port}, error={exc}"
+                    )
 
             self._shutdown_event.set()
             if self._daemon_server:
@@ -242,8 +270,8 @@ class SilcDaemon:
             app,
             host="127.0.0.1",
             port=session.port,
-            log_level="warning",
-            access_log=False,
+            log_level="info",
+            access_log=True,
         )
         return uvicorn.Server(config)
 
@@ -338,9 +366,7 @@ class SilcDaemon:
             except asyncio.TimeoutError:
                 write_daemon_log(f"Timeout closing session PTY: port={port}")
             except Exception as exc:
-                write_daemon_log(
-                    f"Error closing session PTY: port={port}, error={exc}"
-                )
+                write_daemon_log(f"Error closing session PTY: port={port}, error={exc}")
 
         # Remove from registry
         self.registry.remove(port)
@@ -406,6 +432,7 @@ class SilcDaemon:
         if self._running:
             return
 
+        setup_uvicorn_logging()
         write_daemon_log("Starting Silc daemon...")
         write_pidfile(os.getpid())
         self._running = True
@@ -416,8 +443,8 @@ class SilcDaemon:
             self._daemon_api_app,
             host="127.0.0.1",
             port=DAEMON_PORT,
-            log_level="warning",
-            access_log=False,
+            log_level="info",
+            access_log=True,
         )
         self._daemon_server = uvicorn.Server(daemon_config)
 

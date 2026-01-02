@@ -27,6 +27,7 @@ if site_pkg.is_dir():
 import asyncio
 import subprocess
 import time
+import webbrowser
 from pathlib import Path
 from typing import Optional
 
@@ -510,6 +511,16 @@ def open(ctx: click.Context) -> None:
     """Open the Textual TUI."""
     port = ctx.parent.params["port"]
     asyncio.run(launch_tui(port))
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+def web(ctx: click.Context) -> None:
+    """Open the web UI in a browser."""
+    port = ctx.parent.params["port"]
+    web_url = f"http://127.0.0.1:{port}/web"
+    webbrowser.open_new_tab(web_url)
+    click.echo(f"✨ Opening web UI at {web_url}")
 
 
 def main() -> None:
