@@ -10,7 +10,7 @@
 
         <link
             rel="stylesheet"
-            href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"
+            href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css"
         />
 
         <style>
@@ -24,9 +24,16 @@
                 flex-direction: column;
             }
             #terminal {
-                flex: 1;
+                /* Fixed-size terminal (no flex/stretch): keep xterm cols/rows stable */
+                display: inline-block;
+                align-self: center;
+
+                /* If viewport is smaller than the terminal, allow scrolling instead of reflow */
+                max-width: 100%;
+                max-height: calc(100vh - 100px);
+                overflow: auto;
+
                 border-radius: 12px;
-                overflow: hidden;
                 box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             }
             .status {
@@ -37,43 +44,6 @@
                 background: #2d1b2a;
                 border-radius: 8px 8px 0 0;
             }
-            .controls-container {
-                padding: 15px;
-                background: #252526;
-                border-radius: 12px 12px 0 0;
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-                justify-content: center;
-            }
-            .control-btn {
-                padding: 8px 16px;
-                background: #3e3e42;
-                border: 1px solid #5e5e62;
-                border-radius: 4px;
-                color: #ffffff;
-                font-size: 13px;
-                font-weight: 500;
-                cursor: pointer;
-                transition: all 0.2s;
-                min-width: 60px;
-            }
-            .control-btn:hover {
-                background: #5e5e62;
-                border-color: #ff80bf;
-            }
-            .control-btn.clear-btn {
-                background: #d94e4e;
-                border-color: #ff6b6b;
-            }
-            .control-btn.clear-btn:hover {
-                background: #ff6b6b;
-            }
-            .arrow-group {
-                display: flex;
-                gap: 4px;
-                align-items: center;
-            }
         </style>
     </head>
     <body>
@@ -81,23 +51,28 @@
             class="status"
             id="status"
         >
-            Connecting to WebSocket... ♡
+            Connecting to WebSocket...
         </div>
         <div id="terminal"></div>
 
         <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 
         <script>
-            // Dynamic port/protocol for WS
-            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            // Dynamic port/protocol for WS + HTTP endpoints
+            const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const httpProtocol = window.location.protocol === "https:" ? "https:" : "http:";
             const host = window.location.hostname;
             const port = window.location.port || "20000"; // fallback if empty
-            const wsUrl = `${protocol}//${host}:${port}/ws`;
+            const wsUrl = `${wsProtocol}//${host}:${port}/ws`;
+            const httpBaseUrl = `${httpProtocol}//${host}:${port}`;
 
             // Create terminal
+            // Backend PTY is hard-coded to 120x30, so keep xterm hard-coded the same.
+            // Do NOT fit/resize in the browser; instead the container scrolls/clips.
             const term = new Terminal({
                 cols: 120,
-                rows: 40,
+                rows: 30,
+                scrollback: 5000,
                 theme: {
                     background: "#1e1e1e",
                     foreground: "#ffffff",
@@ -117,7 +92,7 @@
             const statusEl = document.getElementById("status");
 
             socket.onopen = () => {
-                statusEl.textContent = "Connected! Ready for updates ♡";
+                statusEl.textContent = "Connected!";
                 statusEl.style.background = "#1b2d1e";
             };
 
@@ -155,13 +130,19 @@
                 sendViaWS(data);
             });
 
-            document.getElementById("ctrlc-btn").addEventListener("click", () => {
-                sendViaWS("\x03");
-            });
+            const ctrlcBtn = document.getElementById("ctrlc-btn");
+            if (ctrlcBtn) {
+                ctrlcBtn.addEventListener("click", () => {
+                    sendViaWS("\x03");
+                });
+            }
 
-            document.getElementById("ctrld-btn").addEventListener("click", () => {
-                sendViaWS("\x04");
-            });
+            const ctrldBtn = document.getElementById("ctrld-btn");
+            if (ctrldBtn) {
+                ctrldBtn.addEventListener("click", () => {
+                    sendViaWS("\x04");
+                });
+            }
 
             document.querySelectorAll(".arrow-btn").forEach(btn => {
                 btn.addEventListener("click", () => {
@@ -176,15 +157,17 @@
                 });
             });
 
-            document.getElementById("clear-btn").addEventListener("click", async () => {
-                try {
-                    const port = window.location.port || "20000";
-                    await fetch(`http://${window.location.hostname}:${port}/clear`, { method: "POST" });
-                    term.clear();
-                } catch (e) {
-                    console.error("Clear failed:", e);
-                }
-            });
+            const clearBtn = document.getElementById("clear-btn");
+            if (clearBtn) {
+                clearBtn.addEventListener("click", async () => {
+                    try {
+                        await fetch(`${httpBaseUrl}/clear`, { method: "POST" });
+                        term.clear();
+                    } catch (e) {
+                        console.error("Clear failed:", e);
+                    }
+                });
+            }
         </script>
     </body>
 </html>

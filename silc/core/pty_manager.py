@@ -155,13 +155,32 @@ class WindowsPTY(PTYBase):
             return None
 
     def resize(self, rows: int, cols: int) -> None:
-        target = getattr(self._process, "set_size", None)
-        if target:
+        """Resize the underlying Windows PTY.
+
+        The `winpty.PtyProcess` backend exposes `setwinsize(rows, cols)` (not
+        `set_size`). If we fail to resize here, the backend stays at its default
+        dimensions (commonly 80x24) while the web UI assumes 120x30, which can
+        cause prompt/cursor drift and output/input interleaving.
+        """
+
+        # PtyProcess API (winpty 3.x)
+        target = getattr(self._process, "setwinsize", None)
+        if callable(target):
             try:
                 target(rows, cols)
             except OSError:
                 pass
             return
+
+        # Legacy API variants
+        target = getattr(self._process, "set_size", None)
+        if callable(target):
+            try:
+                target(rows, cols)
+            except OSError:
+                pass
+            return
+
         if self._pty_handle and hasattr(self._pty_handle, "set_size"):
             try:
                 self._pty_handle.set_size(rows, cols)
