@@ -37,41 +37,6 @@
                 background: #2d1b2a;
                 border-radius: 8px 8px 0 0;
             }
-            .input-container {
-                padding: 15px;
-                background: #252526;
-                border-radius: 0 0 12px 12px;
-                display: flex;
-                gap: 10px;
-                box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.3);
-            }
-            #command-input {
-                flex: 1;
-                padding: 12px 16px;
-                background: #1e1e1e;
-                border: 1px solid #3e3e42;
-                border-radius: 6px;
-                color: #ffffff;
-                font-family: Menlo, Monaco, "Courier New", monospace;
-                font-size: 14px;
-                outline: none;
-            }
-            #command-input:focus {
-                border-color: #ff80bf;
-            }
-            #send-button {
-                padding: 12px 24px;
-                background: #ff80bf;
-                border: none;
-                border-radius: 6px;
-                color: #1e1e1e;
-                font-weight: bold;
-                cursor: pointer;
-                transition: background 0.2s;
-            }
-            #send-button:hover {
-                background: #ffb3d9;
-            }
             .controls-container {
                 padding: 15px;
                 background: #252526;
@@ -119,15 +84,6 @@
             Connecting to WebSocket... ♡
         </div>
         <div id="terminal"></div>
-        <div class="input-container">
-            <input
-                type="text"
-                id="command-input"
-                placeholder="Type command here..."
-                autocomplete="off"
-            />
-            <button id="send-button">Send</button>
-        </div>
         <div class="controls-container">
             <button
                 class="control-btn"
@@ -200,21 +156,11 @@
             });
 
             term.open(document.getElementById("terminal"));
-
-            // Completely disable terminal input
-            term.attachCustomKeyEventHandler(() => false);
-
-            // Safely disable/hide the helper textarea
-            if (term.textarea) {
-                term.textarea.setAttribute("disabled", "true");
-                term.textarea.style.display = "none";
-            }
+            term.focus();
 
             // WebSocket
             const socket = new WebSocket(wsUrl);
             const statusEl = document.getElementById("status");
-            const inputEl = document.getElementById("command-input");
-            const sendButton = document.getElementById("send-button");
 
             socket.onopen = () => {
                 statusEl.textContent = "Connected! Ready for updates ♡";
@@ -245,27 +191,15 @@
                 console.error("WebSocket error:", err);
             };
 
-            // Send command via input
-            function sendCommand() {
-                const text = inputEl.value;
-                if (socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ event: "type", text: text }));
-                    inputEl.value = "";
-                }
-            }
-
-            sendButton.addEventListener("click", sendCommand);
-            inputEl.addEventListener("keydown", e => {
-                if (e.key === "Enter") {
-                    sendCommand();
-                }
-            });
-
-            function sendViaWS(text) {
+            const sendViaWS = text => {
                 if (socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ event: "type", text, nonewline: true }));
                 }
-            }
+            };
+
+            term.onData(data => {
+                sendViaWS(data);
+            });
 
             document.getElementById("ctrlc-btn").addEventListener("click", () => {
                 sendViaWS("\x03");
