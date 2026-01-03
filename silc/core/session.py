@@ -12,20 +12,14 @@ from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     try:
-        import pyte
-        from pyte import Stream, screens
+        from par_term_emu_core_rust import Terminal
     except ImportError:
-        pyte = None
-        Stream = None
-        screens = None
+        Terminal = None
 else:
     try:
-        import pyte
-        from pyte import Stream, screens
+        from par_term_emu_core_rust import Terminal
     except ImportError:  # pragma: no cover
-        pyte = None
-        Stream = None
-        screens = None
+        Terminal = None
 
 from ..core.cleaner import clean_output
 from ..core.raw_buffer import RawByteBuffer
@@ -63,7 +57,7 @@ class SilcSession:
 
         self.screen_columns = 120
         self.screen_rows = 30
-        self.has_pyte = bool(screens and Stream)
+        self.has_par_term = Terminal is not None
         self.pty.resize(self.screen_rows, self.screen_columns)
 
         self._read_task: Optional[asyncio.Task[None]] = None
@@ -172,22 +166,18 @@ class SilcSession:
         """Get a snapshot of what the terminal screen currently displays.
 
         This is the 'human view' - what you'd see if you looked at the terminal.
-        Uses stateless rendering: creates fresh screen, feeds entire buffer, returns result.
+        Uses stateless rendering: creates fresh terminal, feeds entire buffer, returns result.
         """
-        if screens and Stream:
-            # Stateless render: create fresh screen each time
-            screen = screens.HistoryScreen(self.screen_columns, self.screen_rows)
-            stream = Stream(screen)
+        if Terminal:
+            term = Terminal(self.screen_columns, self.screen_rows)
             raw_bytes = self.buffer.get_bytes()
             decoded = raw_bytes.decode("utf-8", errors="replace")
-            stream.feed(decoded)
-            rows = list(screen.display)
-            rendered_lines = [line.rstrip() for line in rows]
+            term.process_str(decoded)
 
-            if lines is not None and lines < len(rendered_lines):
-                rendered_lines = rendered_lines[-lines:]
+            content = term.content()
+            rendered_lines = content.split("\n")
+            rendered_lines = [line.rstrip() for line in rendered_lines]
 
-            # Filter out empty lines, sentinel lines, and wrapper command echoes
             filtered_lines = []
             for line in rendered_lines:
                 if any(fragment in line for fragment in HELPER_ECHO_FRAGMENTS):
@@ -196,13 +186,14 @@ class SilcSession:
                     continue
                 filtered_lines.append(line)
 
-            # Remove trailing empty lines
             while filtered_lines and not filtered_lines[-1].strip():
                 filtered_lines.pop()
 
+            if lines is not None and lines < len(filtered_lines):
+                filtered_lines = filtered_lines[-lines:]
+
             return "\n".join(filtered_lines)
 
-        # Fallback: raw buffer cleaned
         snapshot = self.buffer.get_last(lines or 100)
         output = clean_output(snapshot)
         return self._remove_sentinels(output)

@@ -3,20 +3,20 @@ name = "silc"
 version = "0.1.0"
 description = "Shared interactive linked command that lets agents and humans peer into the same shell."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "textual>=0.44.0",
     "click>=8.1.7",
     "psutil>=5.9.6",
-    "pyte>=0.8.0",
     "requests>=2.31.0",
-    "pywinpty>=3.0.2; sys_platform == 'win32'", # Only keep this one!
+    "pywinpty>=3.0.2; sys_platform == 'win32'",
     "pytest-asyncio>=1.3.0",
     "pip>=25.3",
     "pytest>=9.0.2",
     "pyinstaller>=6.17.0",
+    "par-term-emu-core-rust>=0.20.0",
 ]
 
 [project.scripts]
