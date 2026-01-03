@@ -63,11 +63,7 @@ class SilcSession:
 
         self.screen_columns = 120
         self.screen_rows = 30
-        self.screen: Any = None
-        self.stream: Any = None
-        if screens and Stream:
-            self.screen = screens.HistoryScreen(self.screen_columns, self.screen_rows)
-            self.stream = Stream(self.screen)
+        self.has_pyte = bool(screens and Stream)
         self.pty.resize(self.screen_rows, self.screen_columns)
 
         self._read_task: Optional[asyncio.Task[None]] = None
@@ -91,9 +87,6 @@ class SilcSession:
                 if data:
                     self.buffer.append(data)
                     self.last_output = datetime.utcnow()
-                    if self.stream:
-                        decoded = data.decode("utf-8", errors="replace")
-                        self.stream.feed(decoded)
                     write_session_log(
                         self.port, f"OUTPUT: {data.decode('utf-8', errors='replace')}"
                     )
@@ -132,11 +125,6 @@ class SilcSession:
             await self._wait_for_prompt()
             await asyncio.sleep(0.1)
             self.buffer.clear()
-            if screens and Stream:
-                self.screen = screens.HistoryScreen(
-                    self.screen_columns, self.screen_rows
-                )
-                self.stream = Stream(self.screen)
         self._helper_injected = True
 
     async def _wait_for_prompt(self, timeout: float = 2.0) -> None:
@@ -184,34 +172,40 @@ class SilcSession:
         """Get a snapshot of what the terminal screen currently displays.
 
         This is the 'human view' - what you'd see if you looked at the terminal.
+        Uses stateless rendering: creates fresh screen, feeds entire buffer, returns result.
         """
-        if self.screen is None:
-            # Fallback: raw buffer cleaned
-            snapshot = self.buffer.get_last(lines or 100)
-            output = clean_output(snapshot)
-            return self._remove_sentinels(output)
+        if screens and Stream:
+            # Stateless render: create fresh screen each time
+            screen = screens.HistoryScreen(self.screen_columns, self.screen_rows)
+            stream = Stream(screen)
+            raw_bytes = self.buffer.get_bytes()
+            decoded = raw_bytes.decode("utf-8", errors="replace")
+            stream.feed(decoded)
+            rows = list(screen.display)
+            rendered_lines = [line.rstrip() for line in rows]
 
-        # Get the rendered screen from pyte
-        rows = list(self.screen.display)
-        rendered_lines = [line.rstrip() for line in rows]
+            if lines is not None and lines < len(rendered_lines):
+                rendered_lines = rendered_lines[-lines:]
 
-        if lines is not None and lines < len(rendered_lines):
-            rendered_lines = rendered_lines[-lines:]
+            # Filter out empty lines, sentinel lines, and wrapper command echoes
+            filtered_lines = []
+            for line in rendered_lines:
+                if any(fragment in line for fragment in HELPER_ECHO_FRAGMENTS):
+                    continue
+                if SILC_SENTINEL_PATTERN.search(line):
+                    continue
+                filtered_lines.append(line)
 
-        # Filter out empty lines, sentinel lines, and wrapper command echoes
-        filtered_lines = []
-        for line in rendered_lines:
-            if any(fragment in line for fragment in HELPER_ECHO_FRAGMENTS):
-                continue
-            if SILC_SENTINEL_PATTERN.search(line):
-                continue
-            filtered_lines.append(line)
+            # Remove trailing empty lines
+            while filtered_lines and not filtered_lines[-1].strip():
+                filtered_lines.pop()
 
-        # Remove trailing empty lines
-        while filtered_lines and not filtered_lines[-1].strip():
-            filtered_lines.pop()
+            return "\n".join(filtered_lines)
 
-        return "\n".join(filtered_lines)
+        # Fallback: raw buffer cleaned
+        snapshot = self.buffer.get_last(lines or 100)
+        output = clean_output(snapshot)
+        return self._remove_sentinels(output)
 
     def resize(self, rows: int, cols: int) -> None:
         """Adjust the PTY and renderer to the new terminal dimensions."""
@@ -220,20 +214,6 @@ class SilcSession:
         self.screen_rows = rows
         self.screen_columns = cols
         self.pty.resize(rows, cols)
-        if screens and Stream:
-            self.screen = screens.HistoryScreen(cols, rows)
-            self.stream = Stream(self.screen)
-            self._rehydrate_screen()
-
-    def _rehydrate_screen(self) -> None:
-        """Replay the buffered bytes through pyte after a resize."""
-        if self.stream is None:
-            return
-        raw_bytes = self.buffer.get_bytes()
-        if not raw_bytes:
-            return
-        decoded = raw_bytes.decode("utf-8", errors="replace")
-        self.stream.feed(decoded)
 
     def _remove_sentinels(self, text: str) -> str:
         """Remove sentinel marker lines from fallback output."""
