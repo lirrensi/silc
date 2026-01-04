@@ -667,7 +667,72 @@ def logs(tail: int) -> None:
 def open(ctx: click.Context) -> None:
     """Open the Textual TUI."""
     port = ctx.parent.params["port"] if ctx.parent else 0
+    click.echo(
+        "⚠️  'open' is deprecated and can hang for 2 seconds, but it will still "
+        "launch the textual TUI.",
+        err=True,
+    )
+    time.sleep(2)
     asyncio.run(launch_tui(port))
+
+
+def _tui_dist_dir() -> Path | None:
+    potential_roots = (
+        Path(__file__).resolve().parents[1],
+        repo_root,
+        Path.cwd(),
+    )
+    for root in potential_roots:
+        dist_dir = root / "tui_client" / "dist"
+        if dist_dir.is_dir():
+            return dist_dir
+    return None
+
+
+def _native_tui_binary_path(dist_dir: Path) -> Path | None:
+    if sys.platform.startswith("win"):
+        filename = "silc-tui-windows.exe"
+    elif sys.platform.startswith("linux"):
+        filename = "silc-tui-linux"
+    else:
+        return None
+    return dist_dir / filename
+
+
+def _launch_native_tui_client(port: int) -> None:
+    dist_dir = _tui_dist_dir()
+    if dist_dir is None:
+        click.echo(
+            "⚠️  Native TUI distribution directory is missing; build the native "
+            "client via `tui_client` before running `tui`.",
+            err=True,
+        )
+        return
+
+    executable = _native_tui_binary_path(dist_dir)
+    if executable is None:
+        click.echo("⚠️  Native TUI client is not available on this platform", err=True)
+        return
+
+    if not executable.exists():
+        click.echo(
+            f"⚠️  Native TUI binary is missing at {executable}. "
+            "Build it from `tui_client` before running `tui`.",
+            err=True,
+        )
+        return
+
+    ws_url = f"ws://127.0.0.1:{port}/ws"
+    click.echo(f"✨ Launching native TUI client at {ws_url}")
+    subprocess.run([str(executable), ws_url])
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+def tui(ctx: click.Context) -> None:
+    """Open the native TUI client."""
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    _launch_native_tui_client(port)
 
 
 @cli.port_subcommands.command()
