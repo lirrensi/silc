@@ -8,6 +8,7 @@
         />
         <title>SILC terminal GUI</title>
 
+        <script src="https://cdn.tailwindcss.com"></script>
         <link
             rel="stylesheet"
             href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css"
@@ -15,60 +16,84 @@
 
         <style>
             body {
-                margin: 0;
-                padding: 20px;
                 background: #1e1e1e;
-                font-family: system-ui, sans-serif;
-                height: 100vh;
-                display: flex;
-                flex-direction: column;
             }
             #terminal {
-                /* Fixed-size terminal (no flex/stretch): keep xterm cols/rows stable */
                 display: inline-block;
                 align-self: center;
-
-                /* If viewport is smaller than the terminal, allow scrolling instead of reflow */
                 max-width: 100%;
-                max-height: calc(100vh - 100px);
+                max-height: calc(100vh - 180px);
                 overflow: auto;
-
                 border-radius: 12px;
                 box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             }
-            .status {
-                color: #ffb3d9;
-                text-align: center;
-                padding: 8px;
-                font-size: 14px;
-                background: #2d1b2a;
-                border-radius: 8px 8px 0 0;
-            }
         </style>
     </head>
-    <body>
+    <body class="min-h-screen flex flex-col items-center p-4">
         <div
-            class="status"
+            class="w-full max-w-5xl text-center py-2 text-pink-300 text-sm bg-[#2d1b2a] rounded-t-xl font-medium"
             id="status"
         >
             Connecting to WebSocket...
         </div>
         <div id="terminal"></div>
+        <div class="w-full max-w-5xl bg-[#252526] rounded-b-xl p-4 flex flex-wrap gap-3 justify-center shadow-lg">
+            <button
+                class="px-4 py-2 bg-[#3e3e42] border border-[#5e5e62] text-white text-sm font-medium rounded hover:bg-[#5e5e62] hover:border-pink-400 transition-all min-w-[60px]"
+                id="ctrlc-btn"
+            >
+                Ctrl+C
+            </button>
+            <button
+                class="px-4 py-2 bg-[#3e3e42] border border-[#5e5e62] text-white text-sm font-medium rounded hover:bg-[#5e5e62] hover:border-pink-400 transition-all min-w-[60px]"
+                id="ctrld-btn"
+            >
+                Ctrl+D
+            </button>
+            <div class="flex gap-1">
+                <button
+                    class="arrow-btn px-3 py-2 bg-[#3e3e42] border border-[#5e5e62] text-white text-sm font-medium rounded hover:bg-[#5e5e62] hover:border-pink-400 transition-all"
+                    data-key="up"
+                >
+                    ↑
+                </button>
+                <button
+                    class="arrow-btn px-3 py-2 bg-[#3e3e42] border border-[#5e5e62] text-white text-sm font-medium rounded hover:bg-[#5e5e62] hover:border-pink-400 transition-all"
+                    data-key="left"
+                >
+                    ←
+                </button>
+                <button
+                    class="arrow-btn px-3 py-2 bg-[#3e3e42] border border-[#5e5e62] text-white text-sm font-medium rounded hover:bg-[#5e5e62] hover:border-pink-400 transition-all"
+                    data-key="down"
+                >
+                    ↓
+                </button>
+                <button
+                    class="arrow-btn px-3 py-2 bg-[#3e3e42] border border-[#5e5e62] text-white text-sm font-medium rounded hover:bg-[#5e5e62] hover:border-pink-400 transition-all"
+                    data-key="right"
+                >
+                    →
+                </button>
+            </div>
+            <button
+                class="px-4 py-2 bg-red-600 border border-red-400 text-white text-sm font-medium rounded hover:bg-red-400 transition-all min-w-[60px]"
+                id="clear-btn"
+            >
+                Clear
+            </button>
+        </div>
 
         <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 
         <script>
-            // Dynamic port/protocol for WS + HTTP endpoints
             const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
             const httpProtocol = window.location.protocol === "https:" ? "https:" : "http:";
             const host = window.location.hostname;
-            const port = window.location.port || "20000"; // fallback if empty
+            const port = window.location.port || "20000";
             const wsUrl = `${wsProtocol}//${host}:${port}/ws`;
             const httpBaseUrl = `${httpProtocol}//${host}:${port}`;
 
-            // Create terminal
-            // Backend PTY is hard-coded to 120x30, so keep xterm hard-coded the same.
-            // Do NOT fit/resize in the browser; instead the container scrolls/clips.
             const term = new Terminal({
                 cols: 120,
                 rows: 30,
@@ -87,7 +112,6 @@
             term.open(document.getElementById("terminal"));
             term.focus();
 
-            // WebSocket
             const socket = new WebSocket(wsUrl);
             const statusEl = document.getElementById("status");
 
@@ -103,7 +127,6 @@
                         term.write(msg.data);
                     }
                 } catch (e) {
-                    // If not JSON, maybe raw data fallback?
                     term.write(event.data);
                 }
             };
