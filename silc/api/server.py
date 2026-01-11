@@ -191,15 +191,7 @@ def create_app(session: SilcSession) -> FastAPI:
         await session.force_kill()
         return {"status": "killed"}
 
-    @app.post("/tui/activate", dependencies=[Depends(_require_token)])
-    async def activate_tui() -> dict:
-        session.tui_active = True
-        return {"status": "tui_active"}
-
-    @app.post("/tui/deactivate", dependencies=[Depends(_require_token)])
-    async def deactivate_tui() -> dict:
-        session.tui_active = False
-        return {"status": "tui_inactive"}
+    # /tui/activate and /tui/deactivate endpoints removed; tui_active is managed via websocket connection
 
     @app.get("/token", dependencies=[Depends(_require_token)])
     async def token() -> dict[str, str | None]:
@@ -212,6 +204,7 @@ def create_app(session: SilcSession) -> FastAPI:
             await websocket.close(code=1008, reason="Invalid API token")
             return
         await websocket.accept()
+        session.tui_active = True
 
         async def send_updates():
             cursor = session.buffer.cursor
@@ -249,6 +242,7 @@ def create_app(session: SilcSession) -> FastAPI:
         except WebSocketDisconnect:
             pass
         finally:
+            session.tui_active = False
             sender_task.cancel()
             try:
                 await sender_task
