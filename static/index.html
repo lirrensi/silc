@@ -87,110 +87,129 @@
         <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 
         <script>
-            const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const httpProtocol = window.location.protocol === "https:" ? "https:" : "http:";
-            const host = window.location.hostname;
-            const port = window.location.port || "20000";
-            const wsUrl = `${wsProtocol}//${host}:${port}/ws`;
-            const httpBaseUrl = `${httpProtocol}//${host}:${port}`;
+            (function () {
+                const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+                const httpProtocol = window.location.protocol === "https:" ? "https:" : "http:";
+                const host = window.location.hostname;
+                const port = window.location.port || "20000";
+                const statusEl = document.getElementById("status");
+                const token = window.prompt("Enter the SILC session token:");
 
-            const term = new Terminal({
-                cols: 120,
-                rows: 30,
-                scrollback: 5000,
-                theme: {
-                    background: "#1e1e1e",
-                    foreground: "#ffffff",
-                    cursor: "#ff80bf",
-                    selectionBackground: "#ff80bf44",
-                },
-                fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-                fontSize: 15,
-                cursorBlink: true,
-            });
-
-            term.open(document.getElementById("terminal"));
-            term.focus();
-
-            const socket = new WebSocket(wsUrl);
-            const statusEl = document.getElementById("status");
-
-            socket.onopen = () => {
-                statusEl.textContent = "Connected!";
-                statusEl.style.background = "#1b2d1e";
-            };
-
-            socket.onmessage = event => {
-                try {
-                    const msg = JSON.parse(event.data);
-                    if (msg.event === "update") {
-                        term.write(msg.data);
-                    }
-                } catch (e) {
-                    term.write(event.data);
+                if (!token) {
+                    statusEl.textContent = "Token is required to connect to this session.";
+                    statusEl.style.background = "#2d1b1b";
+                    return;
                 }
-            };
 
-            socket.onclose = () => {
-                statusEl.textContent = "Connection closed :(";
-                statusEl.style.background = "#2d1b1b";
-                term.write("\r\n\r\n--- WebSocket closed ---\r\n");
-            };
+                const authHeaders = {
+                    Authorization: `Bearer ${token}`,
+                };
 
-            socket.onerror = err => {
-                statusEl.textContent = "Connection error :(";
-                statusEl.style.background = "#2d1b1b";
-                console.error("WebSocket error:", err);
-            };
+                const wsUrl = `${wsProtocol}//${host}:${port}/ws?token=${encodeURIComponent(
+                    token
+                )}`;
+                const httpBaseUrl = `${httpProtocol}//${host}:${port}`;
 
-            const sendViaWS = text => {
-                if (socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ event: "type", text, nonewline: true }));
-                }
-            };
-
-            term.onData(data => {
-                sendViaWS(data);
-            });
-
-            const ctrlcBtn = document.getElementById("ctrlc-btn");
-            if (ctrlcBtn) {
-                ctrlcBtn.addEventListener("click", () => {
-                    sendViaWS("\x03");
+                const term = new Terminal({
+                    cols: 120,
+                    rows: 30,
+                    scrollback: 5000,
+                    theme: {
+                        background: "#1e1e1e",
+                        foreground: "#ffffff",
+                        cursor: "#ff80bf",
+                        selectionBackground: "#ff80bf44",
+                    },
+                    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                    fontSize: 15,
+                    cursorBlink: true,
                 });
-            }
 
-            const ctrldBtn = document.getElementById("ctrld-btn");
-            if (ctrldBtn) {
-                ctrldBtn.addEventListener("click", () => {
-                    sendViaWS("\x04");
-                });
-            }
+                term.open(document.getElementById("terminal"));
+                term.focus();
 
-            document.querySelectorAll(".arrow-btn").forEach(btn => {
-                btn.addEventListener("click", () => {
-                    const key = btn.dataset.key;
-                    const keyMap = {
-                        up: "\x1b[A",
-                        down: "\x1b[B",
-                        left: "\x1b[D",
-                        right: "\x1b[C",
-                    };
-                    sendViaWS(keyMap[key]);
-                });
-            });
+                const socket = new WebSocket(wsUrl);
 
-            const clearBtn = document.getElementById("clear-btn");
-            if (clearBtn) {
-                clearBtn.addEventListener("click", async () => {
+                socket.onopen = () => {
+                    statusEl.textContent = "Connected!";
+                    statusEl.style.background = "#1b2d1e";
+                };
+
+                socket.onmessage = event => {
                     try {
-                        await fetch(`${httpBaseUrl}/clear`, { method: "POST" });
-                        term.clear();
+                        const msg = JSON.parse(event.data);
+                        if (msg.event === "update") {
+                            term.write(msg.data);
+                        }
                     } catch (e) {
-                        console.error("Clear failed:", e);
+                        term.write(event.data);
                     }
+                };
+
+                socket.onclose = () => {
+                    statusEl.textContent = "Connection closed :(";
+                    statusEl.style.background = "#2d1b1b";
+                    term.write("\r\n\r\n--- WebSocket closed ---\r\n");
+                };
+
+                socket.onerror = err => {
+                    statusEl.textContent = "Connection error :(";
+                    statusEl.style.background = "#2d1b1b";
+                    console.error("WebSocket error:", err);
+                };
+
+                const sendViaWS = text => {
+                    if (socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({ event: "type", text, nonewline: true }));
+                    }
+                };
+
+                term.onData(data => {
+                    sendViaWS(data);
                 });
-            }
+
+                const ctrlcBtn = document.getElementById("ctrlc-btn");
+                if (ctrlcBtn) {
+                    ctrlcBtn.addEventListener("click", () => {
+                        sendViaWS("\x03");
+                    });
+                }
+
+                const ctrldBtn = document.getElementById("ctrld-btn");
+                if (ctrldBtn) {
+                    ctrldBtn.addEventListener("click", () => {
+                        sendViaWS("\x04");
+                    });
+                }
+
+                document.querySelectorAll(".arrow-btn").forEach(btn => {
+                    btn.addEventListener("click", () => {
+                        const key = btn.dataset.key;
+                        const keyMap = {
+                            up: "\x1b[A",
+                            down: "\x1b[B",
+                            left: "\x1b[D",
+                            right: "\x1b[C",
+                        };
+                        sendViaWS(keyMap[key]);
+                    });
+                });
+
+                const clearBtn = document.getElementById("clear-btn");
+                if (clearBtn) {
+                    clearBtn.addEventListener("click", async () => {
+                        try {
+                            await fetch(`${httpBaseUrl}/clear`, {
+                                method: "POST",
+                                headers: authHeaders,
+                            });
+                            term.clear();
+                        } catch (e) {
+                            console.error("Clear failed:", e);
+                        }
+                    });
+                }
+            })();
         </script>
     </body>
 </html>

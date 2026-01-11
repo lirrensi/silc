@@ -40,10 +40,11 @@ HELPER_ECHO_FRAGMENTS = (
 
 
 class SilcSession:
-    def __init__(self, port: int, shell_info: ShellInfo):
+    def __init__(self, port: int, shell_info: ShellInfo, api_token: str | None = None):
         self.port = port
         self.shell_info = shell_info
         self.session_id = str(uuid.uuid4())[:8]
+        self.api_token = api_token
         self.pty: PTYBase = create_pty(shell_info.path, os.environ.copy())
 
         self.buffer = RawByteBuffer(maxlen=65536)

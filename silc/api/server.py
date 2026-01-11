@@ -6,7 +6,14 @@ import asyncio
 import json
 import sys
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pathlib import Path
 
@@ -16,40 +23,79 @@ from ..utils.persistence import read_session_log
 
 
 def create_app(session: SilcSession) -> FastAPI:
-    app = FastAPI(title=f"SILC Session {session.session_id}")
+    def _client_is_local(host: str | None) -> bool:
+        if not host:
+            return False
+        return host in {"127.0.0.1", "::1", "localhost"}
+
+    def _require_token(request: Request) -> None:
+        token = session.api_token
+        if not token:
+            return
+        client = request.client
+        client_host = client[0] if client else None
+        if _client_is_local(client_host):
+            return
+
+        auth_header = request.headers.get("authorization")
+        if not auth_header:
+            raise HTTPException(status_code=401, detail="Missing API token")
+
+        parts = auth_header.strip().split(" ", 1)
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise HTTPException(status_code=401, detail="Invalid Authorization header")
+
+        provided = parts[1].strip()
+        if provided != token:
+            raise HTTPException(status_code=403, detail="Invalid API token")
+
+    def _verify_websocket_token(websocket: WebSocket) -> bool:
+        token = session.api_token
+        if not token:
+            return True
+        client = websocket.client
+        client_host = client[0] if client else None
+        if _client_is_local(client_host):
+            return True
+        provided = websocket.query_params.get("token")
+        return provided == token
+
+    app = FastAPI(
+        title=f"SILC Session {session.session_id}",
+    )
 
     def _check_alive() -> None:
         """Check if session is alive, raise exception if not."""
         if not session.get_status()["alive"]:
             raise HTTPException(status_code=410, detail="Session has ended")
 
-    @app.get("/status")
+    @app.get("/status", dependencies=[Depends(_require_token)])
     async def get_status() -> dict:
         status = session.get_status()
         if not status["alive"]:
             raise HTTPException(status_code=410, detail="Session has ended")
         return status
 
-    @app.get("/out")
+    @app.get("/out", dependencies=[Depends(_require_token)])
     async def get_output(lines: int = 100) -> dict:
         _check_alive()
         output = session.get_output(lines)
         return {"output": output, "lines": len(output.splitlines())}
 
-    @app.get("/raw")
+    @app.get("/raw", dependencies=[Depends(_require_token)])
     async def get_raw_output(lines: int = 100) -> dict:
         _check_alive()
         output = session.get_output(lines, raw=True)
         return {"output": output, "lines": len(output.splitlines())}
 
-    @app.get("/logs")
+    @app.get("/logs", dependencies=[Depends(_require_token)])
     async def get_logs(tail: int = 100) -> dict:
         _check_alive()
         log_content = read_session_log(session.port, tail_lines=tail)
         lines = log_content.splitlines() if log_content else []
         return {"logs": log_content, "lines": len(lines)}
 
-    @app.get("/stream")
+    @app.get("/stream", dependencies=[Depends(_require_token)])
     async def stream_output() -> StreamingResponse:
         _check_alive()
 
@@ -65,7 +111,7 @@ def create_app(session: SilcSession) -> FastAPI:
 
         return StreamingResponse(generator(), media_type="text/event-stream")
 
-    @app.post("/in")
+    @app.post("/in", dependencies=[Depends(_require_token)])
     async def send_input(request: Request, nonewline: bool = False) -> dict:
         _check_alive()
         body = await request.body()
@@ -81,7 +127,7 @@ def create_app(session: SilcSession) -> FastAPI:
         await session.write_input(text)
         return {"status": "sent"}
 
-    @app.post("/run")
+    @app.post("/run", dependencies=[Depends(_require_token)])
     async def run_command(request: Request, timeout: int = 60) -> dict:
         _check_alive()
         body = await request.body()
@@ -103,46 +149,49 @@ def create_app(session: SilcSession) -> FastAPI:
         command = command.rstrip("\r\n")
         return await session.run_command(command, resolved_timeout)
 
-    @app.post("/interrupt")
+    @app.post("/interrupt", dependencies=[Depends(_require_token)])
     async def interrupt() -> dict:
         _check_alive()
         await session.interrupt()
         return {"status": "interrupted"}
 
-    @app.post("/clear")
+    @app.post("/clear", dependencies=[Depends(_require_token)])
     async def clear_buffer() -> dict:
         _check_alive()
         await session.clear_buffer()
         return {"status": "cleared"}
 
-    @app.post("/resize")
+    @app.post("/resize", dependencies=[Depends(_require_token)])
     async def resize(rows: int, cols: int) -> dict:
         _check_alive()
         session.resize(rows, cols)
         return {"status": "resized", "rows": rows, "cols": cols}
 
-    @app.post("/close")
+    @app.post("/close", dependencies=[Depends(_require_token)])
     async def close() -> dict:
         await session.close()
         return {"status": "closed"}
 
-    @app.post("/kill")
+    @app.post("/kill", dependencies=[Depends(_require_token)])
     async def kill() -> dict:
         await session.force_kill()
         return {"status": "killed"}
 
-    @app.post("/tui/activate")
+    @app.post("/tui/activate", dependencies=[Depends(_require_token)])
     async def activate_tui() -> dict:
         session.tui_active = True
         return {"status": "tui_active"}
 
-    @app.post("/tui/deactivate")
+    @app.post("/tui/deactivate", dependencies=[Depends(_require_token)])
     async def deactivate_tui() -> dict:
         session.tui_active = False
         return {"status": "tui_inactive"}
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
+        if not _verify_websocket_token(websocket):
+            await websocket.close(code=1008, reason="Invalid API token")
+            return
         await websocket.accept()
 
         async def send_updates():

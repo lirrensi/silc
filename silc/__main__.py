@@ -25,6 +25,7 @@ if site_pkg.is_dir():
 
 
 import asyncio
+import secrets
 import subprocess
 import time
 import webbrowser
@@ -229,27 +230,65 @@ def cli(ctx: click.Context) -> None:
 @click.option(
     "--no-detach", is_flag=True, help="Run daemon in foreground (not detached)."
 )
-def start(port: Optional[int], is_global: bool, no_detach: bool) -> None:
+@click.option(
+    "--token",
+    type=str,
+    default=None,
+    help="Custom token for remote session API (hex string).",
+)
+def start(
+    port: Optional[int],
+    is_global: bool,
+    no_detach: bool,
+    token: Optional[str],
+) -> None:
     """Start a new SILC session (creates daemon if needed)."""
+    normalized_token = token.strip() if token else None
+    session_token: str | None = normalized_token
+    generated_token = False
+    if is_global and not session_token:
+        session_token = secrets.token_hex(18)
+        generated_token = True
+
+    if session_token:
+        auto_note = " (auto-generated)" if generated_token else ""
+        click.echo(
+            f"🔐 Session token{auto_note}: {session_token} "
+            "(send via Authorization: Bearer <token>)"
+        )
+
     if is_global:
         click.echo(
-            "⚠️  SECURITY WARNING: --global exposes the session to the network.",
+            click.style(
+                "⚠️  SECURITY WARNING: --global exposes the session to the network.",
+                fg="red",
+                bold=True,
+            ),
             err=True,
-            bold=True,
-            fg="red",
         )
         click.echo(
-            "   This allows Remote Code Execution (RCE) on your machine!",
+            click.style(
+                "   This allows Remote Code Execution (RCE) on your machine!",
+                fg="red",
+                bold=True,
+            ),
             err=True,
-            bold=True,
-            fg="red",
         )
         click.echo(
-            "   Only use this on trusted networks behind a firewall.",
+            click.style(
+                "   Only use this on trusted networks behind a firewall.",
+                fg="red",
+            ),
             err=True,
-            fg="red",
         )
         click.echo("", err=True)
+        if not normalized_token:
+            click.echo(
+                "   Re-run 'silc start --global --token <your-token>' to keep a stable "
+                "token for remote clients.",
+                err=True,
+                fg="red",
+            )
 
     daemon_responsive = _daemon_available()
     daemon_running = daemon_responsive or is_daemon_running()
@@ -320,7 +359,13 @@ def start(port: Optional[int], is_global: bool, no_detach: bool) -> None:
     # Daemon is running, create session
     click.echo("Creating new session...", err=False)
     try:
-        payload = {"port": port, "is_global": is_global} if port or is_global else {}
+        payload: dict[str, object] = {}
+        if port is not None:
+            payload["port"] = port
+        if is_global:
+            payload["is_global"] = True
+        if session_token:
+            payload["token"] = session_token
         resp = requests.post(_daemon_url("/sessions"), json=payload, timeout=5)
         resp.raise_for_status()
         session = resp.json()

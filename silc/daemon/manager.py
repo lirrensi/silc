@@ -57,6 +57,7 @@ DAEMON_PORT = 19999
 class SessionCreateRequest(BaseModel):
     port: int | None = None
     is_global: bool = False
+    token: str | None = None
 
 
 class SilcDaemon:
@@ -96,9 +97,11 @@ class SilcDaemon:
             """Create a new session."""
             selected_port = port
             is_global = False
+            token: str | None = None
             if selected_port is None and request:
                 selected_port = request.port
                 is_global = request.is_global
+                token = request.token
             if selected_port is None:
                 selected_port = find_available_port(20000, 21000)
 
@@ -110,7 +113,9 @@ class SilcDaemon:
             session_socket = self._reserve_session_socket(selected_port, is_global)
             try:
                 shell_info = detect_shell()
-                session = SilcSession(selected_port, shell_info)
+                session = SilcSession(
+                    selected_port, shell_info, api_token=token
+                )
                 await session.start()
 
                 self.sessions[selected_port] = session
