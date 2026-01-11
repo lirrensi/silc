@@ -546,8 +546,12 @@ def status(ctx: click.Context) -> None:
         click.echo(f"Session: {status_info.get('session_id')}")
         click.echo(f"Alive: {status_info.get('alive')}")
         click.echo(f"Idle: {status_info.get('idle_seconds')}s")
-        if status_info.get("waiting_for_input"):
-            click.echo(f"⚠️  Waiting for input: {status_info.get('last_line')}")
+        waiting_for_input = status_info.get("waiting_for_input")
+        last_line = status_info.get("last_line") or ""
+        click.echo(f"Waiting for input: {waiting_for_input}")
+        if last_line:
+            label = "⚠️  Waiting for input" if waiting_for_input else "Last line"
+            click.echo(f"{label}: {last_line}")
     except requests.RequestException:
         click.echo(f"❌ Session on port {port} does not exist", err=True)
 

@@ -336,15 +336,19 @@ class SilcSession:
 
     def get_status(self) -> dict:
         self.last_access = datetime.utcnow()
-        last_line = self.buffer.get_last(1)
-        waiting = bool(last_line and last_line[0].strip().endswith((":?", "]")))
+        rendered_output = self.get_output(lines=1)
+        last_line = ""
+        rendered_lines = rendered_output.splitlines()
+        if rendered_lines:
+            last_line = rendered_lines[-1]
+        waiting = bool(last_line and last_line.strip().endswith((":?", "]")))
         return {
             "session_id": self.session_id,
             "port": self.port,
             "alive": self._read_task is not None and not self._read_task.done(),
             "idle_seconds": (datetime.utcnow() - self.last_output).seconds,
             "waiting_for_input": waiting,
-            "last_line": last_line[0] if last_line else "",
+            "last_line": last_line,
             "run_locked": self.run_lock.locked(),
         }
 
