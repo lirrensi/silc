@@ -87,28 +87,60 @@
         <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 
         <script>
-            (function () {
+            (async function () {
                 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
                 const httpProtocol = window.location.protocol === "https:" ? "https:" : "http:";
                 const host = window.location.hostname;
                 const port = window.location.port || "20000";
                 const statusEl = document.getElementById("status");
-                const token = window.prompt("Enter the SILC session token:");
+                const urlParams = new URLSearchParams(window.location.search);
+                const tokenParam = urlParams.get("token");
+                const httpBaseUrl = `${httpProtocol}//${host}:${port}`;
 
-                if (!token) {
+                const fetchTokenFromServer = async () => {
+                    try {
+                        const resp = await fetch(`${httpBaseUrl}/token`, {
+                            cache: "no-store",
+                        });
+                        if (!resp.ok) {
+                            return undefined;
+                        }
+                        const data = await resp.json();
+                        return data.token ?? null;
+                    } catch (err) {
+                        return undefined;
+                    }
+                };
+
+                let token = tokenParam;
+                let tokenResolved = tokenParam !== null;
+
+                if (!tokenResolved) {
+                    const serverToken = await fetchTokenFromServer();
+                    if (serverToken !== undefined) {
+                        token = serverToken;
+                        tokenResolved = true;
+                    }
+                }
+
+                if (!token && !tokenResolved) {
+                    token = window.prompt("Enter the SILC session token:");
+                }
+
+                if (!token && !tokenResolved) {
                     statusEl.textContent = "Token is required to connect to this session.";
                     statusEl.style.background = "#2d1b1b";
                     return;
                 }
 
-                const authHeaders = {
-                    Authorization: `Bearer ${token}`,
-                };
+                const authHeaders = token
+                    ? {
+                          Authorization: `Bearer ${token}`,
+                      }
+                    : undefined;
 
-                const wsUrl = `${wsProtocol}//${host}:${port}/ws?token=${encodeURIComponent(
-                    token
-                )}`;
-                const httpBaseUrl = `${httpProtocol}//${host}:${port}`;
+                const wsTokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
+                const wsUrl = `${wsProtocol}//${host}:${port}/ws${wsTokenQuery}`;
 
                 const term = new Terminal({
                     cols: 120,
@@ -199,10 +231,11 @@
                 if (clearBtn) {
                     clearBtn.addEventListener("click", async () => {
                         try {
-                            await fetch(`${httpBaseUrl}/clear`, {
-                                method: "POST",
-                                headers: authHeaders,
-                            });
+                            const clearOptions = { method: "POST" };
+                            if (authHeaders) {
+                                clearOptions.headers = authHeaders;
+                            }
+                            await fetch(`${httpBaseUrl}/clear`, clearOptions);
                             term.clear();
                         } catch (e) {
                             console.error("Clear failed:", e);
