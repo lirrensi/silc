@@ -165,11 +165,19 @@
                 socket.onopen = () => {
                     statusEl.textContent = "Connected!";
                     statusEl.style.background = "#1b2d1e";
+                    socket.send(JSON.stringify({ event: "load_history" }));
                 };
 
                 socket.onmessage = event => {
                     try {
                         const msg = JSON.parse(event.data);
+                        if (msg.event === "history") {
+                            term.clear();
+                            if (msg.data) {
+                                term.write(msg.data);
+                            }
+                            return;
+                        }
                         if (msg.event === "update") {
                             term.write(msg.data);
                         }

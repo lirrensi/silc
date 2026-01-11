@@ -206,12 +206,18 @@ def create_app(session: SilcSession) -> FastAPI:
         await websocket.accept()
         session.tui_active = True
 
-        async def send_updates():
+        send_lock = asyncio.Lock()
+
+        async def safe_send(payload: dict[str, str]) -> None:
+            async with send_lock:
+                await websocket.send_json(payload)
+
+        async def send_updates() -> None:
             cursor = session.buffer.cursor
             while True:
                 new_bytes, cursor = session.buffer.get_since(cursor)
                 if new_bytes:
-                    await websocket.send_json(
+                    await safe_send(
                         {
                             "event": "update",
                             "data": new_bytes.decode("utf-8", errors="replace"),
@@ -225,7 +231,8 @@ def create_app(session: SilcSession) -> FastAPI:
                 data = await websocket.receive_text()
                 try:
                     message = json.loads(data)
-                    if message.get("event") == "type":
+                    event_type = message.get("event")
+                    if event_type == "type":
                         text = message.get("text", "")
                         nonewline = message.get("nonewline", False)
 
@@ -237,6 +244,14 @@ def create_app(session: SilcSession) -> FastAPI:
                             newline = "\r\n" if sys.platform == "win32" else "\n"
                             text += newline
                             await session.write_input(text)
+                    elif event_type == "load_history":
+                        raw_bytes = session.buffer.get_bytes()
+                        await safe_send(
+                            {
+                                "event": "history",
+                                "data": raw_bytes.decode("utf-8", errors="replace"),
+                            }
+                        )
                 except json.JSONDecodeError:
                     pass
         except WebSocketDisconnect:
