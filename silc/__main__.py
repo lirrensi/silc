@@ -31,6 +31,7 @@ import time
 import webbrowser
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlencode
 
 import click
 import requests
@@ -152,6 +153,18 @@ def _show_daemon_error_details() -> None:
                 click.echo("  (unable to read stderr)", err=True)
     except Exception as e:
         click.echo(f"\n⚠️  Could not fetch daemon error details: {e}", err=True)
+
+
+def _fetch_session_token(port: int, timeout: float = 2.0) -> str | None:
+    """Try to fetch the token for a running session (local only)."""
+    try:
+        resp = requests.get(f"http://127.0.0.1:{port}/token", timeout=timeout)
+        resp.raise_for_status()
+        return resp.json().get("token")
+    except requests.RequestException:
+        return None
+    except ValueError:
+        return None
 
 
 def _get_session_entry(port: int) -> dict | None:
@@ -785,9 +798,12 @@ def tui(ctx: click.Context) -> None:
 def web(ctx: click.Context) -> None:
     """Open the web UI in a browser."""
     port = ctx.parent.params["port"] if ctx.parent else 0
-    web_url = f"http://127.0.0.1:{port}/web"
+    token = _fetch_session_token(port)
+    query = f"?{urlencode({'token': token})}" if token else ""
+    web_url = f"http://127.0.0.1:{port}/web{query}"
     webbrowser.open_new_tab(web_url)
     click.echo(f"✨ Opening web UI at {web_url}")
+    click.echo(web_url)
 
 
 @cli.port_subcommands.command()

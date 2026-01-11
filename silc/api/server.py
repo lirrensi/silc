@@ -16,6 +16,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pathlib import Path
+from ipaddress import AddressValueError, ip_address
 
 from ..core.cleaner import clean_output
 from ..core.session import SilcSession
@@ -26,7 +27,20 @@ def create_app(session: SilcSession) -> FastAPI:
     def _client_is_local(host: str | None) -> bool:
         if not host:
             return False
-        return host in {"127.0.0.1", "::1", "localhost"}
+        if host.lower() == "localhost":
+            return True
+        if "%" in host:
+            host = host.split("%", 1)[0]
+        try:
+            addr = ip_address(host)
+        except AddressValueError:
+            return False
+        if addr.is_loopback:
+            return True
+        ipv4_mapped = getattr(addr, "ipv4_mapped", None)
+        if ipv4_mapped and ipv4_mapped.is_loopback:
+            return True
+        return False
 
     def _require_token(request: Request) -> None:
         token = session.api_token
@@ -186,6 +200,11 @@ def create_app(session: SilcSession) -> FastAPI:
     async def deactivate_tui() -> dict:
         session.tui_active = False
         return {"status": "tui_inactive"}
+
+    @app.get("/token", dependencies=[Depends(_require_token)])
+    async def token() -> dict[str, str | None]:
+        """Expose the current session token (if any) for local helpers."""
+        return {"token": session.api_token}
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
