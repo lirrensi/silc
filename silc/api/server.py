@@ -170,10 +170,16 @@ def create_app(session: SilcSession) -> FastAPI:
         return {"status": "interrupted"}
 
     @app.post("/clear", dependencies=[Depends(_require_token)])
-    async def clear_buffer() -> dict:
+    async def clear_screen() -> dict:
         _check_alive()
-        await session.clear_buffer()
+        await session.clear_screen()
         return {"status": "cleared"}
+
+    @app.post("/reset", dependencies=[Depends(_require_token)])
+    async def reset_terminal() -> dict:
+        _check_alive()
+        await session.reset_terminal()
+        return {"status": "reset"}
 
     @app.post("/resize", dependencies=[Depends(_require_token)])
     async def resize(rows: int, cols: int) -> dict:

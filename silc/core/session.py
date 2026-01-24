@@ -147,6 +147,24 @@ class SilcSession:
             await asyncio.sleep(0.05)
         self.last_access = datetime.utcnow()
 
+    async def clear_screen(self) -> None:
+        """Send a clear-screen sequence and refresh the prompt."""
+        newline = "\r\n" if sys.platform == "win32" else "\n"
+        sequence = f"\x1b[2J\x1b[H{newline}"
+        self.buffer.clear()
+        await self.pty.write(sequence.encode("utf-8", errors="replace"))
+        self.last_access = datetime.utcnow()
+        self.last_output = datetime.utcnow()
+
+    async def reset_terminal(self) -> None:
+        """Reset the terminal state and clear any buffered output."""
+        newline = "\r\n" if sys.platform == "win32" else "\n"
+        sequence = f"\x1bc{newline}"
+        self.buffer.clear()
+        await self.pty.write(sequence.encode("utf-8", errors="replace"))
+        self.last_access = datetime.utcnow()
+        self.last_output = datetime.utcnow()
+
     def get_output(self, lines: int = 100, raw: bool = False) -> str:
         """Get output from the session.
 

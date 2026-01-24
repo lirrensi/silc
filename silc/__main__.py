@@ -559,7 +559,7 @@ def status(ctx: click.Context) -> None:
 @cli.port_subcommands.command()
 @click.pass_context
 def clear(ctx: click.Context) -> None:
-    """Clear the session buffer."""
+    """Clear the session terminal."""
     port = ctx.parent.params["port"] if ctx.parent else 0
     try:
         resp = requests.post(f"http://127.0.0.1:{port}/clear", timeout=5)
@@ -567,7 +567,23 @@ def clear(ctx: click.Context) -> None:
             click.echo(f"❌ Session on port {port} has ended", err=True)
             return
         resp.raise_for_status()
-        click.echo("✨ Session buffer cleared")
+        click.echo("✨ Terminal cleared")
+    except requests.RequestException:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+def reset(ctx: click.Context) -> None:
+    """Reset the session terminal."""
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    try:
+        resp = requests.post(f"http://127.0.0.1:{port}/reset", timeout=5)
+        if resp.status_code == 410:
+            click.echo(f"❌ Session on port {port} has ended", err=True)
+            return
+        resp.raise_for_status()
+        click.echo("✨ Terminal reset")
     except requests.RequestException:
         click.echo(f"❌ Session on port {port} does not exist", err=True)
 
