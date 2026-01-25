@@ -40,6 +40,7 @@ import uvicorn
 from silc.api.server import create_app
 from silc.core.session import SilcSession
 from silc.tui.app import launch_tui
+from silc.tui.installer import InstallerError, ensure_native_tui_binary
 from silc.utils.ports import find_available_port
 from .utils.shell_detect import detect_shell
 from silc.daemon import is_daemon_running, kill_daemon, DAEMON_PORT
@@ -772,30 +773,33 @@ def _native_tui_binary_path(dist_dir: Path) -> Path | None:
         filename = "silc-tui-windows.exe"
     elif sys.platform.startswith("linux"):
         filename = "silc-tui-linux"
+    elif sys.platform == "darwin":
+        filename = "silc-tui-macos"
     else:
         return None
     return dist_dir / filename
 
 
-def _launch_native_tui_client(port: int) -> None:
+def _find_native_tui_binary() -> Path | None:
     dist_dir = _tui_dist_dir()
-    if dist_dir is None:
-        click.echo(
-            "⚠️  Native TUI distribution directory is missing; build the native "
-            "client via `tui_client` before running `tui`.",
-            err=True,
-        )
-        return
+    if dist_dir is not None:
+        candidate = _native_tui_binary_path(dist_dir)
+        if candidate is not None and candidate.exists():
+            return candidate
 
-    executable = _native_tui_binary_path(dist_dir)
-    if executable is None:
-        click.echo("⚠️  Native TUI client is not available on this platform", err=True)
-        return
+    try:
+        return ensure_native_tui_binary(progress=lambda msg: click.echo(msg, err=True))
+    except InstallerError as exc:
+        click.echo(f"⚠️  Native TUI installer failed: {exc}", err=True)
+        return None
 
-    if not executable.exists():
+
+def _launch_native_tui_client(port: int) -> None:
+    executable = _find_native_tui_binary()
+    if executable is None or not executable.exists():
         click.echo(
-            f"⚠️  Native TUI binary is missing at {executable}. "
-            "Build it from `tui_client` before running `tui`.",
+            "⚠️  Native TUI binary could not be found or installed. "
+            "Run `tui_client` manually or revisit the release metadata.",
             err=True,
         )
         return
