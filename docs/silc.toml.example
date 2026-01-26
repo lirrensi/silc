@@ -1,0 +1,66 @@
+# SILC Configuration File
+# Copy this file to ~/.silc/silc.toml (or %APPDATA%\silc\silc.toml on Windows)
+# to customize SILC behavior.
+
+[ports]
+# Port range for daemon (default: 19999-20000)
+daemon_start = 19999
+daemon_end = 20000
+
+# Port range for sessions (default: 20000-21000)
+session_start = 20000
+session_end = 21000
+
+# Maximum number of ports to try when finding an available one (default: 10)
+max_attempts = 10
+
+[paths]
+# Data directory for SILC (default: ~/.silc or %APPDATA%\silc)
+# Uncomment to override:
+# data_dir = "/path/to/custom/data/dir"
+
+# Log directory (default: <data_dir>/logs)
+# Uncomment to override:
+# log_dir = "/path/to/custom/log/dir"
+
+[tls]
+# Enable TLS/SSL for daemon and sessions (default: false)
+# WARNING: Only enable this if you have valid certificates
+enabled = false
+
+# Path to TLS certificate file (required if enabled)
+# cert_path = "/path/to/cert.pem"
+
+# Path to TLS private key file (required if enabled)
+# key_path = "/path/to/key.pem"
+
+[tokens]
+# Length of generated API tokens (default: 32)
+length = 32
+
+# Require API token for non-localhost connections (default: true)
+require_token = true
+
+[sessions]
+# Default command timeout in seconds (default: 600 = 10 minutes)
+# Commands running longer than this will be interrupted with Ctrl+C
+default_timeout = 600
+
+# Maximum buffer size in bytes for command output (default: 5242880 = 5MB)
+# Output larger than this will be truncated and command will be interrupted
+max_buffer_bytes = 5242880
+
+# Session idle timeout in seconds (default: 1800 = 30 minutes)
+# Sessions idle longer than this will be garbage collected
+idle_timeout = 1800
+
+# Garbage collection interval in seconds (default: 60 = 1 minute)
+# How often to check for idle sessions
+gc_interval = 60
+
+[logging]
+# Maximum number of lines to keep in log files (default: 1000)
+max_log_lines = 1000
+
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
+log_level = "INFO"

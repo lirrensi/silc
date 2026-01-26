@@ -12,7 +12,7 @@ SILC bridges an interactive terminal session with an HTTP API so both humans and
 ### Using pipx (recommended)
 
 ```bash
-pipx install git+https://github.com/username/repo-name.git
+pipx install git+https://github.com/lirrensi/silc.git
 ```
 
 ### Using pip
@@ -99,6 +99,61 @@ The standalone installer will:
 - `silc list` - List all active sessions
 - `silc shutdown` - Gracefully stop the daemon
 - `silc killall` - Force kill all sessions and daemon
+
+## Configuration
+
+SILC can be configured through a `silc.toml` file or environment variables.
+
+### Configuration File
+
+Create a configuration file at:
+- **Linux/macOS**: `~/.silc/silc.toml`
+- **Windows**: `%APPDATA%\silc\silc.toml`
+
+Copy the example configuration:
+```bash
+# Linux/macOS
+cp docs/silc.toml.example ~/.silc/silc.toml
+
+# Windows
+copy docs\silc.toml.example %APPDATA%\silc\silc.toml
+```
+
+### Common Configuration Options
+
+```toml
+[ports]
+session_start = 20000
+session_end = 21000
+
+[sessions]
+default_timeout = 600  # 10 minutes
+max_buffer_bytes = 5242880  # 5MB
+
+[logging]
+log_level = "INFO"
+```
+
+### Environment Variables
+
+You can also configure SILC using environment variables:
+
+```bash
+# Custom port range
+export SILC_SESSION_PORT_START=20000
+export SILC_SESSION_PORT_END=21000
+
+# Custom data directory
+export SILC_DATA_DIR=/custom/path/to/silc
+
+# Command timeout (seconds)
+export SILC_COMMAND_TIMEOUT=600
+
+# Log level
+export SILC_LOG_LEVEL=INFO
+```
+
+For complete configuration documentation, see [docs/configuration.md](docs/configuration.md).
 
 ## Docker mode: API-first shell access
 

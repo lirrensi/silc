@@ -6,9 +6,40 @@ import socket
 from contextlib import closing
 from typing import Iterable
 
+from silc.config import get_config
 
-def find_available_port(start: int = 20000, end: int = 30000) -> int:
+
+def find_available_port(
+    start: int | None = None, end: int | None = None, max_attempts: int | None = None
+) -> int:
+    """Find an available port in the specified range.
+
+    Args:
+        start: Starting port number. If None, uses config default.
+        end: Ending port number. If None, uses config default.
+        max_attempts: Maximum number of ports to try. If None, uses config default.
+
+    Returns:
+        Available port number
+
+    Raises:
+        RuntimeError: If no available port found in range
+    """
+    config = get_config()
+
+    if start is None:
+        start = config.ports.session_start
+    if end is None:
+        end = config.ports.session_end
+    if max_attempts is None:
+        max_attempts = config.ports.max_attempts
+
+    attempts = 0
     for port in range(start, end):
+        if attempts >= max_attempts:
+            break
+        attempts += 1
+
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -16,7 +47,11 @@ def find_available_port(start: int = 20000, end: int = 30000) -> int:
             except OSError:
                 continue
             return port
-    raise RuntimeError("Could not find an available port in the requested range.")
+
+    raise RuntimeError(
+        f"Could not find an available port in range {start}-{end} after {max_attempts} attempts. "
+        "All ports may be in use or blocked."
+    )
 
 
 def bind_port(host: str, port: int, backlog: int = 64) -> socket.socket:
