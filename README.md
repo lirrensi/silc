@@ -195,6 +195,78 @@ silc 20000 run "ls -la"
 2. Expand integration tests to cover the API endpoints, TUI refresh, and multiple concurrent clients.
 3. Add buffering persistence/rotation and auth for exposed sockets before shipping a release.
 
+## TUI Binary
+
+SILC includes a native TUI component built with Rust. The installer will automatically download the appropriate binary for your platform.
+
+### Building the TUI Binary Locally
+
+If you want to build the TUI binary yourself, navigate to the `tui_client` directory:
+
+```bash
+cd tui_client
+
+# Build for your platform
+cargo build --release
+
+# The binary will be in target/release/
+```
+
+### Building Release Artifacts
+
+The repository includes a GitHub Actions workflow that automatically builds and releases TUI binaries for multiple platforms.
+
+**To trigger a release:**
+
+1. **Create a git tag:**
+   ```bash
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+2. **Or manually trigger via GitHub:**
+   - Go to Actions → "Build and Release TUI Binary"
+   - Click "Run workflow"
+   - Optionally mark as draft or pre-release
+
+**What gets built:**
+
+- **Linux**: `x86_64` and `aarch64` (ARM64)
+- **macOS**: `x86_64` (Intel) and `aarch64` (Apple Silicon)
+- **Windows**: `x86_64` (MSVC)
+
+Each build produces a compressed archive:
+- Linux: `.tar.gz`
+- macOS: `.tar.gz`
+- Windows: `.zip`
+
+### Binary Distribution
+
+The installer automatically:
+1. Checks for a cached binary in the user's cache directory
+2. If not found, fetches the latest release from GitHub
+3. Downloads the appropriate asset for your platform
+4. Extracts and installs the binary
+
+**Cache location:**
+- **Linux/macOS**: `~/.cache/silc/bin/`
+- **Windows**: `%LOCALAPPDATA%\Cache\silc\bin\`
+
+### Environment Variables
+
+You can customize the binary distribution behavior:
+
+```bash
+# Custom binary installation directory
+export SILC_TUI_BIN_DIR=/custom/path/to/bin
+
+# Custom release repository
+export SILC_TUI_RELEASE_REPO=lirrensi/silc
+
+# Custom release API endpoint
+export SILC_TUI_RELEASE_API=https://api.github.com/repos/lirrensi/silc/releases/latest
+```
+
 ## Testing
 
 Run `pytest` (after installing the `test` extras) to exercise the shell lifecycle cycle tests that create a session, send input, clean the buffer, and stop it.

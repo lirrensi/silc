@@ -18,7 +18,7 @@ import requests
 INSTALL_DIR_ENV = "SILC_TUI_BIN_DIR"
 REPO_ENV = "SILC_TUI_RELEASE_REPO"
 API_ENV = "SILC_TUI_RELEASE_API"
-DEFAULT_GITHUB_REPO = "yourorg/silc-tui"
+DEFAULT_GITHUB_REPO = "lirrensi/silc"
 DEFAULT_RELEASE_API = (
     f"https://api.github.com/repos/{DEFAULT_GITHUB_REPO}/releases/latest"
 )
