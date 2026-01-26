@@ -19,6 +19,8 @@ dependencies = [
     "pyinstaller>=6.17.0",
     "par-term-emu-core-rust>=0.20.0",
     "black>=26.1.0",
+    "websockets>=12.0",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]

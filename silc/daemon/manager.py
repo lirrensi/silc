@@ -113,9 +113,7 @@ class SilcDaemon:
             session_socket = self._reserve_session_socket(selected_port, is_global)
             try:
                 shell_info = detect_shell()
-                session = SilcSession(
-                    selected_port, shell_info, api_token=token
-                )
+                session = SilcSession(selected_port, shell_info, api_token=token)
                 await session.start()
 
                 self.sessions[selected_port] = session
@@ -135,6 +133,18 @@ class SilcDaemon:
                 if is_global:
                     write_daemon_log(
                         f"Session {selected_port} is globally accessible on 0.0.0.0 (RCE RISK)"
+                    )
+                    write_daemon_log(
+                        "WARNING: --global flag exposes session on all network interfaces."
+                    )
+                    write_daemon_log(
+                        "WARNING: API tokens are sent over plaintext HTTP - NOT SECURE."
+                    )
+                    write_daemon_log(
+                        "WARNING: Only use on trusted home networks, NEVER on public internet."
+                    )
+                    write_daemon_log(
+                        "WARNING: Consider using SSH tunneling or reverse proxy with TLS for remote access."
                     )
             except Exception:
                 self._close_session_socket(selected_port)

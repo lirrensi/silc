@@ -7,15 +7,10 @@ import sys
 
 import pytest
 from typing import Generator
-import requests
+import httpx
 
 from silc.daemon.manager import SilcDaemon, DAEMON_PORT
 from silc.daemon.pidfile import write_pidfile, read_pidfile, remove_pidfile
-
-pytestmark = pytest.mark.skipif(
-    True,
-    reason="Daemon HTTP API tests timeout in pytest environment, work fine manually",
-)
 
 
 def _shutdown_daemon() -> None:
@@ -79,7 +74,6 @@ async def wait_for_daemon_start(daemon, timeout=10):
         sock.settimeout(1)
         try:
             sock.connect(("127.0.0.1", DAEMON_PORT))
-            print("DEBUG: Daemon port is open")
             sock.close()
             return
         except socket.timeout:
@@ -114,12 +108,11 @@ async def test_daemon_creates_session() -> None:
 
     try:
         # Create session via API
-        import time
-
-        time.sleep(0.5)  # Wait for API to be ready
-        resp = requests.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
-        )
+        await asyncio.sleep(0.5)  # Wait for API to be ready
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
+            )
         assert resp.status_code == 200
 
         session_data = resp.json()
@@ -144,15 +137,14 @@ async def test_daemon_creates_session_with_requested_port() -> None:
     await asyncio.sleep(1)
 
     try:
-        import time
-
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
         requested_port = 20500
-        resp = requests.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions",
-            json={"port": requested_port},
-            timeout=15,
-        )
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions",
+                json={"port": requested_port},
+                timeout=15,
+            )
         assert resp.status_code == 200
         session_data = resp.json()
         assert session_data["port"] == requested_port
@@ -170,23 +162,23 @@ async def test_daemon_rejects_duplicate_port() -> None:
     await asyncio.sleep(1)
 
     try:
-        import time
-
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
         requested_port = 20510
 
-        resp = requests.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions",
-            json={"port": requested_port},
-            timeout=15,
-        )
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions",
+                json={"port": requested_port},
+                timeout=15,
+            )
         resp.raise_for_status()
 
-        second_resp = requests.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions",
-            json={"port": requested_port},
-            timeout=15,
-        )
+        async with httpx.AsyncClient() as client:
+            second_resp = await client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions",
+                json={"port": requested_port},
+                timeout=15,
+            )
         assert second_resp.status_code == 400
         assert "already in use" in second_resp.json().get("detail", "")
         assert requested_port in daemon.sessions
@@ -205,20 +197,22 @@ async def test_daemon_lists_sessions() -> None:
     await asyncio.sleep(1)
 
     try:
-        import time
-
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
         # Create two sessions
-        resp1 = requests.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
-        )
-        resp2 = requests.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
-        )
+        async with httpx.AsyncClient() as client:
+            resp1 = await client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
+            )
+            resp2 = await client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
+            )
 
         # List sessions
-        resp = requests.get(f"http://127.0.0.1:{DAEMON_PORT}/sessions", timeout=15)
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions", timeout=15
+            )
         assert resp.status_code == 200
 
         sessions = resp.json()
@@ -239,20 +233,20 @@ async def test_daemon_closes_session() -> None:
     await asyncio.sleep(1)
 
     try:
-        import time
-
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
         # Create session
-        resp = requests.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
-        )
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
+            )
         port = resp.json()["port"]
 
         # Close session
-        resp = requests.delete(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions/{port}", timeout=15
-        )
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions/{port}", timeout=15
+            )
         assert resp.status_code == 200
 
         # Check session removed
@@ -272,17 +266,19 @@ async def test_daemon_killall_cleans_all_sessions() -> None:
     await asyncio.sleep(1)
 
     try:
-        import time
-
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
         for _ in range(2):
-            resp = requests.post(
-                f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
-            )
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"http://127.0.0.1:{DAEMON_PORT}/sessions", json={}, timeout=15
+                )
             resp.raise_for_status()
 
-        resp = requests.post(f"http://127.0.0.1:{DAEMON_PORT}/killall", timeout=15)
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/killall", timeout=15
+            )
         assert resp.status_code == 200
 
         await asyncio.sleep(0.5)

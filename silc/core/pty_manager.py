@@ -249,14 +249,22 @@ class WindowsPTY(PTYBase):
         except TypeError:
             self._process.write(data.decode("utf-8", errors="replace"))
 
+
     def _load_winpty_module(self) -> Any:
+        """Load the winpty module required for Windows PTY support.
+
+        Returns:
+            The winpty module
+
+        Raises:
+            RuntimeError: If winpty is not installed
+        """
         try:
             import winpty as module
         except ImportError as winpty_error:
             raise RuntimeError(
                 "winpty is required on Windows to run SILC."
             ) from winpty_error
-        return module
         return module
 
 

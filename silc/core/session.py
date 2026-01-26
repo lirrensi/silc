@@ -38,6 +38,29 @@ HELPER_ECHO_FRAGMENTS = (
     "Invoke-Expression $cmd",
 )
 
+# Security: Cap collected buffer to prevent DoS attacks
+MAX_COLLECTED_BYTES = 5 * 1024 * 1024  # 5MB
+DEFAULT_COMMAND_TIMEOUT = 600  # 10 minutes in seconds
+
+# Buffer and PTY configuration
+DEFAULT_BUFFER_SIZE = 65536  # 64KB buffer for PTY output
+DEFAULT_READ_SIZE = 4096  # Default read chunk size from PTY
+DEFAULT_SCREEN_COLUMNS = 120
+DEFAULT_SCREEN_ROWS = 30
+
+# Timing constants (in seconds)
+HELPER_INJECTION_DELAY = 0.5  # Delay after injecting helper function
+POLL_INTERVAL = 0.05  # Default poll interval for async operations
+READ_POLL_INTERVAL = 0.1  # Poll interval when no data available
+INTERRUPT_DELAY = 0.5  # Delay after sending interrupt signal
+PROMPT_WAIT_TIMEOUT = 2.0  # Timeout for waiting for prompt
+GC_INTERVAL_SECONDS = 60  # Garbage collection interval
+SESSION_IDLE_TIMEOUT_SECONDS = 1800  # 30 minutes idle timeout
+MAX_ACCUMULATOR_SIZE = 4096  # Max size for prompt accumulator
+
+# Log rotation
+MAX_LOG_LINES = 1000  # Maximum lines to keep in rotated logs
+
 
 class SilcSession:
     def __init__(self, port: int, shell_info: ShellInfo, api_token: str | None = None):
@@ -47,7 +70,7 @@ class SilcSession:
         self.api_token = api_token
         self.pty: PTYBase = create_pty(shell_info.path, os.environ.copy())
 
-        self.buffer = RawByteBuffer(maxlen=65536)
+        self.buffer = RawByteBuffer(maxlen=DEFAULT_BUFFER_SIZE)
         self.created_at = datetime.utcnow()
         self.last_access = datetime.utcnow()
         self.last_output = datetime.utcnow()
@@ -56,8 +79,8 @@ class SilcSession:
         self.current_run_cmd: str | None = None
         self.input_lock = asyncio.Lock()
 
-        self.screen_columns = 120
-        self.screen_rows = 30
+        self.screen_columns = DEFAULT_SCREEN_COLUMNS
+        self.screen_rows = DEFAULT_SCREEN_ROWS
         self.has_par_term = Terminal is not None
         self.pty.resize(self.screen_rows, self.screen_columns)
 
@@ -232,20 +255,21 @@ class SilcSession:
         return "\n".join(filtered)
 
     def rotate_logs(self) -> None:
-        """Rotate session logs to keep size manageable."""
-        rotate_session_log(self.port, max_lines=1000)
+            """Rotate session logs to keep size manageable."""
+            rotate_session_log(self.port, max_lines=1000)
 
-    async def run_command(self, cmd: str, timeout: int = 60) -> dict:
-        # Capture the command being run for lock error reporting
+    async def run_command(self, cmd: str, timeout: int = DEFAULT_COMMAND_TIMEOUT) -> dict:
+            # Capture the command being run for lock error reporting
 
         if self.run_lock.locked():
-            return {
-                "error": "Another run command is already executing",
-                "status": "busy",
-                "running_cmd": self.current_run_cmd,
-            }
+                return {
+                    "error": "Another run command is already executing",
+                    "status": "busy",
+                    "running_cmd": self.current_run_cmd,
+                }
 
         async with self.run_lock:
+            self.current_run_cmd = cmd
             await self._ensure_helper_ready()
             run_token = str(uuid.uuid4())[:8]
             cursor = self.buffer.cursor
