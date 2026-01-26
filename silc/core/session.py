@@ -298,6 +298,18 @@ class SilcSession:
 
                 collected.extend(chunk)
 
+                # Security: Cap buffer to prevent DoS attacks
+                if len(collected) > MAX_COLLECTED_BYTES:
+                    await self.pty.write(b"\x03")  # Send Ctrl+C
+                    await asyncio.sleep(INTERRUPT_DELAY)
+                    self.current_run_cmd = None
+                    return {
+                        "output": "",
+                        "exit_code": -1,
+                        "status": "error",
+                        "error": f"Command output exceeded {MAX_COLLECTED_BYTES} bytes limit",
+                    }
+
                 if not started:
                     begin_index = collected.find(begin_marker)
                     if begin_index < 0:
@@ -350,6 +362,7 @@ class SilcSession:
                 ]
 
                 await asyncio.sleep(0.05)
+                self.current_run_cmd = None
                 return {
                     "output": clean_output(raw_lines),
                     "exit_code": exit_code,
@@ -367,9 +380,10 @@ class SilcSession:
             )
             fallback_lines = [
                 line
-                for line in fallback_text.split("\n")
+                for line in fallback_text.split("\\n")
                 if not SILC_SENTINEL_PATTERN.search(line)
             ]
+            self.current_run_cmd = None
             return {
                 "output": clean_output(fallback_lines),
                 "status": "timeout",
