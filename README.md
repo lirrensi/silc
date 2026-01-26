@@ -1,5 +1,7 @@
 # SILC (Shared Interactive Linked CMD)
 
+# ⚠️ work in progress...
+
 SILC bridges an interactive terminal session with an HTTP API so both humans and agents can read, write, and orchestrate commands in the same shell.
 
 ## Requirements

@@ -11,13 +11,12 @@ Environment variables override config file values, which override defaults.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import toml
-
-from silc.utils.persistence import DATA_DIR
 
 
 @dataclass
@@ -88,7 +87,16 @@ class Config:
     def __post_init__(self) -> None:
         """Resolve paths after initialization."""
         if self.paths.data_dir is None:
-            self.paths.data_dir = DATA_DIR
+            # Resolve data directory from environment or use default
+            data_dir_str = os.environ.get("SILC_DATA_DIR")
+            if data_dir_str:
+                self.paths.data_dir = Path(data_dir_str)
+            else:
+                # Default: ~/.silc on Unix or %APPDATA%/silc on Windows
+                if sys.platform == "win32":
+                    self.paths.data_dir = Path(os.environ.get("APPDATA", "")) / "silc"
+                else:
+                    self.paths.data_dir = Path.home() / ".silc"
         if self.paths.log_dir is None:
             self.paths.log_dir = self.paths.data_dir / "logs"
 
@@ -127,7 +135,13 @@ def _get_env_path(key: str, default: Path | None) -> Path | None:
 
 def _load_config_file() -> dict[str, Any]:
     """Load configuration from silc.toml file."""
-    config_path = DATA_DIR / "silc.toml"
+    # Resolve data directory directly (avoiding circular import)
+    if sys.platform == "win32":
+        data_dir = Path(os.environ.get("APPDATA", "")) / "silc"
+    else:
+        data_dir = Path.home() / ".silc"
+
+    config_path = data_dir / "silc.toml"
     if not config_path.exists():
         return {}
 
