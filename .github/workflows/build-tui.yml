@@ -2,6 +2,8 @@ name: Build and Release TUI Binary
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*.*.*'
   workflow_dispatch:
@@ -18,8 +20,95 @@ on:
         type: boolean
 
 jobs:
+  detect_version:
+    name: Detect release version
+    runs-on: ubuntu-latest
+    outputs:
+      release_needed: ${{ steps.version.outputs.release_needed }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      current_version: ${{ steps.version.outputs.current_version }}
+      previous_version: ${{ steps.version.outputs.previous_version }}
+      released_from_tag: ${{ steps.version.outputs.released_from_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version
+        id: version
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before || '' }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+          import tomllib
+
+          cargo_path = Path("tui_client/Cargo.toml")
+          if not cargo_path.exists():
+              raise SystemExit("tui_client/Cargo.toml not found")
+
+          def parse_version(text):
+              data = tomllib.loads(text)
+              return data["package"]["version"]
+
+          current_version = parse_version(cargo_path.read_text())
+          previous_version = ""
+          release_needed = False
+          released_from_tag = False
+
+          ref = os.environ.get("GITHUB_REF", "")
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          before = os.environ.get("GITHUB_EVENT_BEFORE", "").strip()
+
+          if ref.startswith("refs/tags/"):
+              released_from_tag = True
+              release_tag = ref.removeprefix("refs/tags/")
+              release_needed = True
+          else:
+              release_tag = f"v{current_version}"
+              if event_name == "workflow_dispatch":
+                  release_needed = True
+              elif before and not before.startswith("0000000000000000000000000000000000000000"):
+                  git_result = subprocess.run(
+                      ["git", "show", f"{before}:tui_client/Cargo.toml"],
+                      capture_output=True,
+                      text=True,
+                  )
+                  if git_result.returncode == 0:
+                      try:
+                          previous_version = parse_version(git_result.stdout)
+                          release_needed = previous_version != current_version
+                      except Exception:
+                          release_needed = True
+                  else:
+                      release_needed = True
+              else:
+                  release_needed = True
+
+          github_output = os.environ["GITHUB_OUTPUT"]
+          with open(github_output, "a") as fh:
+              print(f"current_version={current_version}", file=fh)
+              print(f"previous_version={previous_version}", file=fh)
+              print(f"release_tag={release_tag}", file=fh)
+              print(f"release_needed={str(release_needed).lower()}", file=fh)
+              print(f"released_from_tag={str(released_from_tag).lower()}", file=fh)
+
+          print(f"Current version: {current_version}")
+          if previous_version:
+              print(f"Previous version: {previous_version}")
+          print(f"Release tag: {release_tag}")
+          print(f"Release needed: {release_needed}, from tag: {released_from_tag}")
+          PY
+
   build:
     name: Build TUI Binary on ${{ matrix.os }}
+    needs: detect_version
+    if: needs.detect_version.outputs.release_needed == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -125,9 +214,9 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, detect_version]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.detect_version.outputs.release_needed == 'true'
 
     permissions:
       contents: write
@@ -135,15 +224,33 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
+      - name: Create release tag
+        if: needs.detect_version.outputs.released_from_tag == 'false'
+        env:
+          RELEASE_TAG: ${{ needs.detect_version.outputs.release_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists, skipping"
+          else
+            git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
+          fi
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.detect_version.outputs.release_tag }}
+          name: ${{ needs.detect_version.outputs.release_tag }}
           files: artifacts/*/*
           draft: ${{ github.event.inputs.draft_release || false }}
           prerelease: ${{ github.event.inputs.prerelease || false }}
