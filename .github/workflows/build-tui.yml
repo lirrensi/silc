@@ -9,12 +9,12 @@ on:
       draft_release:
         description: 'Create as a draft release'
         required: false
-        default: 'false'
+        default: false
         type: boolean
       prerelease:
         description: 'Mark as pre-release'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 jobs:
@@ -25,21 +25,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux
+          # Linux (x86_64 - most common)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: silc-tui-linux-x86_64
             asset_name: silc-tui-linux-x86_64.tar.gz
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            artifact_name: silc-tui-linux-aarch64
-            asset_name: silc-tui-linux-aarch64.tar.gz
 
-          # macOS (Intel and ARM)
+          # macOS (Intel - most common)
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: silc-tui-darwin-x86_64
             asset_name: silc-tui-darwin-x86_64.tar.gz
+
+          # macOS (Apple Silicon - native build)
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: silc-tui-darwin-aarch64
