@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import hashlib
 import platform
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,7 @@ class TestTuiRelease:
         self.api_url = installer.DEFAULT_RELEASE_API
         self.target_platform = platform.system().lower()
         self.target_arch = platform.machine().lower()
+        self._temp_dirs: list[Path] = []
 
     def print_section(self, title: str) -> None:
         """Print a formatted section header."""
@@ -105,46 +108,45 @@ class TestTuiRelease:
 
         print(f"Downloading from: {url}")
 
-        # Create a temporary directory
-        import tempfile
+        # Create a temporary directory that lives until cleanup
+        temp_dir = Path(tempfile.mkdtemp(prefix="silc-tui-test-"))
+        self._temp_dirs.append(temp_dir)
+        download_path = temp_dir / asset.get("name", "binary")
 
-        with tempfile.TemporaryDirectory(prefix="silc-tui-test-") as temp_dir:
-            download_path = Path(temp_dir) / asset.get("name", "binary")
+        try:
+            # Download with progress
+            print(f"Downloading to: {download_path}")
+            with requests.get(url, stream=True, timeout=60) as resp:
+                resp.raise_for_status()
+                total_size = int(resp.headers.get("content-length", 0))
+                downloaded = 0
 
-            try:
-                # Download with progress
-                print(f"Downloading to: {download_path}")
-                with requests.get(url, stream=True, timeout=60) as resp:
-                    resp.raise_for_status()
-                    total_size = int(resp.headers.get("content-length", 0))
-                    downloaded = 0
+                with open(download_path, "wb") as out_file:
+                    for chunk in resp.iter_content(chunk_size=32_768):
+                        if chunk:
+                            out_file.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                percent = (downloaded / total_size) * 100
+                                print(
+                                    f"\rProgress: {downloaded:,}/{total_size:,} ({percent:.1f}%)",
+                                    end="",
+                                )
 
-                    with open(download_path, "wb") as out_file:
-                        for chunk in resp.iter_content(chunk_size=32_768):
-                            if chunk:
-                                out_file.write(chunk)
-                                downloaded += len(chunk)
-                                if total_size > 0:
-                                    percent = (downloaded / total_size) * 100
-                                    print(
-                                        f"\rProgress: {downloaded:,}/{total_size:,} ({percent:.1f}%)",
-                                        end="",
-                                    )
+            print(f"\n✓ Download completed")
+            print(f"  Size: {download_path.stat().st_size:,} bytes")
 
-                print(f"\n✓ Download completed")
-                print(f"  Size: {download_path.stat().st_size:,} bytes")
+            # Verify file
+            if not download_path.exists():
+                raise RuntimeError("Downloaded file does not exist")
 
-                # Verify file
-                if not download_path.exists():
-                    raise RuntimeError("Downloaded file does not exist")
+            return download_path
 
-                return download_path
-
-            except Exception as exc:
-                if download_path.exists():
-                    download_path.unlink()
-                print(f"\n✗ Download failed: {exc}")
-                raise
+        except Exception as exc:
+            if download_path.exists():
+                download_path.unlink()
+            print(f"\n✗ Download failed: {exc}")
+            raise
 
     def test_extract_binary(
         self, archive_path: Path, progress: installer.BinaryProgress | None = None
@@ -296,6 +298,16 @@ class TestTuiRelease:
             if binary_path and binary_path.exists():
                 print(f"\nCleaning up test binary: {binary_path}")
                 binary_path.unlink()
+
+            # Cleanup: remove temporary directories created during download
+            for temp_dir in getattr(self, "_temp_dirs", []):
+                try:
+                    if temp_dir.exists():
+                        shutil.rmtree(temp_dir)
+                except Exception:
+                    print(f"Warning: failed to remove temporary directory {temp_dir}")
+            if hasattr(self, "_temp_dirs"):
+                self._temp_dirs.clear()
 
 
 def main() -> int:

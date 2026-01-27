@@ -11,14 +11,19 @@ SILC bridges an interactive terminal session with an HTTP API so both humans and
 
 ## Installation
 
-### Using pipx (recommended)
+### Using pipx | uv (recommended)
 
 ```bash
 pipx install git+https://github.com/lirrensi/silc.git
 ```
 
+```bash
+uv tool install git+https://github.com/lirrensi/silc.git
+```
+
 ### Using pip
 
+clone repo and
 ```bash
 pip install -e .
 ```
@@ -37,7 +42,7 @@ chmod +x install.sh
 ```
 
 The standalone installer will:
-- Build the executable if not present in `dist/`
+- Build the TUI executable if not present in `dist/`
 - Copy it to `~/silc` (Windows: `%USERPROFILE%\silc`)
 - Add it to your PATH automatically
 
@@ -188,12 +193,6 @@ silc 20000 run "ls -la"
 - Simplified session, buffer, and output-cleaning helpers.
 - FastAPI endpoints and a Textual TUI that can be wired into the server.
 - Cross-platform PTY wiring: `pywinpty` on Windows and the standard `pty` module on Unix.
-
-## Next steps
-
-1. Harden `SilcSession.run_command` sentinel detection (time-outs, exit code reporting, queued runs).
-2. Expand integration tests to cover the API endpoints, TUI refresh, and multiple concurrent clients.
-3. Add buffering persistence/rotation and auth for exposed sockets before shipping a release.
 
 ## TUI Binary
 
