@@ -94,11 +94,33 @@ jobs:
           cd tui_client\target\${{ matrix.target }}\release
           powershell Compress-Archive -Path silc-tui.exe -DestinationPath ..\${{ matrix.artifact_name }}.zip
 
+      - name: Stage release artifact for upload
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+
+          target_dir = Path("tui_client") / "target" / "${{ matrix.target }}"
+          pattern = "${{ matrix.artifact_name }}.*"
+          matches = sorted(target_dir.glob(pattern))
+          if not matches:
+              raise SystemExit(f"No artifacts found in {target_dir} matching {pattern}")
+
+          artifacts_dir = Path("tui_client") / "artifacts"
+          artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+          for match in matches:
+              destination = artifacts_dir / match.name
+              shutil.copy2(match, destination)
+              print(f"Copied {match} -> {destination}")
+          PY
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: tui_client/target/${{ matrix.target }}/${{ matrix.artifact_name }}.*
+          path: tui_client/artifacts/${{ matrix.artifact_name }}.*
           retention-days: 1
 
   release:
