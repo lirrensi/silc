@@ -22,6 +22,7 @@ dependencies = [
     "websockets>=12.0",
     "httpx>=0.28.1",
     "toml>=0.10.2",
+    "aiofiles>=25.1.0",
 ]
 
 [project.scripts]

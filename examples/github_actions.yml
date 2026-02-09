@@ -1,0 +1,72 @@
+name: Deploy with SILC
+
+# This workflow demonstrates using SILC in GitHub Actions for deployment
+# SILC provides programmatic shell access via HTTP API, perfect for CI/CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      # Step 3: Install SILC
+      - name: Install SILC
+        run: |
+          pip install -e .
+
+      # Step 4: Start SILC daemon
+      - name: Start SILC daemon
+        run: |
+          silc start --port 20000
+
+      # Step 5: Verify SILC is running
+      - name: Verify SILC status
+        run: |
+          curl http://localhost:20000/status
+
+      # Step 6: Run deployment script via SILC
+      - name: Run deployment
+        run: |
+          # Execute deployment script
+          curl -X POST http://localhost:20000/run -d "./deploy.sh"
+
+          # Get deployment output
+          curl http://localhost:20000/out
+
+      # Step 7: Run tests via SILC
+      - name: Run tests
+        run: |
+          # Run test suite
+          curl -X POST http://localhost:20000/run -d "pytest tests/"
+
+          # Get test results
+          curl http://localhost:20000/out
+
+      # Step 8: Check deployment status
+      - name: Check deployment status
+        run: |
+          # Verify application is running
+          curl -X POST http://localhost:20000/run -d "curl -f http://localhost:8080/health || exit 1"
+
+          # Get output
+          curl http://localhost:20000/out
+
+      # Step 9: Cleanup
+      - name: Stop SILC
+        if: always()
+        run: |
+          silc shutdown

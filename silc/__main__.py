@@ -44,6 +44,12 @@ from silc.tui.installer import InstallerError, ensure_native_tui_binary
 from silc.utils.ports import find_available_port
 from .utils.shell_detect import detect_shell
 from silc.daemon import is_daemon_running, kill_daemon, DAEMON_PORT
+from silc.stream.cli_commands import (
+    stream_file_append,
+    stream_file_render,
+    stream_status,
+    stream_stop,
+)
 
 
 def _daemon_url(path: str) -> str:
@@ -860,3 +866,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# Register streaming commands
+cli.port_subcommands.add_command(stream_file_render)
+cli.port_subcommands.add_command(stream_file_append)
+cli.port_subcommands.add_command(stream_stop)
+cli.port_subcommands.add_command(stream_status)

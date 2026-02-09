@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SILC Terminal Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        .header h1 {
+            color: #4ec9b0;
+        }
+
+        .status {
+            display: flex;
+            gap: 20px;
+        }
+
+        .status-item {
+            background: #252526;
+            padding: 10px 15px;
+            border-radius: 4px;
+        }
+
+        .status-label {
+            color: #808080;
+            font-size: 12px;
+        }
+
+        .status-value {
+            color: #4ec9b0;
+            font-weight: bold;
+        }
+
+        .terminal {
+            background: #000;
+            border: 1px solid #333;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .terminal-header {
+            background: #252526;
+            padding: 10px 15px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .terminal-title {
+            color: #808080;
+            font-size: 12px;
+        }
+
+        .terminal-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 5px 15px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .btn:hover {
+            background: #1177bb;
+        }
+
+        .btn.danger {
+            background: #f14c4c;
+        }
+
+        .btn.danger:hover {
+            background: #ff6b6b;
+        }
+
+        .terminal-output {
+            padding: 15px;
+            height: 500px;
+            overflow-y: auto;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .terminal-output::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        .terminal-output::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+
+        .terminal-output::-webkit-scrollbar-thumb {
+            background: #424242;
+            border-radius: 5px;
+        }
+
+        .line {
+            margin-bottom: 2px;
+        }
+
+        .command-input {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .command-input input {
+            flex: 1;
+            background: #252526;
+            border: 1px solid #333;
+            color: #d4d4d4;
+            padding: 10px 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .command-input input:focus {
+            outline: none;
+            border-color: #0e639c;
+        }
+
+        .sessions {
+            margin-top: 20px;
+        }
+
+        .sessions h2 {
+            color: #4ec9b0;
+            margin-bottom: 10px;
+        }
+
+        .session-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .session-card {
+            background: #252526;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #333;
+        }
+
+        .session-card h3 {
+            color: #dcdcaa;
+            margin-bottom: 10px;
+        }
+
+        .session-info {
+            color: #808080;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+
+        .connection-status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .connected {
+            background: #4ec9b0;
+        }
+
+        .disconnected {
+            background: #f14c4c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🖥️ SILC Terminal Monitor</h1>
+            <div class="status">
+                <div class="status-item">
+                    <div class="status-label">Connection</div>
+                    <div class="status-value">
+                        <span class="connection-status disconnected" id="connectionStatus"></span>
+                        <span id="connectionText">Disconnected</span>
+                    </div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Session</div>
+                    <div class="status-value" id="sessionPort">20000</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Idle Time</div>
+                    <div class="status-value" id="idleTime">--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="terminal">
+            <div class="terminal-header">
+                <div class="terminal-title">Session Output (Live)</div>
+                <div class="terminal-controls">
+                    <button class="btn" onclick="clearOutput()">Clear</button>
+                    <button class="btn" onclick="refreshOutput()">Refresh</button>
+                    <button class="btn danger" onclick="interruptSession()">Interrupt</button>
+                </div>
+            </div>
+            <div class="terminal-output" id="terminalOutput">
+                <div class="line">Connecting to SILC...</div>
+            </div>
+        </div>
+
+        <div class="command-input">
+            <input type="text" id="commandInput" placeholder="Enter command to execute..." onkeypress="handleKeyPress(event)">
+            <button class="btn" onclick="executeCommand()">Execute</button>
+        </div>
+
+        <div class="sessions">
+            <h2>Active Sessions</h2>
+            <div class="session-list" id="sessionList">
+                <div class="session-card">
+                    <h3>Session 20000</h3>
+                    <div class="session-info">Shell: /bin/bash</div>
+                    <div class="session-info">Status: <span style="color: #4ec9b0;">Alive</span></div>
+                    <div class="session-info">Idle: <span id="sessionIdle">--</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const SILC_PORT = 20000;
+        const SILC_URL = `http://localhost:${SILC_PORT}`;
+        let ws = null;
+        let isConnected = false;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWebSocket();
+            updateStatus();
+            setInterval(updateStatus, 5000); // Update status every 5 seconds
+        });
+
+        // Connect to WebSocket for real-time output
+        function connectWebSocket() {
+            try {
+                ws = new WebSocket(`ws://localhost:${SILC_PORT}/ws`);
+
+                ws.onopen = () => {
+                    isConnected = true;
+                    updateConnectionStatus(true);
+                    addLine('✓ Connected to SILC session', '#4ec9b0');
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.event === 'update') {
+                        addLine(data.data);
+                    }
+                };
+
+                ws.onclose = () => {
+                    isConnected = false;
+                    updateConnectionStatus(false);
+                    addLine('✗ Disconnected from SILC', '#f14c4c');
+                    // Attempt to reconnect after 5 seconds
+                    setTimeout(connectWebSocket, 5000);
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    addLine('✗ WebSocket error', '#f14c4c');
+                };
+            } catch (error) {
+                console.error('Failed to connect:', error);
+                addLine('✗ Failed to connect to SILC', '#f14c4c');
+                // Fallback to polling
+                setInterval(pollOutput, 2000);
+            }
+        }
+
+        // Update connection status display
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            const text = document.getElementById('connectionText');
+
+            if (connected) {
+                status.className = 'connection-status connected';
+                text.textContent = 'Connected';
+            } else {
+                status.className = 'connection-status disconnected';
+                text.textContent = 'Disconnected';
+            }
+        }
+
+        // Add line to terminal output
+        function addLine(text, color = null) {
+            const output = document.getElementById('terminalOutput');
+            const line = document.createElement('div');
+            line.className = 'line';
+            line.textContent = text;
+            if (color) {
+                line.style.color = color;
+            }
+            output.appendChild(line);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        // Clear terminal output
+        function clearOutput() {
+            document.getElementById('terminalOutput').innerHTML = '';
+            addLine('Output cleared', '#808080');
+        }
+
+        // Refresh output (fallback for polling)
+        function refreshOutput() {
+            fetch(`${SILC_URL}/out?lines=100`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('terminalOutput').innerHTML = '';
+                    data.output.split('\n').forEach(line => {
+                        addLine(line);
+                    });
+                })
+                .catch(error => {
+                    console.error('Failed to refresh output:', error);
+                    addLine('✗ Failed to refresh output', '#f14c4c');
+                });
+        }
+
+        // Poll output (fallback if WebSocket fails)
+        function pollOutput() {
+            if (isConnected) return;
+
+            fetch(`${SILC_URL}/out?lines=10`)
+                .then(response => response.json())
+                .then(data => {
+                    const lines = data.output.split('\n');
+                    const lastLine = lines[lines.length - 1];
+                    if (lastLine && lastLine.trim()) {
+                        addLine(lastLine);
+                    }
+                })
+                .catch(error => {
+                    console.error('Polling error:', error);
+                });
+        }
+
+        // Execute command
+        function executeCommand() {
+            const input = document.getElementById('commandInput');
+            const command = input.value.trim();
+
+            if (!command) return;
+
+            addLine(`$ ${command}`, '#dcdcaa');
+
+            fetch(`${SILC_URL}/run`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ command: command })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.output) {
+                        data.output.split('\n').forEach(line => {
+                            addLine(line);
+                        });
+                    }
+                    if (data.exit_code !== 0) {
+                        addLine(`Exit code: ${data.exit_code}`, '#f14c4c');
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to execute command:', error);
+                    addLine('✗ Failed to execute command', '#f14c4c');
+                });
+
+            input.value = '';
+        }
+
+        // Handle Enter key in command input
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                executeCommand();
+            }
+        }
+
+        // Interrupt running command
+        function interruptSession() {
+            fetch(`${SILC_URL}/interrupt`, {
+                method: 'POST'
+            })
+                .then(response => response.json())
+                .then(data => {
+                    addLine('✓ Command interrupted', '#4ec9b0');
+                })
+                .catch(error => {
+                    console.error('Failed to interrupt:', error);
+                    addLine('✗ Failed to interrupt command', '#f14c4c');
+                });
+        }
+
+        // Update session status
+        function updateStatus() {
+            fetch(`${SILC_URL}/status`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('idleTime').textContent = `${data.idle_time.toFixed(1)}s`;
+                    document.getElementById('sessionIdle').textContent = `${data.idle_time.toFixed(1)}s`;
+                })
+                .catch(error => {
+                    console.error('Failed to update status:', error);
+                });
+        }
+    </script>
+</body>
+</html>

@@ -21,6 +21,8 @@ from ipaddress import AddressValueError, ip_address
 from ..core.cleaner import clean_output
 from ..core.session import SilcSession
 from ..utils.persistence import read_session_log
+from ..stream import api_endpoints
+from ..stream.streaming_service import StreamingService
 
 
 def create_app(session: SilcSession) -> FastAPI:
@@ -77,6 +79,21 @@ def create_app(session: SilcSession) -> FastAPI:
     app = FastAPI(
         title=f"SILC Session {session.session_id}",
     )
+
+    # Create streaming service instance
+    streaming_service = StreamingService(session)
+
+    # Override the streaming service dependency
+    def get_streaming_service_override() -> StreamingService:
+        return streaming_service
+
+    # Override the dependency in the streaming endpoints module
+    app.dependency_overrides[api_endpoints.get_streaming_service] = (
+        get_streaming_service_override
+    )
+
+    # Include streaming router with authentication
+    app.include_router(api_endpoints.router, dependencies=[Depends(_require_token)])
 
     def _check_alive() -> None:
         """Check if session is alive, raise exception if not."""

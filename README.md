@@ -1,34 +1,555 @@
 # SILC (Shared Interactive Linked CMD)
 
-# ⚠️ work in progress...
+[![PyPI version](https://badge.fury.io/py/silc.svg)](https://badge.fury.io/py/silc)
+[![Python Version](https://img.shields.io/pypi/pyversions/silc.svg)](https://pypi.org/project/silc/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Build Status](https://github.com/lirrensi/silc/workflows/CI/badge.svg)](https://github.com/lirrensi/silc/actions)
+[![codecov](https://codecov.io/gh/lirrensi/silc/branch/main/graph/badge.svg)](https://codecov.io/gh/lirrensi/silc)
+[![GitHub stars](https://img.shields.io/github/stars/lirrensi/silc?style=social)](https://github.com/lirrensi/silc/stargazers)
 
-SILC bridges an interactive terminal session with an HTTP API so both humans and agents can read, write, and orchestrate commands in the same shell.
+**Bridge your terminal with the world - let humans and AI agents collaborate in the same shell.**
 
-## Requirements
+---
 
-- **Python >= 3.12** (required)
+## 🎯 The Problem
+
+Most AI coding agents (Claude, GPT-4, Cursor, etc.) spawn their own isolated shells when they need to execute commands. This creates major limitations:
+
+- ❌ **No access to your environment** - They can't see your installed tools, aliases, or configuration
+- ❌ **No context continuity** - Each command runs in a fresh, isolated environment
+- ❌ **Can't use TUI apps** - They can't use `vim`, `htop`, `git interactive`, or any terminal UI
+- ❌ **Limited debugging** - You can't see what they're doing in real-time or intervene
+- ❌ **No collaboration** - You and the agent can't work together in the same session
+
+## ✨ The SILC Solution
+
+SILC gives AI agents **direct access to YOUR shell** while keeping you in control:
+
+- ✅ **Full environment access** - Agents work in your actual shell with all your tools and config
+- ✅ **Real-time visibility** - See exactly what the agent is doing as it happens
+- ✅ **Interactive TUI support** - Agents can use `vim`, `htop`, `git`, and any terminal app
+- ✅ **Human-in-the-loop** - Monitor, interrupt, or take over at any moment
+- ✅ **True collaboration** - Work side-by-side with AI agents in the same session
+
+## 💡 CLI-First Design
+
+SILC is designed to be used primarily through its **CLI commands** - the same interface for both you and AI agents:
+
+```bash
+# You use it
+silc 20000 run "git status"
+silc 20000 run "vim config.json"
+
+# Agent uses it (same commands!)
+silc 20000 run "npm test"
+silc 20000 run "htop"
+```
+
+The HTTP API and WebSocket are available for programmatic access, but the **CLI is the primary and recommended interface**.
+
+---
+
+---
+
+## What is SILC?
+
+SILC transforms your terminal session into a programmable interface, enabling **seamless collaboration between you and AI agents** in your actual shell environment.
+
+### The Problem with AI Coding Agents
+
+Most AI coding agents (Claude, GPT-4, Cursor, etc.) spawn their own isolated shells when they need to execute commands. This has major limitations:
+
+- ❌ **No access to your environment** - They can't see your installed tools, aliases, or configuration
+- ❌ **No context continuity** - Each command runs in a fresh, isolated environment
+- ❌ **Can't interact with TUI apps** - They can't use `vim`, `htop`, `git interactive`, or any terminal UI
+- ❌ **Limited debugging** - You can't see what they're doing in real-time or intervene
+- ❌ **No collaboration** - You and the agent can't work together in the same session
+
+### The SILC Solution
+
+SILC gives AI agents **direct access to YOUR shell** while keeping you in control:
+
+- ✅ **Full environment access** - Agents work in your actual shell with all your tools and config
+- ✅ **Real-time visibility** - See exactly what the agent is doing as it happens
+- ✅ **Interactive TUI support** - Agents can use `vim`, `htop`, `git`, and any terminal app
+- ✅ **Human-in-the-loop** - Monitor, interrupt, or take over at any moment
+- ✅ **True collaboration** - Work side-by-side with AI agents in the same session
+
+### How It Works
+
+**CLI-first approach** - SILC is designed to be used primarily through its CLI commands:
+
+```bash
+# Start a session
+silc start
+
+# You work in your terminal normally
+vim myapp.py
+npm test
+git commit -m "fix bug"
+
+# Agent can also work in the SAME session
+silc 20000 run "git status"
+silc 20000 run "npm install"
+silc 20000 run "vim config.json"  # Yes, even vim!
+```
+
+The HTTP API and WebSocket are available for programmatic access, but the **CLI is the primary and recommended interface** for both humans and agents.
+
+---
+
+## Agent + Human Collaboration Patterns
+
+SILC enables powerful new ways to work with AI agents:
+
+### 1. **Open SSH and Ask Agent to Work Inside**
+
+```bash
+# SSH into your server
+ssh user@production-server
+
+# Start SILC
+silc start
+
+# Now ask your AI agent to work in this session:
+# "Please deploy the new version and monitor the logs"
+# Agent executes: silc 20000 run "./deploy.sh"
+# Agent monitors: silc 20000 out
+# You can watch everything in real-time
+```
+
+### 2. **Monitor Long-Running Processes**
+
+```bash
+# Start a long-running task
+silc 20000 run "nohup python train_model.py &"
+
+# Agent monitors it for you
+# "Watch this training job and alert me if it fails"
+# Agent periodically checks: silc 20000 out
+# Agent alerts you: "Training failed at epoch 5, error: out of memory"
+```
+
+### 3. **Use CLI Exactly as Human Would**
+
+```bash
+# Agent can use ANY CLI tool, including TUI apps:
+silc 20000 run "htop"              # System monitoring
+silc 20000 run "vim main.py"       # Edit files
+silc 20000 run "git rebase -i"     # Interactive git
+silc 20000 run "docker run -it ubuntu"  # Interactive containers
+silc 20000 run "python manage.py shell"  # REPLs
+```
+
+### 4. **Collaborative Debugging**
+
+```bash
+# You're debugging an issue
+silc 20000 run "python -m pytest tests/test_api.py"
+
+# Test fails, you ask agent to investigate
+# Agent runs: silc 20000 run "cat logs/error.log"
+# Agent runs: silc 20000 run "vim tests/test_api.py"
+# Agent suggests fix, you review and apply
+```
+
+### 5. **Agent as Your Terminal Assistant**
+
+```bash
+# You're working, agent watches and helps
+# You: "Set up a development environment for this project"
+# Agent: silc 20000 run "python -m venv venv"
+# Agent: silc 20000 run "source venv/bin/activate"
+# Agent: silc 20000 run "pip install -r requirements.txt"
+# You can see everything and intervene if needed
+```
+
+---
+
+## Why SILC?
+
+---
+
+## Why SILC?
+
+### SILC vs. AI Agent Shells
+
+| Feature | SILC | Agent Isolated Shells |
+|---------|------|----------------------|
+| Your Environment | ✅ Full access | ❌ Fresh/clean env |
+| Your Aliases/Config | ✅ Available | ❌ Not available |
+| TUI App Support | ✅ vim, htop, git | ❌ Only simple commands |
+| Real-time Visibility | ✅ Watch everything | ❌ Black box |
+| Human Intervention | ✅ Take over anytime | ❌ Can't intervene |
+| Context Continuity | ✅ Same session | ❌ Each command isolated |
+| Debugging | ✅ See what happens | ❌ Hard to debug |
+
+### SILC vs. Traditional Tools
+
+| Feature | SILC | tmux/screen | SSH | Docker Exec |
+|---------|------|-------------|-----|-------------|
+| HTTP API | ✅ | ❌ | ❌ | ❌ |
+| AI Agent Friendly | ✅ | ❌ | ❌ | ⚠️ |
+| CLI-First Design | ✅ | ⚠️ | ⚠️ | ⚠️ |
+| Real-time Streaming | ✅ | ✅ | ✅ | ✅ |
+| Cross-platform | ✅ | ⚠️ | ✅ | ✅ |
+| Programmatic Access | ✅ | ❌ | ⚠️ | ⚠️ |
+| Session Persistence | ✅ | ✅ | ❌ | ❌ |
+| Web UI | ✅ | ❌ | ❌ | ❌ |
+
+### When to Use SILC
+
+**Perfect for AI + Human Collaboration:**
+- 🤖 **AI agents** that need to work in YOUR environment
+- 👤 **You** want to monitor and control what agents do
+- 🔄 **Collaborative debugging** - work together with AI
+- 📊 **Agent-assisted monitoring** - let agents watch processes for you
+- 🛠️ **Agent as terminal assistant** - have AI help with CLI tasks
+
+**Also Great For:**
+- Creating web-based terminal interfaces
+- Automating shell operations via HTTP
+- Sharing terminal sessions with teams
+- Building custom terminal-based tools
+
+### Key Differentiator: Control + Accessibility
+
+SILC gives you **both** control and accessibility:
+
+- **Control**: You see everything agents do, can interrupt anytime, and maintain full ownership of your shell
+- **Accessibility**: Agents can use your environment exactly as you would - including TUI apps, your config, and your tools
+- **Flexibility**: Works with any agent (Claude, GPT-4, Cursor, etc.) and any workflow
+
+Unlike isolated agent shells that limit what agents can do, SILC removes those limitations while keeping you in the driver's seat.
+
+---
+
+## Quick Start (5 minutes)
+
+### Prerequisites
+- Python 3.12 or later
 - Windows, Linux, or macOS
+
+### Step 1: Install (30 seconds)
+
+```bash
+pip install -e .
+```
+
+### Step 2: Start SILC (10 seconds)
+
+```bash
+silc start
+```
+
+**Output:**
+```
+✓ SILC daemon started on port 19999
+✓ Session created on port 20000
+```
+
+### Step 3: Use SILC via CLI (Recommended)
+
+The **CLI is the primary way to interact with SILC** - for both you and AI agents:
+
+```bash
+# Run commands in your session
+silc 20000 run "echo 'Hello from SILC!'"
+silc 20000 run "ls -la"
+silc 20000 run "git status"
+
+# View output anytime
+silc 20000 out
+
+# Check session status
+silc 20000 status
+
+# List all sessions
+silc list
+```
+
+### Step 4: Try with TUI Apps (10 seconds)
+
+SILC supports interactive terminal apps - something most agent shells can't do:
+
+```bash
+# Use vim through SILC
+silc 20000 run "vim test.txt"
+
+# Use htop for monitoring
+silc 20000 run "htop"
+
+# Interactive git operations
+silc 20000 run "git rebase -i HEAD~3"
+```
+
+### Step 5: Agent Integration (30 seconds)
+
+Now your AI agent can work in YOUR shell:
+
+```python
+import requests
+
+# Agent runs commands in YOUR environment
+response = requests.post("http://localhost:20000/run", json={
+    "command": "git status"
+})
+print(response.json()["output"])
+
+# Agent can use YOUR tools and config
+response = requests.post("http://localhost:20000/run", json={
+    "command": "npm test"  # Uses your npm, your config
+})
+```
+
+🎉 **Congratulations! You've just set up SILC for human + AI collaboration.**
+
+**Next:** Tell your AI agent: "I have a SILC session running on port 20000. You can run commands using `silc 20000 run \"<command>\"` and view output with `silc 20000 out`."
+
+---
+
+## Features
+
+### CLI-First Design
+- 💻 **Primary CLI interface** - Designed to be used via command line
+- 🎯 **Simple commands** - Intuitive syntax for humans and agents alike
+- 🔄 **Session management** - Easy create, list, and manage sessions
+- 📤 **Output viewing** - View session output anytime with `silc <port> out`
+- ⚡ **Quick execution** - Run commands with `silc <port> run "<cmd>"`
+
+### Agent + Human Collaboration
+- 🤖 **Full environment access** - Agents work in YOUR shell with your tools
+- 👀 **Real-time visibility** - See exactly what agents are doing
+- 🛑 **Human control** - Interrupt, take over, or monitor at any time
+- 🎨 **TUI app support** - Agents can use vim, htop, git, and any terminal app
+- 🔄 **Context continuity** - Same session for all commands
+
+### Core Capabilities
+- 🚀 **One-command setup** - Start daemon and create sessions instantly
+- 🔌 **HTTP API** - Full REST API for programmatic access
+- 📡 **WebSocket Streaming** - Real-time terminal output
+- 🌐 **Cross-platform** - Windows, Linux, macOS support
+- 🎨 **Native TUI** - Beautiful terminal interface (Rust-based)
+
+### Advanced Features
+- 🔐 **Token-based Auth** - Secure remote access
+- 📊 **Session Management** - Multiple concurrent sessions
+- 💾 **Output Buffering** - Configurable output history
+- 🔄 **Command History** - Track executed commands
+- 📝 **Logging** - Comprehensive session and daemon logs
+
+### Developer-Friendly
+- 🐍 **Python-first** - Easy to extend and integrate
+- 📦 **PyPI Package** - Simple installation
+- 🧪 **Well-tested** - Comprehensive test suite
+- 📚 **Extensive Docs** - Detailed API documentation
+- 🔧 **Configurable** - TOML-based configuration
+
+---
+
+## Use Cases
+
+### 1. 🤖 AI Agent Working in Your Environment
+
+**Problem:** AI agents spawn isolated shells with no access to your tools, config, or context.
+
+**Solution with SILC:**
+```python
+import requests
+
+# Agent works in YOUR actual shell
+response = requests.post("http://localhost:20000/run", json={
+    "command": "git status"  # Uses your git config
+})
+output = response.json()["output"]
+
+# Agent can use YOUR installed tools
+response = requests.post("http://localhost:20000/run", json={
+    "command": "npm test"  # Uses your npm, your node_modules
+})
+
+# Agent can use YOUR aliases and functions
+response = requests.post("http://localhost:20000/run", json={
+    "command": "my-custom-alias"  # Your .bashrc aliases work!
+})
+```
+
+**Result:** Agent has full access to your environment while you maintain control.
+
+---
+
+### 2. 👀 Monitor Long-Running Processes
+
+**Problem:** You need to run long tasks but want AI to monitor and alert you.
+
+**Solution with SILC:**
+```bash
+# Start a long-running task
+silc 20000 run "nohup python train_model.py &"
+
+# Tell agent: "Monitor this training and alert me if it fails"
+# Agent periodically checks:
+silc 20000 out
+
+# Agent alerts you: "Training failed at epoch 5 with error: out of memory"
+# You can then investigate:
+silc 20000 run "cat logs/training.log"
+```
+
+**Result:** AI watches your processes while you focus on other work.
+
+---
+
+### 3. 🛠️ Collaborative Debugging
+
+**Problem:** You're stuck on a bug and want AI to help investigate in your actual environment.
+
+**Solution with SILC:**
+```bash
+# You run tests
+silc 20000 run "pytest tests/test_api.py"
+
+# Tests fail, you ask agent to investigate
+# Agent runs: silc 20000 run "cat logs/error.log"
+# Agent runs: silc 20000 run "vim tests/test_api.py"
+# Agent suggests: "Line 42 has a typo - change 'fale' to 'false'"
+
+# You review and apply the fix
+silc 20000 run "vim tests/test_api.py"  # You make the change
+silc 20000 run "pytest tests/test_api.py"  # Tests pass!
+```
+
+**Result:** True collaboration - you and AI work together in the same session.
+
+---
+
+### 4. 🖥️ Agent Uses TUI Apps
+
+**Problem:** Most agent shells can't use interactive terminal apps like vim, htop, or git.
+
+**Solution with SILC:**
+```bash
+# Agent can use vim to edit files
+silc 20000 run "vim config.json"
+
+# Agent can use htop for system monitoring
+silc 20000 run "htop"
+
+# Agent can do interactive git operations
+silc 20000 run "git rebase -i HEAD~3"
+
+# Agent can use any CLI tool you have
+silc 20000 run "docker run -it ubuntu bash"
+silc 20000 run "python manage.py shell"
+silc 20000 run "ncdu"  # Disk usage analyzer
+```
+
+**Result:** Agents can use ANY terminal tool, just like you.
+
+---
+
+### 5. 🚀 Remote Server Management
+
+**Problem:** You need AI to work on a remote server but want to monitor and control it.
+
+**Solution with SILC:**
+```bash
+# SSH into your server
+ssh user@production-server
+
+# Start SILC
+silc start
+
+# Tell agent: "Deploy the new version and monitor the logs"
+# Agent executes:
+silc 20000 run "./deploy.sh"
+silc 20000 run "tail -f /var/log/app.log"
+
+# You watch everything in real-time via:
+silc 20000 out
+
+# If something goes wrong, you can take over immediately
+silc 20000 run "systemctl restart myapp"
+```
+
+**Result:** AI works on your servers while you maintain full visibility and control.
+
+---
+
+### 6. 📊 Agent as Terminal Assistant
+
+**Problem:** You want AI to help with CLI tasks but don't want to give up control.
+
+**Solution with SILC:**
+```bash
+# You're setting up a new project
+# You say: "Set up a Python development environment"
+
+# Agent handles it:
+silc 20000 run "python -m venv venv"
+silc 20000 run "source venv/bin/activate"
+silc 20000 run "pip install -r requirements.txt"
+silc 20000 run "pre-commit install"
+
+# You can see every step and intervene if needed
+silc 20000 out
+
+# You continue working normally
+vim main.py
+pytest tests/
+```
+
+**Result:** AI assists with setup and automation while you stay in control.
+
+---
+
+### 7. 🔄 Multi-Agent Collaboration
+
+**Problem:** Multiple AI agents need to work together in the same environment.
+
+**Solution with SILC:**
+```bash
+# Agent 1 sets up the environment
+silc 20000 run "npm install"
+
+# Agent 2 runs tests
+silc 20000 run "npm test"
+
+# Agent 3 deploys if tests pass
+silc 20000 run "npm run deploy"
+
+# All agents work in the SAME session with full context
+# You can monitor everything:
+silc 20000 out
+```
+
+**Result:** Multiple agents collaborate seamlessly in your environment.
+
+See [examples/](examples/) for more real-world examples and code samples.
+
+---
 
 ## Installation
 
-### Using pipx | uv (recommended)
+### Using pip (recommended)
+
+```bash
+pip install -e .
+```
+
+### Using pipx (isolated environment)
 
 ```bash
 pipx install git+https://github.com/lirrensi/silc.git
 ```
 
+### Using uv (fast)
+
 ```bash
 uv tool install git+https://github.com/lirrensi/silc.git
 ```
 
-### Using pip
-
-clone repo and
-```bash
-pip install -e .
-```
-
-### Using standalone installer (no pip required)
+### Standalone Installer (no pip required)
 
 **Windows:**
 ```cmd
@@ -41,333 +562,124 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The standalone installer will:
-- Build the TUI executable if not present in `dist/`
-- Copy it to `~/silc` (Windows: `%USERPROFILE%\silc`)
-- Add it to your PATH automatically
+---
 
-## Getting started
+## Common Commands
 
-### Quick Start (5 minutes)
+**The CLI is the primary and recommended way to interact with SILC** - for both humans and AI agents.
 
-1. **Install SILC:**
-   ```bash
-   pip install -e .
-   ```
+| Command | Description | Example |
+|---------|-------------|---------|
+| `silc start` | Start daemon and create session | `silc start` |
+| `silc create` | Create new session | `silc create --port 20001` |
+| `silc <port> run "<cmd>"` | Execute command in session | `silc 20000 run "ls -la"` |
+| `silc <port> out` | View session output | `silc 20000 out` |
+| `silc <port> status` | Check session status | `silc 20000 status` |
+| `silc <port> tui` | Launch TUI for session | `silc 20000 tui` |
+| `silc <port> interrupt` | Send Ctrl+C to session | `silc 20000 interrupt` |
+| `silc list` | List all sessions | `silc list` |
+| `silc shutdown` | Stop daemon | `silc shutdown` |
 
-2. **Start the daemon:**
-   ```bash
-   silc start
-   ```
+### Agent Usage Pattern
 
-3. **Create a session:**
-   ```bash
-   # Session will be created on an available port (20000-21000)
-   silc create
-   ```
+When working with AI agents, simply tell them:
 
-4. **Run commands:**
-   ```bash
-   # Replace 20000 with your actual session port
-   silc 20000 run "echo hello world"
-   silc 20000 run "ls -la"
-   silc 20000 run "pwd"
-   ```
+> "I have a SILC session running on port 20000. You can run commands using `silc 20000 run \"<command>\"` and view output with `silc 20000 out`."
 
-5. **View output:**
-   ```bash
-   silc 20000 out
-   ```
-
-6. **Check session status:**
-   ```bash
-   silc 20000 status
-   ```
-
-7. **List all sessions:**
-   ```bash
-   silc list
-   ```
-
-8. **Stop the daemon:**
-   ```bash
-   silc shutdown
-   ```
-
-### Common Commands
-
-- `silc start` - Start the SILC daemon
-- `silc create` - Create a new session (auto-assigns port)
-- `silc create --port 20000` - Create session on specific port
-- `silc <port> run "<command>"` - Run a command in the session
-- `silc <port> out` - View session output
-- `silc <port> status` - Check session status
-- `silc <port> clear` - Clear session buffer
-- `silc list` - List all active sessions
-- `silc shutdown` - Gracefully stop the daemon
-- `silc killall` - Force kill all sessions and daemon
-
-## Configuration
-
-SILC can be configured through a `silc.toml` file or environment variables.
-
-### Configuration File
-
-Create a configuration file at:
-- **Linux/macOS**: `~/.silc/silc.toml`
-- **Windows**: `%APPDATA%\silc\silc.toml`
-
-Copy the example configuration:
+The agent can then:
 ```bash
-# Linux/macOS
-cp docs/silc.toml.example ~/.silc/silc.toml
+# Run commands
+silc 20000 run "git status"
+silc 20000 run "npm test"
+silc 20000 run "vim config.json"
 
-# Windows
-copy docs\silc.toml.example %APPDATA%\silc\silc.toml
+# View output
+silc 20000 out
+
+# Check status
+silc 20000 status
 ```
 
-### Common Configuration Options
+See [docs/commands_and_api.md](docs/commands_and_api.md) for complete command reference.
 
-```toml
-[ports]
-session_start = 20000
-session_end = 21000
+---
 
-[sessions]
-default_timeout = 600  # 10 minutes
-max_buffer_bytes = 5242880  # 5MB
+## Documentation
 
-[logging]
-log_level = "INFO"
-```
+- [Getting Started Guide](docs/getting-started.md) - Detailed setup guide
+- [User Guide](docs/user-guide.md) - Comprehensive usage guide
+- [API Reference](docs/commands_and_api.md) - CLI and REST API docs
+- [Configuration](docs/configuration.md) - Setup and customization
+- [Architecture](docs/architecture.md) - System design and components
+- [Examples](examples/) - Real-world usage examples
 
-### Environment Variables
+---
 
-You can also configure SILC using environment variables:
+## Docker Mode
 
-```bash
-# Custom port range
-export SILC_SESSION_PORT_START=20000
-export SILC_SESSION_PORT_END=21000
-
-# Custom data directory
-export SILC_DATA_DIR=/custom/path/to/silc
-
-# Command timeout (seconds)
-export SILC_COMMAND_TIMEOUT=600
-
-# Log level
-export SILC_LOG_LEVEL=INFO
-```
-
-For complete configuration documentation, see [docs/configuration.md](docs/configuration.md).
-
-## Docker mode: API-first shell access
-
-Run SILC in Docker for a sandboxed shell with HTTP API access. This is useful when you want:
-
-- A clean, isolated shell environment
-- Easy HTTP API without managing host processes
-- Consistent environment across different machines
-- Ability to give agents a disposable workspace
+Run SILC in Docker for a sandboxed shell with HTTP API access:
 
 ```bash
-# Build and start the SILC daemon in Docker
 docker-compose up -d
 
 # Access sessions via HTTP
 curl http://localhost:19999/sessions
 curl http://localhost:20000/status
-curl http://localhost:20000/out
-
-# Or use the CLI from outside the container
-silc 20000 out
-silc 20000 run "ls -la"
 ```
 
-**Note**: In Docker mode, the shell runs inside the container. You won't have access to your host files or environment. This is intentional for isolation and sandboxing.
+Perfect for:
+- Clean, isolated shell environments
+- Consistent environments across machines
+- Giving agents a disposable workspace
 
-## Current implementation
+---
 
-- CLI scaffolding for all planned SILC commands.
-- Simplified session, buffer, and output-cleaning helpers.
-- FastAPI endpoints and a Textual TUI that can be wired into the server.
-- Cross-platform PTY wiring: `pywinpty` on Windows and the standard `pty` module on Unix.
+## FAQ
 
-## TUI Binary
+**Q: Why is CLI the primary interface?**
+A: The CLI is designed to be simple and intuitive for both humans and AI agents. It provides a consistent, easy-to-use interface that works seamlessly with agent workflows. The HTTP API and WebSocket are available for programmatic access, but the CLI is recommended for most use cases.
 
-SILC includes a native TUI component built with Rust. The installer will automatically download the appropriate binary for your platform.
+**Q: How is SILC different from agent shells?**
+A: Most AI agents spawn isolated shells with no access to your environment. SILC gives agents access to YOUR actual shell - your tools, config, aliases, and context. Plus, you can see everything they do and intervene at any time.
 
-### Building the TUI Binary Locally
+**Q: Can agents really use TUI apps like vim?**
+A: Yes! SILC supports full PTY emulation, so agents can use any terminal application - vim, htop, git interactive mode, docker containers, REPLs, and more. This is something most agent shells can't do.
 
-If you want to build the TUI binary yourself, navigate to the `tui_client` directory:
+**Q: Is SILC secure?**
+A: SILC provides real shell access. Never expose to public internet without TLS. See [Security Considerations](#security-considerations).
 
-```bash
-cd tui_client
+**Q: Can I use SILC in production?**
+A: Yes, but follow security best practices. Use SSH tunneling for remote access, not `--global` flag.
 
-# Build for your platform
-cargo build --release
+**Q: What's the difference between a session and the daemon?**
+A: The daemon manages sessions. Each session is an independent shell with its own PTY.
 
-# The binary will be in target/release/
-```
+**Q: How do I integrate with my LLM?**
+A: Simply tell your LLM: "I have a SILC session on port 20000. Use `silc 20000 run \"<command>\"` to execute commands and `silc 20000 out` to view output." See [examples/llm_integration.py](examples/llm_integration.py) for a complete example.
 
-### Building Release Artifacts
+**Q: Can multiple agents work in the same session?**
+A: Yes! Multiple agents can collaborate in the same SILC session, maintaining full context and continuity. This is perfect for multi-agent workflows.
 
-The repository includes a GitHub Actions workflow that automatically builds and releases TUI binaries for multiple platforms.
+**Q: What if an agent runs a bad command?**
+A: You can interrupt any command with `silc <port> interrupt` or take over the session at any time. You maintain full control and visibility.
 
-**To trigger a release:**
+See [docs/faq.md](docs/faq.md) for more FAQs.
 
-1. **Create a git tag:**
-   ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
-   ```
-
-2. **Or manually trigger via GitHub:**
-   - Go to Actions → "Build and Release TUI Binary"
-   - Click "Run workflow"
-   - Optionally mark as draft or pre-release
-
-**What gets built:**
-
-- **Linux**: `x86_64` and `aarch64` (ARM64)
-- **macOS**: `x86_64` (Intel) and `aarch64` (Apple Silicon)
-- **Windows**: `x86_64` (MSVC)
-
-Each build produces a compressed archive:
-- Linux: `.tar.gz`
-- macOS: `.tar.gz`
-- Windows: `.zip`
-
-### Binary Distribution
-
-The installer automatically:
-1. Checks for a cached binary in the user's cache directory
-2. If not found, fetches the latest release from GitHub
-3. Downloads the appropriate asset for your platform
-4. Extracts and installs the binary
-
-**Cache location:**
-- **Linux/macOS**: `~/.cache/silc/bin/`
-- **Windows**: `%LOCALAPPDATA%\Cache\silc\bin\`
-
-### Environment Variables
-
-You can customize the binary distribution behavior:
-
-```bash
-# Custom binary installation directory
-export SILC_TUI_BIN_DIR=/custom/path/to/bin
-
-# Custom release repository
-export SILC_TUI_RELEASE_REPO=lirrensi/silc
-
-# Custom release API endpoint
-export SILC_TUI_RELEASE_API=https://api.github.com/repos/lirrensi/silc/releases/latest
-```
-
-## Testing
-
-Run `pytest` (after installing the `test` extras) to exercise the shell lifecycle cycle tests that create a session, send input, clean the buffer, and stop it.
-
-## Troubleshooting
-
-### Port already in use
-
-If you see "Port already in use" errors:
-
-```bash
-# Check what's running on the port
-# Linux/macOS:
-lsof -i :19999  # daemon port
-lsof -i :20000  # session port
-
-# Windows:
-netstat -ano | findstr :19999
-netstat -ano | findstr :20000
-
-# Kill the process if needed (replace PID with actual process ID)
-# Linux/macOS:
-kill -9 <PID>
-
-# Windows:
-taskkill /PID <PID> /F
-```
-
-### Daemon not starting
-
-If the daemon fails to start:
-
-1. Check if a daemon is already running:
-   ```bash
-   silc list
-   ```
-
-2. If it's running but unresponsive, force kill it:
-   ```bash
-   silc killall
-   ```
-
-3. Check the daemon log:
-   ```bash
-   # Linux/macOS:
-   cat ~/.silc/logs/daemon.log
-
-   # Windows:
-   type %USERPROFILE%\.silc\logs\daemon.log
-   ```
-
-### Session not responding
-
-If a session hangs or doesn't respond:
-
-1. Check session status:
-   ```bash
-   silc <port> status
-   ```
-
-2. If it shows as busy, another command may be running. Wait or interrupt:
-   ```bash
-   silc <port> interrupt
-   ```
-
-3. If still unresponsive, close the session:
-   ```bash
-   silc close <port>
-   ```
-
-### Installation issues
-
-If you encounter import errors:
-
-1. Ensure you're using Python 3.12 or later:
-   ```bash
-   python --version
-   ```
-
-2. Reinstall with test dependencies:
-   ```bash
-   pip install -e .[test]
-   ```
-
-3. Verify all dependencies are installed:
-   ```bash
-   pip list | grep silc
-   ```
+---
 
 ## Security Considerations
 
 ⚠️ **Important Security Notes:**
 
 ### Real Shell Access
-SILC provides **real shell access** to your system. This means:
+SILC provides **real shell access** to your system:
 - Commands run with your user permissions
 - You can delete files, modify system settings, etc.
 - **Never run untrusted commands** in SILC sessions
 - Be cautious when sharing session access with agents or others
 
 ### Global Sessions (--global flag)
-When using the `--global` flag to bind sessions to `0.0.0.0`:
+When using the `--global` flag:
 - **Tokens are sent over plaintext HTTP** (not encrypted)
 - Anyone on your network can intercept tokens
 - **Only use on trusted home networks**
@@ -390,3 +702,23 @@ If you need remote access:
    ```
 2. Or set up a reverse proxy with TLS (nginx, traefik, etc.)
 3. Use VPN for secure network access
+
+---
+
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Support
+
+- 📖 [Documentation](docs/)
+- 💬 [GitHub Discussions](https://github.com/lirrensi/silc/discussions)
+- 🐛 [Issue Tracker](https://github.com/lirrensi/silc/issues)
+
+---
+
+**Made with ❤️ for humans and AI agents alike**

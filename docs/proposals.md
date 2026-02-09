@@ -44,7 +44,22 @@ Fixed. The _watch_shutdown method now properly cleans up all sessions when the s
 
 - **Configuration File** – Allow users to override defaults (port ranges, log paths) via a `silc.toml`.
 => add ability to change default daemon port
-=> [SKIP] for now
+=> [DONE] (2025-01-26)
+Implemented comprehensive configuration system:
+- Created silc/config.py with full configuration support
+- Configuration sources: silc.toml file, environment variables (SILC_*), defaults
+- Configurable options:
+  - Port ranges (daemon start/end, session start/end, max attempts)
+  - Paths (data directory, log directory)
+  - TLS settings (enabled, cert path, key path)
+  - Token settings (length, require token)
+  - Session settings (timeout, buffer size, idle timeout, GC interval)
+  - Logging settings (max log lines, log level)
+- Updated silc/utils/ports.py to use config for port ranges
+- Updated silc/utils/persistence.py to use config for paths and log settings
+- Created docs/silc.toml.example with example configuration
+- Created docs/configuration.md with comprehensive documentation
+- Added configuration section to README.md
 
 - **Security**
 => check how --global works now;
@@ -84,6 +99,16 @@ This now:
 The README explains this as a sandboxed/API-first use case, noting the tradeoff: no access to host files/environment (intentional isolation).
 
 
-[mostly ok]
+[DONE] (2025-01-26)
 - **Documentation** – Update `docs/` with usage examples, architecture diagram, and troubleshooting guide.
 => also readme with all commands + potentially update full list of commands for easy management;
+Completed:
+- Updated README.md with real repository URL (https://github.com/lirrensi/silc)
+- Added configuration section to README.md
+- Updated docs/commands_and_api.md with real TUI repository URL (lirrensi/silc)
+- Added comprehensive API examples with request/response samples
+- Added authentication examples
+- Added error code documentation
+- Created docs/configuration.md with complete configuration reference
+- Created docs/architecture.md with system architecture diagram
+- Created docs/silc.toml.example with example configuration file
