@@ -18,8 +18,8 @@ from pydantic import BaseModel
 
 from silc.api.server import create_app
 from silc.core.session import SilcSession
-from silc.daemon.registry import SessionRegistry
 from silc.daemon.pidfile import remove_pidfile, write_pidfile
+from silc.daemon.registry import SessionRegistry
 from silc.utils.persistence import (
     DAEMON_LOG,
     LOGS_DIR,
@@ -586,8 +586,9 @@ class SilcDaemon:
         setup_uvicorn_logging()
         write_daemon_log("Starting Silc daemon...")
 
-        from silc.daemon.pidfile import read_pidfile
         import psutil
+
+        from silc.daemon.pidfile import read_pidfile
 
         # Check for existing daemon process (skip in test mode)
         if self._enable_hard_exit:

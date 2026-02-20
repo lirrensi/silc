@@ -95,9 +95,9 @@ class StreamingService:
             status[filename] = {
                 "active": not task.done(),
                 "cancelled": task.cancelled(),
-                "exception": str(task.exception())
-                if task.done() and task.exception()
-                else None,
+                "exception": (
+                    str(task.exception()) if task.done() and task.exception() else None
+                ),
             }
         return status
 

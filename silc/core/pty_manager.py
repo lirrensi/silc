@@ -249,7 +249,6 @@ class WindowsPTY(PTYBase):
         except TypeError:
             self._process.write(data.decode("utf-8", errors="replace"))
 
-
     def _load_winpty_module(self) -> Any:
         """Load the winpty module required for Windows PTY support.
 

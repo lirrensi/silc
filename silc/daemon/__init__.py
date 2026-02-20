@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from silc.daemon.manager import SilcDaemon, DAEMON_PORT
+from silc.daemon.manager import DAEMON_PORT, SilcDaemon
 from silc.daemon.pidfile import (
     is_daemon_running,
     kill_daemon,

@@ -124,16 +124,16 @@ class RawByteBuffer:
 ```python
 class PTYBase(ABC):
     pid: int | None
-    
+
     @abstractmethod
     async def read(self, size: int = 1024) -> bytes: ...
-    
+
     @abstractmethod
     async def write(self, data: bytes) -> None: ...
-    
+
     @abstractmethod
     def resize(self, rows: int, cols: int) -> None: ...
-    
+
     @abstractmethod
     def kill(self) -> None: ...
 ```
@@ -274,7 +274,7 @@ __SILC_END_<token>:<exit_code>
 
 **Bash/Zsh/Sh:**
 ```bash
-__silc_exec() { 
+__silc_exec() {
     printf "__SILC_BEGIN_$2__\n"
     eval "$1"
     printf "__SILC_END_$2__:%d\n" $?
@@ -304,30 +304,30 @@ echo __SILC_END_%2__:%ERRORLEVEL%
 async def run_command(cmd: str, timeout: int = 600) -> dict:
     if self.run_lock.locked():
         return {"error": "busy", "running_cmd": self.current_run_cmd}
-    
+
     async with self.run_lock:
         token = str(uuid.uuid4())[:8]
         invocation = self.shell_info.build_helper_invocation(cmd, token)
         await self.pty.write(invocation + newline)
-        
+
         # Read until end sentinel or timeout
         while time < deadline:
             chunk, cursor = self.buffer.get_since(cursor)
             collected.extend(chunk)
-            
+
             # Check for buffer overflow
             if len(collected) > MAX_COLLECTED_BYTES:
                 await self.pty.write(b"\x03")  # Ctrl+C
                 return {"error": "buffer overflow"}
-            
+
             # Check for begin marker
             if begin_marker in collected:
                 started = True
-            
+
             # Check for end marker
             if end_marker in collected:
                 return {"output": output, "exit_code": exit_code}
-        
+
         return {"error": "timeout"}
 ```
 

@@ -62,11 +62,11 @@ Each session gets its own FastAPI app instance bound to its port.
 ```python
 def create_app(session: SilcSession) -> FastAPI:
     app = FastAPI(title=f"SILC Session {session.session_id}")
-    
+
     # Register endpoints
     # Setup authentication
     # Include streaming router
-    
+
     return app
 ```
 
@@ -81,19 +81,19 @@ def _require_token(request: Request) -> None:
     token = session.api_token
     if not token:
         return  # No token required
-    
+
     client_host = request.client[0] if request.client else None
     if _client_is_local(client_host):
         return  # Localhost bypass
-    
+
     auth_header = request.headers.get("authorization")
     if not auth_header:
         raise HTTPException(status_code=401, detail="Missing API token")
-    
+
     parts = auth_header.strip().split(" ", 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(status_code=401, detail="Invalid Authorization header")
-    
+
     if parts[1].strip() != token:
         raise HTTPException(status_code=403, detail="Invalid API token")
 ```
@@ -318,10 +318,10 @@ async def websocket_endpoint(websocket: WebSocket):
     if not _verify_websocket_token(websocket):
         await websocket.close(code=1008, reason="Invalid API token")
         return
-    
+
     await websocket.accept()
     session.tui_active = True
-    
+
     async def send_updates():
         cursor = session.buffer.cursor
         while True:
@@ -332,7 +332,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "data": new_bytes.decode("utf-8", errors="replace")
                 })
             await asyncio.sleep(0.1)
-    
+
     sender_task = asyncio.create_task(send_updates())
     try:
         while True:

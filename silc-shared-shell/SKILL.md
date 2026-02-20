@@ -29,4 +29,3 @@ description: Guide an agent to install SILC, create SharedShell sessions, run co
 2. Use `silc <port> in "<text>"` when the running shell already expects input (for example, responding to a prompt or typing keystrokes in an interactive editor); `in` simply writes bytes to STDIN and does not wrap them in a new command, so include newline characters yourself when needed.
 3. Always follow `run` or `in` with `silc <port> out` to grab the latest output, and check `silc <port> status` to know whether the shell is waiting for more input before sending another `in`.
 4. Prefer `run` for idempotent commands and `in` for continuing an interactive session; mixing them without observing `out` can desynchronize your view of the shell.
-

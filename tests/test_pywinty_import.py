@@ -17,12 +17,8 @@ def test_winpty_can_open_pty() -> None:
 
     process = spawn_winpty_process('cmd.exe /k "echo pywinpty ok"')
     try:
-        assert "pywinpty ok" in collect_output(
-            process, "pywinpty ok", timeout=10.0
-        )
+        assert "pywinpty ok" in collect_output(process, "pywinpty ok", timeout=10.0)
         process.write("echo followup ok\r\n")
-        assert "followup ok" in collect_output(
-            process, "followup ok", timeout=5.0
-        )
+        assert "followup ok" in collect_output(process, "followup ok", timeout=5.0)
     finally:
         terminate_process(process)

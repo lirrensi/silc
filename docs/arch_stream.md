@@ -93,21 +93,21 @@ class StreamingService:
         self.session = session
         self.active_streams: Dict[str, asyncio.Task] = {}
         self.deduplicator = LineDeduplicator()
-    
+
     async def start_stream(self, config: StreamConfig) -> str:
         if config.filename in self.active_streams:
             raise ValueError(f"Stream already active for file: {config.filename}")
-        
+
         self.deduplicator = LineDeduplicator(
             window_size=config.window_size,
             similarity_threshold=config.similarity_threshold,
         )
-        
+
         if config.mode == StreamMode.RENDER:
             task = asyncio.create_task(self._stream_render_task(config))
         else:
             task = asyncio.create_task(self._stream_append_task(config))
-        
+
         self.active_streams[config.filename] = task
         return config.filename
 ```
@@ -124,14 +124,14 @@ async def _stream_render_task(self, config: StreamConfig):
         try:
             # Get rendered output (same as TUI)
             output = self.session.get_rendered_output(lines=120)
-            
+
             # Atomic write (temp file + rename)
             temp_file = f"{config.filename}.tmp"
             async with aiofiles.open(temp_file, "w") as f:
                 await f.write(output)
-            
+
             os.replace(temp_file, config.filename)
-            
+
             await asyncio.sleep(config.interval)
         except asyncio.CancelledError:
             break
@@ -153,22 +153,22 @@ async def _stream_append_task(self, config: StreamConfig):
             # Get current buffer lines
             buffer_content = self.session.buffer.get_last(config.window_size)
             new_lines = buffer_content.splitlines()
-            
+
             # Read existing file tail
             existing_lines = await self._read_file_tail(
                 config.filename, config.window_size
             )
-            
+
             # Compute diff using deduplicator
             lines_to_append = self.deduplicator.compute_diff(
                 existing_lines, new_lines
             )
-            
+
             # Append if there are new lines
             if lines_to_append:
                 async with aiofiles.open(config.filename, "a") as f:
                     await f.write("\n".join(lines_to_append) + "\n")
-            
+
             await asyncio.sleep(config.interval)
         except asyncio.CancelledError:
             break
@@ -188,7 +188,7 @@ class LineDeduplicator:
     def __init__(self, window_size: int = 2000, similarity_threshold: float = 0.85):
         self.window_size = window_size
         self.similarity_threshold = similarity_threshold
-    
+
     def compute_diff(self, existing: list[str], new: list[str]) -> list[str]:
         # Compare new lines against existing
         # Return only lines that are new or significantly different

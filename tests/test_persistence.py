@@ -13,7 +13,9 @@ def _patch_log_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return logs_dir
 
 
-def test_daemon_log_rotation_trims_old_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_daemon_log_rotation_trims_old_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _patch_log_paths(tmp_path, monkeypatch)
 
     persistence.write_daemon_log("first")
@@ -26,7 +28,9 @@ def test_daemon_log_rotation_trims_old_lines(tmp_path: Path, monkeypatch: pytest
     assert "first" not in "\n".join(lines)
 
 
-def test_session_logs_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_session_logs_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _patch_log_paths(tmp_path, monkeypatch)
     port = 45000
 

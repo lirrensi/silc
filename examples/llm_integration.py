@@ -9,10 +9,11 @@ Requirements:
 - SILC daemon running: silc start
 """
 
+import json
+from typing import Any, Dict
+
 import openai
 import requests
-import json
-from typing import Dict, Any
 
 
 class SILCAgent:

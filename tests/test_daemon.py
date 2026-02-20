@@ -4,13 +4,13 @@ import asyncio
 import contextlib
 import subprocess
 import sys
-
-import pytest
 from typing import Generator
-import httpx
 
-from silc.daemon.manager import SilcDaemon, DAEMON_PORT
-from silc.daemon.pidfile import write_pidfile, read_pidfile, remove_pidfile
+import httpx
+import pytest
+
+from silc.daemon.manager import DAEMON_PORT, SilcDaemon
+from silc.daemon.pidfile import read_pidfile, remove_pidfile, write_pidfile
 
 
 def _shutdown_daemon() -> None:
@@ -337,8 +337,9 @@ def test_registry_add_remove() -> None:
 
 def test_registry_timeout_cleanup() -> None:
     """Test that registry cleans up timed-out sessions."""
-    from silc.daemon.registry import SessionRegistry
     from datetime import datetime, timedelta
+
+    from silc.daemon.registry import SessionRegistry
 
     registry = SessionRegistry()
 

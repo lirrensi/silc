@@ -9,9 +9,10 @@ Requirements:
 - SILC daemon running: silc start
 """
 
-import requests
 import time
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
+import requests
 
 
 class SILCClient:

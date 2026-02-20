@@ -24,7 +24,11 @@ from silc.utils.shell_detect import ShellInfo
         ),
         (
             "pwsh",
-            ["function __silc_exec($cmd, $token) {", "__SILC_BEGIN_${token}__", "__SILC_END_${token}__"],
+            [
+                "function __silc_exec($cmd, $token) {",
+                "__SILC_BEGIN_${token}__",
+                "__SILC_END_${token}__",
+            ],
         ),
         (
             "cmd",
@@ -69,7 +73,9 @@ def test_get_helper_function_contains_markers(
         ("cmd", "whoami", "token", '__silc_exec "whoami" token'),
     ],
 )
-def test_build_helper_invocation(shell_type: str, command: str, token: str, expected_fragment: str):
+def test_build_helper_invocation(
+    shell_type: str, command: str, token: str, expected_fragment: str
+):
     info = ShellInfo(shell_type, "/bin/shell", re.compile(r".*$"))
     invocation = info.build_helper_invocation(command, token)
     assert expected_fragment in invocation

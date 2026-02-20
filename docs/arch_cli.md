@@ -97,7 +97,7 @@ silc
 ```python
 class SilcCLI(click.Group):
     port_subcommands = click.Group()
-    
+
     def get_command(self, ctx, cmd_name):
         if cmd_name.isdigit():
             return PortGroup(int(cmd_name), commands=self.port_subcommands.commands)
@@ -111,7 +111,7 @@ class PortGroup(click.Group):
     def __init__(self, port: int, **kwargs):
         self.port = port
         super().__init__(**kwargs)
-    
+
     def invoke(self, ctx):
         ctx.params["port"] = self.port
         return super().invoke(ctx)
@@ -230,7 +230,7 @@ def _find_native_tui_binary() -> Path | None:
         candidate = _native_tui_binary_path(dist_dir)
         if candidate.exists():
             return candidate
-    
+
     # 2. Download from GitHub releases
     try:
         return ensure_native_tui_binary(progress=click.echo)
@@ -261,7 +261,7 @@ def _native_tui_binary_path(dist_dir: Path) -> Path:
 def _start_detached_daemon():
     python_exec = _get_daemon_python_executable()
     cmd = [python_exec, "-m", "silc", "daemon"]
-    
+
     if sys.platform == "win32":
         creationflags = (
             subprocess.CREATE_NEW_PROCESS_GROUP

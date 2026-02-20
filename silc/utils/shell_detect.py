@@ -25,8 +25,8 @@ class ShellInfo:
             return (
                 "function __silc_exec($cmd, $token) { "
                 '$prompt = "PS $($PWD.Path)> "; '  # Build prompt string
-                'Write-Host -NoNewline $prompt; '  # Print prompt
-                'Write-Host $cmd; '  # Print command
+                "Write-Host -NoNewline $prompt; "  # Print prompt
+                "Write-Host $cmd; "  # Print command
                 'Write-Host "__SILC_BEGIN_${token}__"; '
                 "Invoke-Expression $cmd; "
                 "$exitCode = $LASTEXITCODE; "
@@ -39,7 +39,7 @@ class ShellInfo:
             return (
                 "__silc_exec() { "
                 'printf "__SILC_BEGIN_$2__\\n"; '
-                "eval \"$1\"; "
+                'eval "$1"; '
                 'printf "__SILC_END_$2__:%d\\n" $?; '
                 "}"
             )
@@ -52,7 +52,7 @@ class ShellInfo:
         return (
             "__silc_exec() { "
             'printf "__SILC_BEGIN_$2__\\n"; '
-            "eval \"$1\"; "
+            'eval "$1"; '
             'printf "__SILC_END_$2__:%d\\n" $?; '
             "}"
         )

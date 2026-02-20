@@ -25,10 +25,7 @@ def clean_output(raw_lines: Iterable[str]) -> str:
 
         # Remove ANSI/OSC/control sequences while preserving tabs.
         line = ANSI_CONTROL_SEQUENCE.sub("", line)
-        line = "".join(
-            char if char == "\t" or char >= " " else ""
-            for char in line
-        )
+        line = "".join(char if char == "\t" or char >= " " else "" for char in line)
         line = line.rstrip()
         line = line.replace("\r\n", "\n").replace("\r", "\n")
 

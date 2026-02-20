@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import pathlib
+
 # Adjust sys.path to include a sibling virtual environment (venv or venv-win) when running from a .pyz.
 import sys
-import pathlib
 import sysconfig
 
 script_path = pathlib.Path(sys.argv[0]).resolve()
@@ -39,17 +40,18 @@ import uvicorn
 
 from silc.api.server import create_app
 from silc.core.session import SilcSession
-from silc.tui.app import launch_tui
-from silc.tui.installer import InstallerError, ensure_native_tui_binary
-from silc.utils.ports import find_available_port
-from .utils.shell_detect import detect_shell
-from silc.daemon import is_daemon_running, kill_daemon, DAEMON_PORT
+from silc.daemon import DAEMON_PORT, is_daemon_running, kill_daemon
 from silc.stream.cli_commands import (
     stream_file_append,
     stream_file_render,
     stream_status,
     stream_stop,
 )
+from silc.tui.app import launch_tui
+from silc.tui.installer import InstallerError, ensure_native_tui_binary
+from silc.utils.ports import find_available_port
+
+from .utils.shell_detect import detect_shell
 
 
 def _daemon_url(path: str) -> str:

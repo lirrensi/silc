@@ -7,7 +7,6 @@ import contextlib
 import json
 
 import requests
-
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
@@ -126,8 +125,15 @@ class SilcTUI(App):
                             await task
             except asyncio.CancelledError:
                 break
-            except (ConnectionRefusedError, ConnectionClosedError, ConnectionClosedOK, OSError):
-                await self._append_output("\r\n--- WebSocket disconnected, retrying ---\r\n")
+            except (
+                ConnectionRefusedError,
+                ConnectionClosedError,
+                ConnectionClosedOK,
+                OSError,
+            ):
+                await self._append_output(
+                    "\r\n--- WebSocket disconnected, retrying ---\r\n"
+                )
                 await asyncio.sleep(WS_RECONNECT_DELAY)
             except Exception:
                 await self._append_output("\r\n--- WebSocket error, retrying ---\r\n")

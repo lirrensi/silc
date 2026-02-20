@@ -11,7 +11,10 @@ import subprocess
 import sys
 import time
 
-def _run(port: int, cmd: tuple[str, ...], timeout: float = 15.0) -> tuple[str, str, int]:
+
+def _run(
+    port: int, cmd: tuple[str, ...], timeout: float = 15.0
+) -> tuple[str, str, int]:
     """
     Execute a silc command.
 

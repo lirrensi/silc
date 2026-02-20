@@ -1,4 +1,9 @@
-import pathlib, zipapp, importlib.metadata, shutil, tempfile, sys
+import importlib.metadata
+import pathlib
+import shutil
+import sys
+import tempfile
+import zipapp
 
 
 def main() -> None:

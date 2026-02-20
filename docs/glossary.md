@@ -112,7 +112,7 @@ Data structure containing shell configuration:
 A shell function injected into the session for command execution:
 
 ```bash
-__silc_exec() { 
+__silc_exec() {
     printf "__SILC_BEGIN_$2__\n"
     eval "$1"
     printf "__SILC_END_$2__:%d\n" $?

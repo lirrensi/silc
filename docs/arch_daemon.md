@@ -323,12 +323,12 @@ In-memory registry tracking active sessions.
 async def _garbage_collect():
     while self._running and not self._shutdown_event.is_set():
         await asyncio.sleep(60)
-        
+
         # Cleanup timed out sessions
         cleaned_ports = self.registry.cleanup_timeout(timeout_seconds=1800)
         for port in cleaned_ports:
             await self._ensure_cleanup_task(port)
-        
+
         # Rotate daemon log
         rotate_daemon_log(max_lines=1000)
 ```
@@ -338,11 +338,11 @@ async def _garbage_collect():
 ```python
 async def _watch_shutdown():
     await self._shutdown_event.wait()
-    
+
     # Cleanup all sessions with 30s budget
     for port in list(self.sessions.keys()):
         await self._ensure_cleanup_task(port)
-    
+
     self._daemon_server.should_exit = True
 ```
 
@@ -364,7 +364,7 @@ def _setup_signals():
     def handle_signal(signum, frame):
         self._shutdown_event.set()
         self._daemon_server.should_exit = True
-    
+
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 ```
@@ -378,24 +378,24 @@ async def start():
     # 1. Check for existing daemon
     if read_pidfile():
         raise RuntimeError("Daemon already running")
-    
+
     # 2. Write PID file
     write_pidfile(os.getpid())
-    
+
     # 3. Setup signal handlers
     _setup_signals()
-    
+
     # 4. Create daemon API server
     config = uvicorn.Config(daemon_api_app, host="127.0.0.1", port=19999)
     self._daemon_server = uvicorn.Server(config)
-    
+
     # 5. Start background tasks
     gc_task = asyncio.create_task(self._garbage_collect())
     shutdown_watcher = asyncio.create_task(self._watch_shutdown())
-    
+
     # 6. Run daemon server
     await self._daemon_server.serve()
-    
+
     # 7. Cleanup on exit
     gc_task.cancel()
     shutdown_watcher.cancel()

@@ -22,11 +22,10 @@ else:
         Terminal = None
 
 from ..core.cleaner import clean_output
+from ..core.pty_manager import PTYBase, create_pty
 from ..core.raw_buffer import RawByteBuffer
-from ..core.pty_manager import create_pty, PTYBase
-from ..utils.shell_detect import ShellInfo
 from ..utils.persistence import rotate_session_log, write_session_log
-
+from ..utils.shell_detect import ShellInfo
 
 OSC_BYTE_PATTERN = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 SILC_SENTINEL_PATTERN = re.compile(r"__SILC_(?:BEGIN|END)_\w+__")
@@ -255,18 +254,20 @@ class SilcSession:
         return "\n".join(filtered)
 
     def rotate_logs(self) -> None:
-            """Rotate session logs to keep size manageable."""
-            rotate_session_log(self.port, max_lines=1000)
+        """Rotate session logs to keep size manageable."""
+        rotate_session_log(self.port, max_lines=1000)
 
-    async def run_command(self, cmd: str, timeout: int = DEFAULT_COMMAND_TIMEOUT) -> dict:
-            # Capture the command being run for lock error reporting
+    async def run_command(
+        self, cmd: str, timeout: int = DEFAULT_COMMAND_TIMEOUT
+    ) -> dict:
+        # Capture the command being run for lock error reporting
 
         if self.run_lock.locked():
-                return {
-                    "error": "Another run command is already executing",
-                    "status": "busy",
-                    "running_cmd": self.current_run_cmd,
-                }
+            return {
+                "error": "Another run command is already executing",
+                "status": "busy",
+                "running_cmd": self.current_run_cmd,
+            }
 
         async with self.run_lock:
             self.current_run_cmd = cmd

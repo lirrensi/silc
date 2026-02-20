@@ -10,10 +10,10 @@ and prints the raw output, so it can be used as a standalone executable
 instead of a pytest test case.
 """
 
-import subprocess
-import time
 import socket
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 

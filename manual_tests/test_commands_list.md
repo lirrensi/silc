@@ -6,7 +6,7 @@ cmd> python main.py start --port 20000
 cmd> python main.py list
 cmd> python main.py 20000 open         # launches Textual TUI
 cmd> python main.py 20000 tui         # launches NEW REAL Textual TUI
-cmd> python main.py 20000 web  
+cmd> python main.py 20000 web
 cmd> python main.py 20000 out          # fetch cleaned output
 cmd> python main.py 20000 out 50      # fetch last 50 lines
 cmd> python main.py 20000 in "echo hi"

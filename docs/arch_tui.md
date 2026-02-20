@@ -54,30 +54,30 @@ https://github.com/lirrensi/silc/releases/latest
 def ensure_native_tui_binary(progress: Callable[[str], None]) -> Path:
     # 1. Check cache directory
     cache_dir = platformdirs.user_cache_dir("silc") / "bin"
-    
+
     # 2. Check for existing binary
     binary_path = cache_dir / f"silc-tui-{platform}"
     if binary_path.exists():
         return binary_path
-    
+
     # 3. Fetch release info from GitHub API
     api_url = os.environ.get(
         "SILC_TUI_RELEASE_API",
         "https://api.github.com/repos/lirrensi/silc/releases/latest"
     )
     release = requests.get(api_url).json()
-    
+
     # 4. Find matching asset
     asset = find_asset_for_platform(release["assets"])
-    
+
     # 5. Download binary
     progress(f"Downloading TUI binary from {asset['browser_download_url']}")
     download_file(asset["browser_download_url"], binary_path)
-    
+
     # 6. Make executable (Unix)
     if sys.platform != "win32":
         os.chmod(binary_path, 0o755)
-    
+
     return binary_path
 ```
 
@@ -109,11 +109,11 @@ def _launch_native_tui_client(port: int):
 ```python
 class SilcTUI(App):
     CSS_PATH = "app.css"
-    
+
     def __init__(self, port: int):
         self.port = port
         self.ws_url = f"ws://127.0.0.1:{port}/ws"
-    
+
     async def on_mount(self):
         # Connect to WebSocket
         # Start output stream

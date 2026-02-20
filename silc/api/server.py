@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from ipaddress import AddressValueError, ip_address
+from pathlib import Path
 
 from fastapi import (
     Depends,
@@ -14,15 +16,13 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import StreamingResponse, HTMLResponse
-from pathlib import Path
-from ipaddress import AddressValueError, ip_address
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from ..core.cleaner import clean_output
 from ..core.session import SilcSession
-from ..utils.persistence import read_session_log
 from ..stream import api_endpoints
 from ..stream.streaming_service import StreamingService
+from ..utils.persistence import read_session_log
 
 
 def create_app(session: SilcSession) -> FastAPI:
