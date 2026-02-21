@@ -14,6 +14,8 @@ from textual.widgets import Footer, Header, Static
 from websockets import connect
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
+from silc.core.constants import DEFAULT_SCREEN_COLUMNS, DEFAULT_SCREEN_ROWS
+
 try:
     from par_term_emu_core_rust import Terminal
 except ImportError:  # pragma: no cover
@@ -39,8 +41,6 @@ KEY_SEQUENCES: dict[str, str] = {
 }
 
 MAX_OUTPUT_CHARS = 32_000
-TERMINAL_COLS = 120
-TERMINAL_ROWS = 30
 WS_RECONNECT_DELAY = 1.0
 
 
@@ -96,7 +96,7 @@ class SilcTUI(App):
 
     async def on_mount(self) -> None:
         self._send_queue = asyncio.Queue()
-        await self._send_resize(TERMINAL_ROWS, TERMINAL_COLS)
+        await self._send_resize(DEFAULT_SCREEN_ROWS, DEFAULT_SCREEN_COLUMNS)
         await self._load_initial_output()
         output_widget = self.query_one("#output", TerminalOutput)
         self.set_focus(output_widget)
@@ -195,13 +195,13 @@ class SilcTUI(App):
     def _render_with_par_term(self) -> Text:
         """Run the raw stream through par-term so the widget shows the real screen."""
         assert Terminal is not None
-        term = Terminal(TERMINAL_COLS, TERMINAL_ROWS)
+        term = Terminal(DEFAULT_SCREEN_COLUMNS, DEFAULT_SCREEN_ROWS)
         term.process_str(self._raw_output)
         lines = term.content().split("\n")
-        if len(lines) > TERMINAL_ROWS:
-            lines = lines[-TERMINAL_ROWS:]
-        elif len(lines) < TERMINAL_ROWS:
-            lines.extend([""] * (TERMINAL_ROWS - len(lines)))
+        if len(lines) > DEFAULT_SCREEN_ROWS:
+            lines = lines[-DEFAULT_SCREEN_ROWS:]
+        elif len(lines) < DEFAULT_SCREEN_ROWS:
+            lines.extend([""] * (DEFAULT_SCREEN_ROWS - len(lines)))
         return Text("\n".join(lines))
 
     def _map_key_event(self, event: events.Key) -> str | None:

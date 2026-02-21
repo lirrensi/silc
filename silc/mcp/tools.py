@@ -95,6 +95,22 @@ def get_status(port: int) -> dict[str, Any]:
         return {"alive": False, "error": str(e)}
 
 
+def resize(port: int, rows: int = 30, cols: int = 120) -> dict[str, Any]:
+    """Resize a SILC session terminal."""
+    try:
+        resp = requests.post(
+            f"http://127.0.0.1:{port}/resize",
+            params={"rows": rows, "cols": cols},
+            timeout=5,
+        )
+        if resp.status_code == 410:
+            return {"error": "Session has ended", "status": "not_found"}
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as e:
+        return {"error": str(e)}
+
+
 def read(port: int, lines: int = 100) -> dict[str, Any]:
     """Read output from a SILC session."""
     try:
@@ -221,6 +237,7 @@ __all__ = [
     "start_session",
     "close_session",
     "get_status",
+    "resize",
     "read",
     "send",
     "send_key",

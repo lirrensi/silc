@@ -641,8 +641,8 @@ def interrupt(ctx: click.Context) -> None:
 
 @cli.port_subcommands.command()
 @click.pass_context
-@click.option("--rows", type=int, default=24, help="Number of rows")
-@click.option("--cols", type=int, default=80, help="Number of columns")
+@click.option("--rows", type=int, default=30, help="Number of rows")
+@click.option("--cols", type=int, default=120, help="Number of columns")
 def resize(ctx: click.Context, rows: int, cols: int) -> None:
     """Resize the session terminal."""
     port = ctx.parent.params["port"] if ctx.parent else 0

@@ -10,6 +10,8 @@ import sys
 from abc import ABC, abstractmethod
 from typing import Any, Mapping, Optional
 
+from silc.core.constants import DEFAULT_SCREEN_COLUMNS, DEFAULT_SCREEN_ROWS
+
 
 class PTYBase(ABC):
     """Abstract PTY interface used by SILC session logic."""
@@ -149,7 +151,9 @@ class WindowsPTY(PTYBase):
                 command, env=self.env, cwd=self.cwd
             )
         elif hasattr(winpty_module, "PTY"):
-            self._pty_handle = winpty_module.PTY(cols=120, rows=30)
+            self._pty_handle = winpty_module.PTY(
+                cols=DEFAULT_SCREEN_COLUMNS, rows=DEFAULT_SCREEN_ROWS
+            )
             self._process = self._pty_handle.spawn(command, env=self.env, cwd=self.cwd)
         else:
             raise RuntimeError("winpty/pywinpty does not expose a usable PTY backend.")

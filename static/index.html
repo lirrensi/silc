@@ -26,6 +26,12 @@
                 overflow: auto;
                 border-radius: 12px;
                 box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+                resize: both;
+                min-width: 400px;
+                min-height: 200px;
+            }
+            #terminal .xterm-viewport::-webkit-scrollbar {
+                display: none;
             }
         </style>
     </head>
@@ -159,6 +165,30 @@
 
                 term.open(document.getElementById("terminal"));
                 term.focus();
+
+                // Resize handling
+                const terminalEl = document.getElementById("terminal");
+                let resizeTimeout = null;
+                const handleResize = () => {
+                    if (resizeTimeout) clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(() => {
+                        const dims = term._core._renderService.dimensions;
+                        if (!dims) return;
+                        const charWidth = dims.css.cell.width;
+                        const charHeight = dims.css.cell.height;
+                        const rect = terminalEl.getBoundingClientRect();
+                        const newCols = Math.floor(rect.width / charWidth);
+                        const newRows = Math.floor(rect.height / charHeight);
+                        if (newCols > 0 && newRows > 0 && (newCols !== term.cols || newRows !== term.rows)) {
+                            term.resize(newCols, newRows);
+                            const opts = { method: "POST" };
+                            if (authHeaders) opts.headers = authHeaders;
+                            fetch(`${httpBaseUrl}/resize?rows=${newRows}&cols=${newCols}`, opts).catch(() => {});
+                        }
+                    }, 100);
+                };
+                const resizeObserver = new ResizeObserver(handleResize);
+                resizeObserver.observe(terminalEl);
 
                 const socket = new WebSocket(wsUrl);
 

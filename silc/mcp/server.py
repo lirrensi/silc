@@ -113,6 +113,27 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="resize",
+            description="Resize a SILC session terminal dimensions",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "port": {"type": "integer", "description": "Session port"},
+                    "rows": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Number of rows",
+                    },
+                    "cols": {
+                        "type": "integer",
+                        "default": 120,
+                        "description": "Number of columns",
+                    },
+                },
+                "required": ["port"],
+            },
+        ),
+        Tool(
             name="run",
             description="Execute a command with exit code capture (native shell only)",
             inputSchema={
@@ -165,6 +186,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         result = tools.close_session(port=arguments["port"])
     elif name == "get_status":
         result = tools.get_status(port=arguments["port"])
+    elif name == "resize":
+        result = tools.resize(
+            port=arguments["port"],
+            rows=arguments.get("rows", 30),
+            cols=arguments.get("cols", 120),
+        )
     elif name == "run":
         result = tools.run(
             port=arguments["port"],

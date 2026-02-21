@@ -238,6 +238,33 @@ Get session status.
 
 ---
 
+### `resize(port, rows=30, cols=120)`
+
+Resize terminal dimensions.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `port` | int | Yes | — | Session port |
+| `rows` | int | No | 30 | Number of rows |
+| `cols` | int | No | 120 | Number of columns |
+
+**Response:**
+```json
+{
+  "status": "resized",
+  "rows": 30,
+  "cols": 120
+}
+```
+
+**Implementation:**
+- Calls session API: `POST http://127.0.0.1:<port>/resize?rows=N&cols=M`
+- Updates both PTY dimensions and internal renderer
+
+---
+
 ### `run(port, command, timeout_ms=60000)`
 
 Execute command with exit code capture (native shell only).

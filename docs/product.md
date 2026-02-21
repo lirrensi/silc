@@ -208,8 +208,8 @@ All session commands use the syntax `silc <port> <command>`.
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
-| `rows` | int | 24 | Number of rows |
-| `cols` | int | 80 | Number of columns |
+| `rows` | int | 30 | Number of rows |
+| `cols` | int | 120 | Number of columns |
 
 ---
 

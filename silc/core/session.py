@@ -22,6 +22,7 @@ else:
         Terminal = None
 
 from ..core.cleaner import clean_output
+from ..core.constants import DEFAULT_SCREEN_COLUMNS, DEFAULT_SCREEN_ROWS
 from ..core.pty_manager import PTYBase, create_pty
 from ..core.raw_buffer import RawByteBuffer
 from ..utils.persistence import rotate_session_log, write_session_log
@@ -44,8 +45,6 @@ DEFAULT_COMMAND_TIMEOUT = 600  # 10 minutes in seconds
 # Buffer and PTY configuration
 DEFAULT_BUFFER_SIZE = 65536  # 64KB buffer for PTY output
 DEFAULT_READ_SIZE = 4096  # Default read chunk size from PTY
-DEFAULT_SCREEN_COLUMNS = 120
-DEFAULT_SCREEN_ROWS = 30
 
 # Timing constants (in seconds)
 HELPER_INJECTION_DELAY = 0.5  # Delay after injecting helper function
@@ -477,4 +476,4 @@ class SilcSession:
         self._gc_task = None
 
 
-__all__ = ["SilcSession"]
+__all__ = ["SilcSession", "DEFAULT_SCREEN_COLUMNS", "DEFAULT_SCREEN_ROWS"]
