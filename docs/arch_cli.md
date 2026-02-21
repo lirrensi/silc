@@ -61,7 +61,7 @@ The CLI provides user-friendly commands to interact with SILC:
 
 ```
 silc
-├── start [--port] [--global] [--no-detach] [--token]
+├── start [name] [--port] [--global] [--no-detach] [--token]
 ├── manager
 ├── list
 ├── shutdown
@@ -69,7 +69,7 @@ silc
 ├── restart-server
 ├── logs [--tail]
 ├── daemon (hidden)
-└── <port>
+└── <port-or-name>
     ├── run <command...> [--timeout]
     ├── out [<lines>]
     ├── in <text...>
@@ -101,22 +101,53 @@ class SilcCLI(click.Group):
     port_subcommands = click.Group()
 
     def get_command(self, ctx, cmd_name):
+        # Distinguish port (all digits) from name (contains letters)
         if cmd_name.isdigit():
-            return PortGroup(int(cmd_name), commands=self.port_subcommands.commands)
+            return SessionGroup(port=int(cmd_name), commands=self.port_subcommands.commands)
+        elif _is_valid_name(cmd_name):
+            return SessionGroup(name=cmd_name, commands=self.port_subcommands.commands)
         return super().get_command(ctx, cmd_name)
 ```
 
-### `PortGroup`
+### `SessionGroup`
+
+Handles both port and name identification:
 
 ```python
-class PortGroup(click.Group):
-    def __init__(self, port: int, **kwargs):
+class SessionGroup(click.Group):
+    def __init__(self, port: int | None = None, name: str | None = None, **kwargs):
         self.port = port
+        self.name = name
         super().__init__(**kwargs)
 
     def invoke(self, ctx):
+        # Resolve name to port if needed
+        if self.name and not self.port:
+            self.port = _resolve_name(self.name)
         ctx.params["port"] = self.port
         return super().invoke(ctx)
+```
+
+### Name Detection
+
+```python
+def _is_valid_name(s: str) -> bool:
+    """Check if string is a valid session name (not a port)."""
+    if s.isdigit():
+        return False  # It's a port number
+    # Must match [a-z][a-z0-9-]*[a-z0-9]
+    return bool(re.match(r'^[a-z][a-z0-9-]*[a-z0-9]$', s.lower()))
+```
+
+### Name Resolution
+
+```python
+def _resolve_name(name: str) -> int:
+    """Resolve session name to port via daemon API."""
+    resp = requests.get(f"http://127.0.0.1:19999/resolve/{name}", timeout=2)
+    if resp.status_code == 404:
+        raise click.ClickException(f"Session '{name}' not found")
+    return resp.json()["port"]
 ```
 
 ---
@@ -127,17 +158,26 @@ class PortGroup(click.Group):
 
 ```python
 @cli.command()
+@click.argument("name", required=False, default=None)
 @click.option("--port", type=int, default=None)
 @click.option("--global", "is_global", is_flag=True)
 @click.option("--no-detach", is_flag=True)
 @click.option("--token", type=str, default=None)
-def start(port, is_global, no_detach, token):
-    # 1. Show security warning if --global
-    # 2. Check if daemon is running
-    # 3. Start daemon if needed (detached or foreground)
-    # 4. Create session via daemon API
-    # 5. Print session info
+@click.option("--shell", type=str, default=None)
+@click.option("--cwd", type=str, default=None)
+def start(name, port, is_global, no_detach, token, shell, cwd):
+    # 1. Validate name format if provided
+    # 2. Show security warning if --global
+    # 3. Check if daemon is running
+    # 4. Start daemon if needed (detached or foreground)
+    # 5. Create session via daemon API with name
+    # 6. Print session info (port, name, session_id)
 ```
+
+**Name handling:**
+- If `name` is provided, validate format and send to daemon
+- If `name` is not provided, daemon auto-generates one
+- Name collision results in error from daemon
 
 ### `silc manager`
 
@@ -193,16 +233,16 @@ Restarts the daemon HTTP server without killing PTY sessions. Useful for recover
 
 ## Session Commands
 
-All session commands use the pattern `silc <port> <command>`.
+All session commands use the pattern `silc <port-or-name> <command>`. Sessions can be identified by port number (e.g., `20000`) or by name (e.g., `my-project`).
 
-### `silc <port> run`
+### `silc <port-or-name> run`
 
 ```python
 @cli.port_subcommands.command()
 @click.argument("command", nargs=-1)
 @click.option("--timeout", default=60)
 def run(ctx, command, timeout):
-    port = ctx.parent.params["port"]
+    port = ctx.parent.params["port"]  # Resolved from name if needed
     resp = requests.post(
         f"http://127.0.0.1:{port}/run",
         json={"command": " ".join(command), "timeout": timeout},
@@ -211,7 +251,7 @@ def run(ctx, command, timeout):
     print(resp.json().get("output", ""))
 ```
 
-### `silc <port> out`
+### `silc <port-or-name> out`
 
 ```python
 @cli.port_subcommands.command()
@@ -222,7 +262,7 @@ def out(ctx, lines):
     print(resp.json().get("output", ""))
 ```
 
-### `silc <port> tui`
+### `silc <port-or-name> tui`
 
 ```python
 @cli.port_subcommands.command()
@@ -347,7 +387,9 @@ def _wait_for_daemon_start(timeout: float = 10.0) -> bool:
 
 | Invariant | Description |
 |-----------|-------------|
-| Port as subcommand | `<port>` is parsed as a command group |
+| Port or name as subcommand | `<port-or-name>` is parsed as a command group |
+| Port = all digits | If argument is all digits, treat as port |
+| Name = contains letters | If argument matches name pattern, resolve via daemon |
 | HTTP communication | CLI communicates with daemon/sessions via HTTP |
 | Detached daemon | Daemon runs in background by default |
 | TUI binary fallback | Downloads binary if not found locally |
@@ -359,7 +401,9 @@ def _wait_for_daemon_start(timeout: float = 10.0) -> bool:
 | Decision | Why | Confidence |
 |----------|-----|------------|
 | Click framework | Mature, well-documented | High |
-| Port as subcommand | Natural `silc 20000 run` syntax | High |
+| Port or name as subcommand | Natural `silc 20000 run` or `silc my-project run` syntax | High |
+| Digits = port, letters = name | Unambiguous distinction | High |
+| Resolve name via daemon API | Centralized name registry | High |
 | HTTP client | Simple, reliable communication | High |
 | Detached daemon | Background operation, no terminal required | High |
 | Native TUI binary | Better performance than Python TUI | High |
@@ -382,7 +426,10 @@ def _wait_for_daemon_start(timeout: float = 10.0) -> bool:
 | Error | Behavior |
 |-------|----------|
 | Daemon not running | Start daemon automatically |
-| Session not found | Print error message |
+| Session not found (port) | Print error message |
+| Session not found (name) | Print "Session 'name' not found" |
+| Name collision | Print error from daemon |
+| Invalid name format | Print error message with format rules |
 | Port in use | Print error with existing session info |
 | TUI binary not found | Print warning, suggest manual build |
 | Request timeout | Print error message |

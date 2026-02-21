@@ -204,6 +204,27 @@ def _get_error_detail(response: requests.Response | None) -> str:
     return msg or "unknown error"
 
 
+def _resolve_name(name: str) -> int:
+    """Resolve session name to port via daemon API."""
+    try:
+        resp = requests.get(_daemon_url(f"/resolve/{name}"), timeout=2)
+        if resp.status_code == 404:
+            raise click.ClickException(f"Session '{name}' not found")
+        resp.raise_for_status()
+        return resp.json()["port"]
+    except requests.RequestException as e:
+        raise click.ClickException(f"Failed to resolve session '{name}': {e}")
+
+
+def _is_valid_name(s: str) -> bool:
+    """Check if string looks like a session name (not a port number)."""
+    if s.isdigit():
+        return False  # It's a port number
+    from silc.utils.names import is_valid_name as validate
+
+    return validate(s)
+
+
 SESSION_REGISTRY: dict[int, SilcSession] = {}
 
 
@@ -213,12 +234,16 @@ def _build_server(session: SilcSession, host: str) -> uvicorn.Server:
     return uvicorn.Server(config)
 
 
-class PortGroup(click.Group):
-    def __init__(self, port: int, **kwargs):
+class SessionGroup(click.Group):
+    def __init__(self, port: int | None = None, name: str | None = None, **kwargs):
         self.port = port
+        self.name = name
         super().__init__(**kwargs)
 
     def invoke(self, ctx):
+        # Resolve name to port if needed
+        if self.name and not self.port:
+            self.port = _resolve_name(self.name)
         ctx.params["port"] = self.port
         return super().invoke(ctx)
 
@@ -228,7 +253,11 @@ class SilcCLI(click.Group):
 
     def get_command(self, ctx, cmd_name):
         if cmd_name.isdigit():
-            return PortGroup(int(cmd_name), commands=self.port_subcommands.commands)
+            return SessionGroup(
+                port=int(cmd_name), commands=self.port_subcommands.commands
+            )
+        elif _is_valid_name(cmd_name):
+            return SessionGroup(name=cmd_name, commands=self.port_subcommands.commands)
         return super().get_command(ctx, cmd_name)
 
     def list_commands(self, ctx):
@@ -245,6 +274,7 @@ def cli(ctx: click.Context) -> None:
 
 
 @cli.command()
+@click.argument("name", required=False, default=None)
 @click.option("--port", type=int, default=None, help="Port for session")
 @click.option(
     "--global", "is_global", is_flag=True, help="Bind to 0.0.0.0 (for legacy mode)."
@@ -271,6 +301,7 @@ def cli(ctx: click.Context) -> None:
     help="Working directory for session.",
 )
 def start(
+    name: Optional[str],
     port: Optional[int],
     is_global: bool,
     no_detach: bool,
@@ -279,6 +310,18 @@ def start(
     cwd: Optional[str],
 ) -> None:
     """Start a new SILC session (creates daemon if needed)."""
+    # Validate name format if provided
+    if name:
+        name = name.lower().strip()
+        from silc.utils.names import is_valid_name
+
+        if not is_valid_name(name):
+            click.echo(
+                "Invalid name format. Must match [a-z][a-z0-9-]*[a-z0-9]",
+                err=True,
+            )
+            return
+
     normalized_token = token.strip() if token else None
     session_token: str | None = normalized_token
     generated_token = False
@@ -396,6 +439,8 @@ def start(
     click.echo("Creating new session...", err=False)
     try:
         payload: dict[str, object] = {}
+        if name is not None:
+            payload["name"] = name
         if port is not None:
             payload["port"] = port
         if is_global:
@@ -409,10 +454,12 @@ def start(
         resp = requests.post(_daemon_url("/sessions"), json=payload, timeout=5)
         resp.raise_for_status()
         session = resp.json()
+        session_name = session.get("name", "N/A")
         click.echo(f"✨ SILC session started at port {session['port']}")
+        click.echo(f"   Name: {session_name}")
         click.echo(f"   Session ID: {session['session_id']}")
         click.echo(f"   Shell: {session['shell']}")
-        click.echo(f"   Use: silc {session['port']} out")
+        click.echo(f"   Use: silc {session_name} out")
     except requests.HTTPError as e:
         response = e.response
         detail = _get_error_detail(response)
@@ -707,8 +754,9 @@ def list_sessions() -> None:
         click.echo("Active sessions:")
         for s in sessions:
             status_icon = "✓" if s["alive"] else "✗"
+            name = s.get("name", "N/A")
             click.echo(
-                f"  {s['port']:5} | {s['session_id']:8} | {s['shell']:6} | "
+                f"  {s['port']:5} | {name:16} | {s['session_id']:8} | {s['shell']:6} | "
                 f"idle: {s['idle_seconds']:4}s {status_icon}"
             )
     except requests.RequestException:

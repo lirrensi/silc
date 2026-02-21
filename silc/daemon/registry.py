@@ -12,6 +12,7 @@ class SessionEntry:
     """Registry entry for a session."""
 
     port: int
+    name: str
     session_id: str
     shell_type: str
     created_at: datetime
@@ -23,32 +24,58 @@ class SessionEntry:
 
 
 class SessionRegistry:
-    """In-memory registry of active sessions."""
+    """In-memory registry of active sessions with dual index by port and name."""
 
     def __init__(self):
         self._sessions: Dict[int, SessionEntry] = {}
+        self._name_index: Dict[str, int] = {}  # name -> port
 
-    def add(self, port: int, session_id: str, shell_type: str) -> SessionEntry:
-        """Add a new session entry."""
+    def add(
+        self, port: int, name: str, session_id: str, shell_type: str
+    ) -> SessionEntry:
+        """Add a new session entry.
+
+        Raises:
+            ValueError: If name is already in use.
+        """
+        if name in self._name_index:
+            raise ValueError(f"Session name '{name}' is already in use")
+
         entry = SessionEntry(
             port=port,
+            name=name,
             session_id=session_id,
             shell_type=shell_type,
             created_at=datetime.utcnow(),
         )
         self._sessions[port] = entry
+        self._name_index[name] = port
         return entry
 
     def remove(self, port: int) -> SessionEntry | None:
         """Remove a session entry."""
-        return self._sessions.pop(port, None)
+        entry = self._sessions.pop(port, None)
+        if entry:
+            self._name_index.pop(entry.name, None)
+        return entry
 
     def get(self, port: int) -> SessionEntry | None:
-        """Get a session entry."""
+        """Get a session entry by port."""
         entry = self._sessions.get(port)
         if entry:
             entry.update_access()
         return entry
+
+    def get_by_name(self, name: str) -> SessionEntry | None:
+        """Get a session entry by name."""
+        port = self._name_index.get(name)
+        if port is None:
+            return None
+        return self.get(port)
+
+    def name_exists(self, name: str) -> bool:
+        """Check if a name is already in use."""
+        return name in self._name_index
 
     def list_all(self) -> list[SessionEntry]:
         """List all sessions sorted by port."""
@@ -63,7 +90,7 @@ class SessionRegistry:
             if idle_seconds > timeout_seconds:
                 to_remove.append(port)
         for port in to_remove:
-            self._sessions.pop(port)
+            self.remove(port)
         return to_remove
 
 

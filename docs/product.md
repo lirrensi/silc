@@ -36,6 +36,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 ### Advanced Features
 
 - **Token-based Auth** — Secure remote access
+- **Named Sessions** — Docker-style names for easy session identification (e.g., `horny-cat`)
 - **Session Management** — Multiple concurrent sessions
 - **Output Buffering** — Configurable output history
 - **Command History** — Track executed commands
@@ -100,11 +101,22 @@ Unlike tmux, screen, or SSH, SILC provides:
 
 ```bash
 silc start                    # Start daemon and create session
-silc 20000 run "ls -la"       # Execute command
+silc 20000 run "ls -la"       # Execute command (by port)
 silc 20000 out                # View output
 ```
 
-### Flow 2: AI Agent Integration
+### Flow 2: Named Sessions
+
+```bash
+silc start my-project         # Create session with name "my-project"
+silc my-project run "ls -la"  # Execute command (by name)
+silc my-project out           # View output
+
+silc start                    # Auto name: "happy-fox-42"
+silc happy-fox-42 status      # Use auto-generated name
+```
+
+### Flow 3: AI Agent Integration
 
 ```python
 import requests
@@ -117,7 +129,7 @@ response = requests.post("http://localhost:20000/run", json={
 output = response.json()["output"]
 ```
 
-### Flow 3: Interactive Development
+### Flow 4: Interactive Development
 
 ```bash
 silc start                    # Start session
@@ -125,7 +137,7 @@ silc 20000 tui                # Launch native TUI
 # ... interactive work ...
 ```
 
-### Flow 4: Remote Access
+### Flow 5: Remote Access
 
 ```bash
 # On server
@@ -154,39 +166,40 @@ silc 20000 run "htop"         # Use TUI apps remotely
 
 ### Session Commands
 
-All session commands use the syntax `silc <port> <command>`.
+All session commands use the syntax `silc <port-or-name> <command>`. You can identify a session by its **port number** (e.g., `20000`) or by its **name** (e.g., `my-project`).
 
 | Command | Description |
 |---------|-------------|
-| `silc <port> run <command...>` | Execute a shell command |
-| `silc <port> out [<lines>]` | Fetch latest terminal output |
-| `silc <port> in <text...>` | Send raw input to the shell |
-| `silc <port> status` | Show session status |
-| `silc <port> interrupt` | Send Ctrl+C to the session |
-| `silc <port> clear` | Clear the terminal screen |
-| `silc <port> reset` | Reset terminal state |
-| `silc <port> resize <rows> <cols>` | Resize terminal dimensions |
-| `silc <port> close` | Gracefully close the session |
-| `silc <port> kill` | Force kill the session |
-| `silc <port> logs [--tail N]` | Show session logs |
-| `silc <port> tui` | Launch native TUI client |
-| `silc <port> web` | Open web UI in browser |
+| `silc <port-or-name> run <command...>` | Execute a shell command |
+| `silc <port-or-name> out [<lines>]` | Fetch latest terminal output |
+| `silc <port-or-name> in <text...>` | Send raw input to the shell |
+| `silc <port-or-name> status` | Show session status |
+| `silc <port-or-name> interrupt` | Send Ctrl+C to the session |
+| `silc <port-or-name> clear` | Clear the terminal screen |
+| `silc <port-or-name> reset` | Reset terminal state |
+| `silc <port-or-name> resize <rows> <cols>` | Resize terminal dimensions |
+| `silc <port-or-name> close` | Gracefully close the session |
+| `silc <port-or-name> kill` | Force kill the session |
+| `silc <port-or-name> logs [--tail N]` | Show session logs |
+| `silc <port-or-name> tui` | Launch native TUI client |
+| `silc <port-or-name> web` | Open web UI in browser |
 
 ### Stream-to-File Commands
 
 | Command | Description |
 |---------|-------------|
-| `silc <port> stream-render <filename> [--interval N]` | Stream rendered output to file |
-| `silc <port> stream-append <filename> [--interval N]` | Append output to file with deduplication |
-| `silc <port> stream-stop <filename>` | Stop streaming to file |
-| `silc <port> stream-status` | Show streaming status |
+| `silc <port-or-name> stream-render <filename> [--interval N]` | Stream rendered output to file |
+| `silc <port-or-name> stream-append <filename> [--interval N]` | Append output to file with deduplication |
+| `silc <port-or-name> stream-stop <filename>` | Stop streaming to file |
+| `silc <port-or-name> stream-status` | Show streaming status |
 
 ### Command Options
 
 #### `silc start`
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| Argument/Option | Type | Default | Description |
+|-----------------|------|---------|-------------|
+| `<name>` (positional) | string | auto | Session name (Docker-style, e.g., `my-project`) |
 | `--port` | int | auto | Specific port for session |
 | `--global` | flag | false | Bind to 0.0.0.0 (network accessible) |
 | `--no-detach` | flag | false | Run daemon in foreground |
@@ -194,19 +207,25 @@ All session commands use the syntax `silc <port> <command>`.
 | `--shell` | string | auto | Shell to use (bash, zsh, pwsh, cmd) |
 | `--cwd` | string | daemon cwd | Working directory for session |
 
-#### `silc <port> run`
+**Name format:** `[a-z][a-z0-9-]*[a-z0-9]` (lowercase letters, numbers, hyphens; must start with letter, cannot end with hyphen).
+
+**Auto-generated names:** If no name is provided, one is auto-generated in the format `adjective-noun-number` (e.g., `happy-fox-42`).
+
+**Name collision:** If a name is already in use, session creation fails with an error.
+
+#### `silc <port-or-name> run`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `--timeout` | int | 60 | Command timeout in seconds |
 
-#### `silc <port> out`
+#### `silc <port-or-name> out`
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
 | `lines` | int | 100 | Number of lines to fetch |
 
-#### `silc <port> resize`
+#### `silc <port-or-name> resize`
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -247,6 +266,7 @@ The API is exposed by the FastAPI server. All endpoints (except `/web`) require 
 ```json
 {
   "session_id": "abc12345",
+  "name": "happy-fox-42",
   "port": 20000,
   "alive": true,
   "idle_seconds": 5,
@@ -394,6 +414,7 @@ The daemon exposes a management API on port 19999 for session lifecycle operatio
 |--------|----------|-------------|
 | `POST` | `/sessions` | Create a new session |
 | `GET` | `/sessions` | List all active sessions |
+| `GET` | `/resolve/{name}` | Resolve session name to session info |
 | `DELETE` | `/sessions/{port}` | Close a specific session |
 | `POST` | `/shutdown` | Graceful shutdown |
 | `POST` | `/killall` | Force kill all |
@@ -404,6 +425,7 @@ The daemon exposes a management API on port 19999 for session lifecycle operatio
 ```json
 {
   "port": null,
+  "name": null,
   "is_global": false,
   "token": null,
   "shell": "bash",
@@ -414,6 +436,7 @@ The daemon exposes a management API on port 19999 for session lifecycle operatio
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `port` | int | auto | Desired port for session |
+| `name` | string | auto | Session name (auto-generated if null) |
 | `is_global` | bool | false | Bind to 0.0.0.0 (network accessible) |
 | `token` | string | auto | Custom API token for remote access |
 | `shell` | string | auto | Shell type (bash, zsh, pwsh, cmd, sh) |
@@ -423,10 +446,30 @@ The daemon exposes a management API on port 19999 for session lifecycle operatio
 ```json
 {
   "port": 20000,
+  "name": "happy-fox-42",
   "session_id": "abc12345",
   "shell": "bash"
 }
 ```
+
+### `GET /resolve/{name}`
+
+Resolve a session name to full session info.
+
+**Response:**
+```json
+{
+  "port": 20000,
+  "name": "happy-fox-42",
+  "session_id": "abc12345",
+  "shell": "bash",
+  "idle_seconds": 5,
+  "alive": true
+}
+```
+
+**Errors:**
+- `404` — Session name not found
 
 ---
 
@@ -652,6 +695,12 @@ Configuration is loaded from (highest to lowest priority):
 
 ## Edge Cases
 
+### Name Collision
+
+- If a requested name is already in use, session creation fails with error
+- Auto-generated names retry with different suffix if collision occurs (rare)
+- Use `silc list` to see existing session names
+
 ### Port Conflicts
 
 - If requested port is in use, session creation fails with error
@@ -716,11 +765,12 @@ SILC deliberately does NOT:
 
 | Command | Description |
 |---------|-------------|
-| `silc start` | Start daemon and create session |
-| `silc <port> run "<cmd>"` | Execute command |
-| `silc <port> out` | View output |
-| `silc <port> status` | Check session status |
-| `silc <port> tui` | Launch TUI |
+| `silc start` | Start daemon and create session (auto name) |
+| `silc start my-project` | Start session with name "my-project" |
+| `silc <port-or-name> run "<cmd>"` | Execute command |
+| `silc <port-or-name> out` | View output |
+| `silc <port-or-name> status` | Check session status |
+| `silc <port-or-name> tui` | Launch TUI |
 | `silc list` | List all sessions |
 | `silc shutdown` | Stop daemon |
 | `silc killall` | Force kill everything |

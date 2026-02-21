@@ -74,6 +74,7 @@ class ShellInfo:
 ```python
 class SilcSession:
     port: int                    # Session port
+    name: str                    # Session name (unique, e.g., "happy-fox-42")
     session_id: str              # 8-char UUID
     shell_info: ShellInfo        # Shell configuration
     api_token: str | None        # API token (optional)
@@ -204,7 +205,7 @@ def create_pty(shell_cmd: str | None, env: Mapping[str, str], cwd: str | None = 
 ### Initialization
 
 ```python
-session = SilcSession(port, shell_info, api_token, cwd=cwd)
+session = SilcSession(port, name, shell_info, api_token, cwd=cwd)
 session.pty = create_pty(shell_info.path, os.environ.copy(), cwd=cwd)
 session.buffer = RawByteBuffer(maxlen=65536)
 ```

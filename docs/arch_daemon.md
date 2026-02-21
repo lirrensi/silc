@@ -67,6 +67,7 @@ The daemon is the central process that manages multiple shell sessions. It:
 ```python
 class SessionCreateRequest(BaseModel):
     port: int | None = None      # Requested port (optional)
+    name: str | None = None      # Session name (optional, auto-generated if null)
     is_global: bool = False      # Bind to 0.0.0.0
     token: str | None = None     # Custom API token
     shell: str | None = None     # Shell type (bash, zsh, pwsh, cmd, sh)
@@ -79,6 +80,7 @@ class SessionCreateRequest(BaseModel):
 @dataclass
 class SessionEntry:
     port: int
+    name: str                    # Unique session name (e.g., "happy-fox-42")
     session_id: str
     shell_type: str
     created_at: datetime
@@ -145,6 +147,7 @@ The daemon exposes a management API on port 19999.
 | `GET` | `/` | Serve session manager web UI |
 | `POST` | `/sessions` | Create a new session |
 | `GET` | `/sessions` | List all active sessions |
+| `GET` | `/resolve/{name}` | Resolve session name to session info |
 | `DELETE` | `/sessions/{port}` | Close a specific session |
 | `POST` | `/shutdown` | Graceful shutdown |
 | `POST` | `/killall` | Force kill all |
@@ -162,6 +165,7 @@ Serves the session manager SPA that allows users to view, create, and manage ses
 ```json
 {
   "port": 20000,        // optional
+  "name": "my-project", // optional (auto-generated if null)
   "is_global": false,   // optional
   "token": "abc123",    // optional
   "shell": "bash",      // optional (auto-detect if null)
@@ -173,10 +177,16 @@ Serves the session manager SPA that allows users to view, create, and manage ses
 ```json
 {
   "port": 20000,
+  "name": "my-project",
   "session_id": "abc12345",
   "shell": "bash"
 }
 ```
+
+**Errors:**
+- `400` — Name already in use
+- `400` — Invalid name format
+- `400` — Port in use
 
 ### `GET /sessions`
 
@@ -185,6 +195,7 @@ Serves the session manager SPA that allows users to view, create, and manage ses
 [
   {
     "port": 20000,
+    "name": "happy-fox-42",
     "session_id": "abc12345",
     "shell": "bash",
     "idle_seconds": 5,
@@ -192,6 +203,25 @@ Serves the session manager SPA that allows users to view, create, and manage ses
   }
 ]
 ```
+
+### `GET /resolve/{name}`
+
+Resolve a session name to full session info.
+
+**Response:**
+```json
+{
+  "port": 20000,
+  "name": "happy-fox-42",
+  "session_id": "abc12345",
+  "shell": "bash",
+  "idle_seconds": 5,
+  "alive": true
+}
+```
+
+**Errors:**
+- `404` — Session name not found
 
 ### `POST /restart-server`
 
@@ -213,29 +243,34 @@ Restarts the HTTP server layer while keeping all PTY sessions alive. The daemon 
 ### Creation Flow
 
 ```
-1. CLI: silc start --port 20000
+1. CLI: silc start my-project --port 20000
    ↓
 2. CLI POST /sessions to daemon (port 19999)
    ↓
-3. Daemon._reserve_session_socket(20000)
+3. Daemon validates/assigns name
+   - If name provided: validate format [a-z][a-z0-9-]*[a-z0-9]
+   - Check for name collision → 400 error if exists
+   - If no name: generate auto-name (adjective-noun-number)
+   ↓
+4. Daemon._reserve_session_socket(20000)
    - Bind socket to 127.0.0.1:20000 (or 0.0.0.0 if --global)
    ↓
-4. Daemon creates SilcSession
+5. Daemon creates SilcSession
    - detect_shell() → ShellInfo
-   - SilcSession(port, shell_info, token)
+   - SilcSession(port, name, shell_info, token)
    - await session.start()
    ↓
-5. Daemon creates per-session server
+6. Daemon creates per-session server
    - create_app(session) → FastAPI app
    - uvicorn.Server(app, port=20000)
    ↓
-6. Daemon starts server in background
+7. Daemon starts server in background
    - asyncio.create_task(server.serve(sockets=[socket]))
    ↓
-7. Daemon adds to registry
-   - registry.add(port, session_id, shell_type)
+8. Daemon adds to registry
+   - registry.add(port, name, session_id, shell_type)
    ↓
-8. Return session info to CLI
+9. Return session info to CLI
 ```
 
 ### Cleanup Flow
@@ -326,17 +361,43 @@ def kill_daemon(*, timeout: float = 2.0, force: bool = True, port: int | None) -
 
 ### `SessionRegistry`
 
-In-memory registry tracking active sessions.
+In-memory registry tracking active sessions with dual indexing by port and name.
+
+```python
+class SessionRegistry:
+    _sessions: Dict[int, SessionEntry]   # port → entry
+    _name_index: Dict[str, int]           # name → port
+```
 
 **Operations:**
 
 | Method | Description |
 |--------|-------------|
-| `add(port, session_id, shell_type)` | Add new session |
-| `remove(port)` | Remove session |
+| `add(port, name, session_id, shell_type)` | Add new session (both indexes) |
+| `remove(port)` | Remove session (both indexes) |
 | `get(port)` | Get session by port |
+| `get_by_name(name)` | Get session by name |
+| `name_exists(name)` | Check if name is in use |
 | `list_all()` | List all sessions (sorted by port) |
 | `cleanup_timeout(timeout_seconds)` | Remove idle sessions |
+
+### Name Generation
+
+Auto-generated names follow the pattern: `adjective-noun-number`
+
+```python
+ADJECTIVES = ["happy", "sleepy", "clever", "brave", "calm", "eager", ...]  # ~100 words
+NOUNS = ["fox", "bear", "otter", "panda", "tiger", "eagle", ...]  # ~100 words
+
+def generate_name() -> str:
+    return f"{random.choice(ADJECTIVES)}-{random.choice(NOUNS)}-{random.randint(0, 99)}"
+```
+
+**Name format validation:** `[a-z][a-z0-9-]*[a-z0-9]`
+- Must start with a letter
+- Can contain lowercase letters, numbers, and hyphens
+- Cannot end with a hyphen
+- Case-insensitive (stored as lowercase)
 
 ---
 
@@ -439,6 +500,8 @@ async def start():
 | Socket pre-binding | Session sockets MUST be bound before server start |
 | Graceful shutdown | SIGTERM/SIGINT MUST trigger graceful cleanup |
 | Hard exit fallback | Hard exit watchdog MUST ensure process termination |
+| Unique names | Session names MUST be unique within a daemon instance |
+| Name format | Names MUST match `[a-z][a-z0-9-]*[a-z0-9]` pattern |
 
 ---
 
@@ -451,6 +514,9 @@ async def start():
 | PID file | Detect existing daemon, prevent duplicates | High |
 | Hard exit watchdog | Handle stuck uvicorn/asyncio on Windows | High |
 | 30s shutdown budget | Balance graceful vs. forced termination | Medium |
+| Named sessions | Human-friendly identifiers, Docker-style UX | High |
+| Dual index (port + name) | Fast lookup by either identifier | High |
+| Auto-generated names | Zero-config experience | High |
 
 ---
 
@@ -471,10 +537,13 @@ async def start():
 | Error | Behavior |
 |-------|----------|
 | Port in use | Return 400 error to client |
+| Name already in use | Return 400 error to client |
+| Invalid name format | Return 400 error to client |
 | Session creation failure | Close socket, propagate exception |
 | Server task failure | Schedule cleanup task |
 | Cleanup timeout | Log warning, continue |
 | PID file stale | Clean up, allow new daemon |
+| Name not found (resolve) | Return 404 error to client |
 
 ---
 

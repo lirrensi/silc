@@ -316,15 +316,25 @@ def test_registry_add_remove() -> None:
     registry = SessionRegistry()
 
     # Add session
-    entry = registry.add(21000, "test123", "bash")
+    entry = registry.add(21000, "test-session", "test123", "bash")
     assert entry.port == 21000
+    assert entry.name == "test-session"
     assert entry.session_id == "test123"
     assert entry.shell_type == "bash"
 
-    # Get session
+    # Get session by port
     retrieved = registry.get(21000)
     assert retrieved is not None
     assert retrieved.port == 21000
+
+    # Get session by name
+    retrieved_by_name = registry.get_by_name("test-session")
+    assert retrieved_by_name is not None
+    assert retrieved_by_name.port == 21000
+
+    # Check name exists
+    assert registry.name_exists("test-session")
+    assert not registry.name_exists("nonexistent")
 
     # List sessions
     sessions = registry.list_all()
@@ -333,6 +343,7 @@ def test_registry_add_remove() -> None:
     # Remove session
     registry.remove(21000)
     assert registry.get(21000) is None
+    assert not registry.name_exists("test-session")
 
 
 def test_registry_timeout_cleanup() -> None:
@@ -345,7 +356,7 @@ def test_registry_timeout_cleanup() -> None:
 
     # Add session with old timestamp
     old_time = datetime.utcnow() - timedelta(seconds=2000)
-    entry = registry.add(21000, "test123", "bash")
+    entry = registry.add(21000, "test-session", "test123", "bash")
     entry.last_access = old_time
 
     # Clean up

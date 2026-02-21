@@ -64,11 +64,13 @@ class SilcSession:
     def __init__(
         self,
         port: int,
+        name: str,
         shell_info: ShellInfo,
         api_token: str | None = None,
         cwd: str | None = None,
     ):
         self.port = port
+        self.name = name
         self.shell_info = shell_info
         self.session_id = str(uuid.uuid4())[:8]
         self.api_token = api_token
@@ -408,6 +410,7 @@ class SilcSession:
         return {
             "session_id": self.session_id,
             "port": self.port,
+            "name": self.name,
             "alive": self._read_task is not None and not self._read_task.done(),
             "idle_seconds": (datetime.utcnow() - self.last_output).seconds,
             "waiting_for_input": waiting,

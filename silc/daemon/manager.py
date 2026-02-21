@@ -8,6 +8,7 @@ import os
 import signal
 import socket
 import sys
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Dict
@@ -22,6 +23,7 @@ from silc.api.server import create_app
 from silc.core.session import SilcSession
 from silc.daemon.pidfile import remove_pidfile, write_pidfile
 from silc.daemon.registry import SessionRegistry
+from silc.utils.names import generate_name, is_valid_name
 from silc.utils.persistence import (
     DAEMON_LOG,
     LOGS_DIR,
@@ -58,6 +60,7 @@ DAEMON_PORT = 19999
 
 class SessionCreateRequest(BaseModel):
     port: int | None = None
+    name: str | None = None
     is_global: bool = False
     token: str | None = None
     shell: str | None = None
@@ -131,12 +134,14 @@ class SilcDaemon:
             token: str | None = None
             shell: str | None = None
             cwd: str | None = None
+            session_name: str | None = None
             if selected_port is None and request:
                 selected_port = request.port
                 is_global = request.is_global
                 token = request.token
                 shell = request.shell
                 cwd = request.cwd
+                session_name = request.name
             if selected_port is None:
                 selected_port = find_available_port(20000, 21000)
 
@@ -144,6 +149,31 @@ class SilcDaemon:
                 raise HTTPException(
                     status_code=400, detail=f"Port {selected_port} already in use"
                 )
+
+            # Handle name validation and generation
+            if session_name:
+                session_name = session_name.lower().strip()
+                if not is_valid_name(session_name):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid name format. Must match [a-z][a-z0-9-]*[a-z0-9]",
+                    )
+                if self.registry.name_exists(session_name):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Session name '{session_name}' is already in use",
+                    )
+            else:
+                # Auto-generate name
+                for _ in range(10):  # Try 10 times to avoid collision
+                    session_name = generate_name()
+                    if not self.registry.name_exists(session_name):
+                        break
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to generate unique session name",
+                    )
 
             session_socket = self._reserve_session_socket(selected_port, is_global)
             try:
@@ -160,13 +190,13 @@ class SilcDaemon:
                 else:
                     shell_info = detect_shell()
                 session = SilcSession(
-                    selected_port, shell_info, api_token=token, cwd=cwd
+                    selected_port, session_name, shell_info, api_token=token, cwd=cwd
                 )
                 await session.start()
 
                 self.sessions[selected_port] = session
                 entry = self.registry.add(
-                    selected_port, session.session_id, shell_info.type
+                    selected_port, session_name, session.session_id, shell_info.type
                 )
 
                 server = self._create_session_server(session, is_global=is_global)
@@ -199,11 +229,12 @@ class SilcDaemon:
                 raise
 
             write_daemon_log(
-                f"Session created: port={selected_port}, id={session.session_id}"
+                f"Session created: port={selected_port}, name={session_name}, id={session.session_id}"
             )
 
             return {
                 "port": selected_port,
+                "name": session_name,
                 "session_id": session.session_id,
                 "shell": shell_info.type,
             }
@@ -228,6 +259,7 @@ class SilcDaemon:
                     sessions.append(
                         {
                             "port": entry.port,
+                            "name": entry.name,
                             "session_id": entry.session_id,
                             "shell": entry.shell_type,
                             "idle_seconds": status["idle_seconds"],
@@ -243,6 +275,25 @@ class SilcDaemon:
                         )
 
             return sessions
+
+        @app.get("/resolve/{name}")
+        async def resolve_session(name: str):
+            """Resolve session name to session info."""
+            entry = self.registry.get_by_name(name)
+            if not entry:
+                raise HTTPException(
+                    status_code=404, detail=f"Session '{name}' not found"
+                )
+
+            session = self.sessions.get(entry.port)
+            return {
+                "port": entry.port,
+                "name": entry.name,
+                "session_id": entry.session_id,
+                "shell": entry.shell_type,
+                "idle_seconds": (datetime.utcnow() - entry.last_access).total_seconds(),
+                "alive": session is not None and session.pty.pid is not None,
+            }
 
         @app.delete("/sessions/{port}")
         async def close_session(port: int):
