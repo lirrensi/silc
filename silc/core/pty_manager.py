@@ -14,9 +14,12 @@ from typing import Any, Mapping, Optional
 class PTYBase(ABC):
     """Abstract PTY interface used by SILC session logic."""
 
-    def __init__(self, shell_cmd: Optional[str], env: Mapping[str, str]):
+    def __init__(
+        self, shell_cmd: Optional[str], env: Mapping[str, str], cwd: str | None = None
+    ):
         self.shell_cmd = shell_cmd
         self.env = dict(env)
+        self.cwd = cwd
         self.pid: int | None = None
 
     @abstractmethod
@@ -35,6 +38,11 @@ class PTYBase(ABC):
 class StubPTY(PTYBase):
     """Fallback PTY used when a platform-specific backend cannot be loaded."""
 
+    def __init__(
+        self, shell_cmd: Optional[str], env: Mapping[str, str], cwd: str | None = None
+    ):
+        super().__init__(shell_cmd, env, cwd)
+
     async def read(self, size: int = 1024) -> bytes:
         await asyncio.sleep(0.1)
         return b""
@@ -52,8 +60,10 @@ class StubPTY(PTYBase):
 class UnixPTY(PTYBase):
     """Unix PTY backed by the standard library `pty` module."""
 
-    def __init__(self, shell_cmd: Optional[str], env: Mapping[str, str]):
-        super().__init__(shell_cmd, env)
+    def __init__(
+        self, shell_cmd: Optional[str], env: Mapping[str, str], cwd: str | None = None
+    ):
+        super().__init__(shell_cmd, env, cwd)
         import fcntl
         import pty
         import struct
@@ -76,6 +86,7 @@ class UnixPTY(PTYBase):
             env=self.env,
             close_fds=True,
             preexec_fn=os.setsid,
+            cwd=self.cwd,
         )
         self.pid = self._process.pid
         os.close(slave_fd)
@@ -126,16 +137,20 @@ class UnixPTY(PTYBase):
 class WindowsPTY(PTYBase):
     """Windows PTY via the pywinpty/winpty bindings."""
 
-    def __init__(self, shell_cmd: Optional[str], env: Mapping[str, str]):
-        super().__init__(shell_cmd, env)
+    def __init__(
+        self, shell_cmd: Optional[str], env: Mapping[str, str], cwd: str | None = None
+    ):
+        super().__init__(shell_cmd, env, cwd)
         self._pty_handle: Any | None = None
         winpty_module = self._load_winpty_module()
         command = shell_cmd or os.environ.get("COMSPEC", "cmd.exe")
         if hasattr(winpty_module, "PtyProcess"):
-            self._process = winpty_module.PtyProcess.spawn(command, env=self.env)
+            self._process = winpty_module.PtyProcess.spawn(
+                command, env=self.env, cwd=self.cwd
+            )
         elif hasattr(winpty_module, "PTY"):
             self._pty_handle = winpty_module.PTY(cols=120, rows=30)
-            self._process = self._pty_handle.spawn(command, env=self.env)
+            self._process = self._pty_handle.spawn(command, env=self.env, cwd=self.cwd)
         else:
             raise RuntimeError("winpty/pywinpty does not expose a usable PTY backend.")
         self.pid = getattr(self._process, "pid", None)
@@ -268,16 +283,18 @@ class WindowsPTY(PTYBase):
 
 
 def create_pty(
-    shell_cmd: Optional[str] = None, env: Optional[Mapping[str, str]] = None
+    shell_cmd: Optional[str] = None,
+    env: Optional[Mapping[str, str]] = None,
+    cwd: str | None = None,
 ) -> PTYBase:
     """Factory that returns the best available PTY implementation."""
 
     env = dict(env or os.environ.copy())
     if sys.platform == "win32":
-        return WindowsPTY(shell_cmd, env)
+        return WindowsPTY(shell_cmd, env, cwd)
     if sys.platform.startswith("linux") or sys.platform == "darwin":
-        return UnixPTY(shell_cmd, env)
-    return StubPTY(shell_cmd, env)
+        return UnixPTY(shell_cmd, env, cwd)
+    return StubPTY(shell_cmd, env, cwd)
 
 
 __all__ = ["PTYBase", "StubPTY", "create_pty"]

@@ -42,6 +42,13 @@ Unlike tmux, screen, or SSH, SILC provides:
 - **Logging** — Comprehensive session and daemon logs
 - **Stream-to-File** — Export terminal output to files
 
+### AI Agent Integration
+
+- **MCP Server** — Model Context Protocol server for AI agents (Claude Code, Cursor, Windsurf)
+- **Universal tools** — Works in native shell, SSH, REPLs, interactive apps
+- **Smart wait** — Commands wait for completion with configurable timeout
+- **Special keys** — Ctrl+C, Ctrl+D, arrow keys, etc. for interactive apps
+
 ### Developer-Friendly
 
 - **Python-first** — Easy to extend and integrate
@@ -182,6 +189,8 @@ All session commands use the syntax `silc <port> <command>`.
 | `--global` | flag | false | Bind to 0.0.0.0 (network accessible) |
 | `--no-detach` | flag | false | Run daemon in foreground |
 | `--token` | string | auto | Custom API token for remote access |
+| `--shell` | string | auto | Shell to use (bash, zsh, pwsh, cmd) |
+| `--cwd` | string | daemon cwd | Working directory for session |
 
 #### `silc <port> run`
 
@@ -370,6 +379,103 @@ All endpoints may return error responses:
 - `404` — Session not found
 - `410` — Session has ended
 - `500` — Internal server error
+
+---
+
+## Daemon API
+
+The daemon exposes a management API on port 19999 for session lifecycle operations.
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/sessions` | Create a new session |
+| `GET` | `/sessions` | List all active sessions |
+| `DELETE` | `/sessions/{port}` | Close a specific session |
+| `POST` | `/shutdown` | Graceful shutdown |
+| `POST` | `/killall` | Force kill all |
+
+### `POST /sessions`
+
+**Request Body:**
+```json
+{
+  "port": null,
+  "is_global": false,
+  "token": null,
+  "shell": "bash",
+  "cwd": "/home/user/project"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `port` | int | auto | Desired port for session |
+| `is_global` | bool | false | Bind to 0.0.0.0 (network accessible) |
+| `token` | string | auto | Custom API token for remote access |
+| `shell` | string | auto | Shell type (bash, zsh, pwsh, cmd, sh) |
+| `cwd` | string | daemon cwd | Working directory for session |
+
+**Response:**
+```json
+{
+  "port": 20000,
+  "session_id": "abc12345",
+  "shell": "bash"
+}
+```
+
+---
+
+## MCP Server
+
+SILC provides a Model Context Protocol (MCP) server for AI agent integration (Claude Code, Cursor, Windsurf, etc.).
+
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| `send(port, text, timeout_ms)` | Send text to session, wait for output |
+| `read(port, lines)` | Read current terminal output |
+| `send_key(port, key)` | Send special keys (ctrl+c, enter, etc.) |
+| `list_sessions()` | List all active sessions |
+| `start_session(port?, shell?, cwd?)` | Create a new session |
+| `close_session(port)` | Close a session |
+| `get_status(port)` | Get session status |
+| `run(port, command, timeout_ms)` | Execute command with exit code (native shell only) |
+
+### Usage Example
+
+```python
+# Start a session
+session = start_session()
+# → { port: 20000, session_id: "abc12345" }
+
+# Execute a command (waits up to 5s by default)
+result = send(20000, "ls -la")
+# → { output: "total 42\ndrwxr-xr-x...", lines: 15, alive: true }
+
+# Interactive app - fire and forget
+send(20000, "htop", timeout_ms=0)
+
+# Read current screen
+read(20000, lines=40)
+
+# Quit htop
+send_key(20000, "q")
+
+# SSH flow - works in remote shell too
+send(20000, "ssh user@remote", timeout_ms=10000)
+send(20000, "df -h", timeout_ms=5000)
+```
+
+### Key Design
+
+- **`send` always waits** (default 5s) — returns output captured during wait
+- **`timeout_ms=0`** — fire-and-forget mode, returns immediately
+- **Universal** — works in native shell, SSH, Python REPL, htop, any interactive context
+- **`run` is convenience only** — uses sentinel wrapper, only works in native shell
 
 ---
 

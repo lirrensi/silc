@@ -69,6 +69,8 @@ class SessionCreateRequest(BaseModel):
     port: int | None = None      # Requested port (optional)
     is_global: bool = False      # Bind to 0.0.0.0
     token: str | None = None     # Custom API token
+    shell: str | None = None     # Shell type (bash, zsh, pwsh, cmd, sh)
+    cwd: str | None = None       # Working directory for session
 ```
 
 ### `SessionEntry`
@@ -153,7 +155,9 @@ The daemon exposes a management API on port 19999.
 {
   "port": 20000,        // optional
   "is_global": false,   // optional
-  "token": "abc123"     // optional
+  "token": "abc123",    // optional
+  "shell": "bash",      // optional (auto-detect if null)
+  "cwd": "/home/user/project"  // optional (daemon cwd if null)
 }
 ```
 

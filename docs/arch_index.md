@@ -14,6 +14,7 @@ This index maps the SILC architecture components. Each component can be rewritte
 | [arch_cli.md](arch_cli.md) | CLI commands, argument parsing — command-line interface |
 | [arch_tui.md](arch_tui.md) | Native TUI client, installer — terminal user interface |
 | [arch_stream.md](arch_stream.md) | Streaming service, deduplication — file output streaming |
+| [arch_mcp.md](arch_mcp.md) | MCP server for AI agent integration |
 
 ---
 
@@ -37,10 +38,10 @@ This index maps the SILC architecture components. Each component can be rewritte
          ┌─────────────────┼─────────────────┐
          │                 │                 │
   ┌──────▼──────┐   ┌──────▼──────┐   ┌──────▼──────┐
-  │ arch_stream │   │  arch_core  │   │  (Config)   │
-  │ (Streaming) │   │  (Session)  │   │  silc/      │
-  └─────────────┘   └──────┬──────┘   │  config.py  │
-                           │          └─────────────┘
+  │ arch_stream │   │  arch_core  │   │  arch_mcp   │
+  │ (Streaming) │   │  (Session)  │   │ (MCP Server)│
+  └─────────────┘   └──────┬──────┘   └─────────────┘
+                           │
                     ┌──────▼──────┐
                     │    PTY      │
                     │  (Shell)    │
@@ -61,6 +62,10 @@ arch_cli ──────► arch_api ──────► arch_core ──�
               └──► arch_api
 
 arch_tui ──────► arch_api (WebSocket)
+
+arch_mcp ──────► arch_daemon (session management)
+        │
+        └──► arch_api (session operations)
 ```
 
 ---
@@ -77,6 +82,7 @@ Each component can be rewritten in a different language/framework:
 | arch_daemon | Go, Rust, systemd service |
 | arch_core | Rust (portable-pty), Go |
 | arch_stream | Any language with file I/O |
+| arch_mcp | TypeScript (mcp SDK), Go, Rust |
 
 ---
 

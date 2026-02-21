@@ -58,6 +58,8 @@ class SessionCreateRequest(BaseModel):
     port: int | None = None
     is_global: bool = False
     token: str | None = None
+    shell: str | None = None
+    cwd: str | None = None
 
 
 class SilcDaemon:
@@ -98,10 +100,14 @@ class SilcDaemon:
             selected_port = port
             is_global = False
             token: str | None = None
+            shell: str | None = None
+            cwd: str | None = None
             if selected_port is None and request:
                 selected_port = request.port
                 is_global = request.is_global
                 token = request.token
+                shell = request.shell
+                cwd = request.cwd
             if selected_port is None:
                 selected_port = find_available_port(20000, 21000)
 
@@ -112,8 +118,21 @@ class SilcDaemon:
 
             session_socket = self._reserve_session_socket(selected_port, is_global)
             try:
-                shell_info = detect_shell()
-                session = SilcSession(selected_port, shell_info, api_token=token)
+                # Handle shell override
+                if shell:
+                    from silc.utils.shell_detect import get_shell_info_by_type
+
+                    shell_info = get_shell_info_by_type(shell)
+                    if shell_info is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Unknown shell type: {shell}. Supported: bash, zsh, sh, pwsh, cmd",
+                        )
+                else:
+                    shell_info = detect_shell()
+                session = SilcSession(
+                    selected_port, shell_info, api_token=token, cwd=cwd
+                )
                 await session.start()
 
                 self.sessions[selected_port] = session

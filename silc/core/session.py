@@ -62,12 +62,19 @@ MAX_LOG_LINES = 1000  # Maximum lines to keep in rotated logs
 
 
 class SilcSession:
-    def __init__(self, port: int, shell_info: ShellInfo, api_token: str | None = None):
+    def __init__(
+        self,
+        port: int,
+        shell_info: ShellInfo,
+        api_token: str | None = None,
+        cwd: str | None = None,
+    ):
         self.port = port
         self.shell_info = shell_info
         self.session_id = str(uuid.uuid4())[:8]
         self.api_token = api_token
-        self.pty: PTYBase = create_pty(shell_info.path, os.environ.copy())
+        self.cwd = cwd
+        self.pty: PTYBase = create_pty(shell_info.path, os.environ.copy(), cwd=cwd)
 
         self.buffer = RawByteBuffer(maxlen=DEFAULT_BUFFER_SIZE)
         self.created_at = datetime.utcnow()

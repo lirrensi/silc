@@ -258,11 +258,25 @@ def cli(ctx: click.Context) -> None:
     default=None,
     help="Custom token for remote session API (hex string).",
 )
+@click.option(
+    "--shell",
+    type=str,
+    default=None,
+    help="Shell to use (bash, zsh, pwsh, cmd).",
+)
+@click.option(
+    "--cwd",
+    type=str,
+    default=None,
+    help="Working directory for session.",
+)
 def start(
     port: Optional[int],
     is_global: bool,
     no_detach: bool,
     token: Optional[str],
+    shell: Optional[str],
+    cwd: Optional[str],
 ) -> None:
     """Start a new SILC session (creates daemon if needed)."""
     normalized_token = token.strip() if token else None
@@ -388,6 +402,10 @@ def start(
             payload["is_global"] = True
         if session_token:
             payload["token"] = session_token
+        if shell:
+            payload["shell"] = shell
+        if cwd:
+            payload["cwd"] = cwd
         resp = requests.post(_daemon_url("/sessions"), json=payload, timeout=5)
         resp.raise_for_status()
         session = resp.json()
@@ -464,6 +482,14 @@ def run_as_daemon() -> None:
 
     daemon = SilcDaemon()
     asyncio.run(daemon.start())
+
+
+@cli.command()
+def mcp() -> None:
+    """Run the MCP server for AI agent integration."""
+    from silc.mcp import run_mcp_server
+
+    asyncio.run(run_mcp_server())
 
 
 @cli.group()

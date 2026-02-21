@@ -77,6 +77,7 @@ class SilcSession:
     session_id: str              # 8-char UUID
     shell_info: ShellInfo        # Shell configuration
     api_token: str | None        # API token (optional)
+    cwd: str | None              # Working directory (optional)
     buffer: RawByteBuffer        # Output buffer
     created_at: datetime         # Creation timestamp
     last_access: datetime        # Last access timestamp
@@ -188,12 +189,12 @@ Fallback when platform-specific PTY cannot be loaded. All methods are no-ops.
 ### Factory: `create_pty()`
 
 ```python
-def create_pty(shell_cmd: str | None, env: Mapping[str, str]) -> PTYBase:
+def create_pty(shell_cmd: str | None, env: Mapping[str, str], cwd: str | None = None) -> PTYBase:
     if sys.platform == "win32":
-        return WindowsPTY(shell_cmd, env)
+        return WindowsPTY(shell_cmd, env, cwd)
     if sys.platform.startswith("linux") or sys.platform == "darwin":
-        return UnixPTY(shell_cmd, env)
-    return StubPTY(shell_cmd, env)
+        return UnixPTY(shell_cmd, env, cwd)
+    return StubPTY(shell_cmd, env, cwd)
 ```
 
 ---
@@ -203,8 +204,8 @@ def create_pty(shell_cmd: str | None, env: Mapping[str, str]) -> PTYBase:
 ### Initialization
 
 ```python
-session = SilcSession(port, shell_info, api_token)
-session.pty = create_pty(shell_info.path, os.environ.copy())
+session = SilcSession(port, shell_info, api_token, cwd=cwd)
+session.pty = create_pty(shell_info.path, os.environ.copy(), cwd=cwd)
 session.buffer = RawByteBuffer(maxlen=65536)
 ```
 

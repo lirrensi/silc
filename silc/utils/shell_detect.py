@@ -111,4 +111,22 @@ def detect_shell() -> ShellInfo:
         return ShellInfo("sh", "/bin/sh", re.compile(r"[$#] $"))
 
 
-__all__ = ["ShellInfo", "detect_shell"]
+def get_shell_info_by_type(shell_type: str) -> ShellInfo | None:
+    """Get ShellInfo for a specific shell type, or None if unknown."""
+    shell_type = shell_type.lower()
+
+    if shell_type == "pwsh":
+        return ShellInfo("pwsh", "pwsh.exe", re.compile(r"PS .*>"))
+    if shell_type == "cmd":
+        return ShellInfo("cmd", "cmd.exe", re.compile(r"[A-Z]:\\.*>"))
+    if shell_type == "bash":
+        return ShellInfo("bash", "bash", re.compile(r".*[$#] $"))
+    if shell_type == "zsh":
+        return ShellInfo("zsh", "zsh", re.compile(r".*[%#$] $"))
+    if shell_type == "sh":
+        return ShellInfo("sh", "sh", re.compile(r"[$#] $"))
+
+    return None
+
+
+__all__ = ["ShellInfo", "detect_shell", "get_shell_info_by_type"]
