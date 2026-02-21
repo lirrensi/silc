@@ -24,6 +24,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
   // Actions
   function createSession(port: number, sessionId: string, shell: string): Session {
+    console.log(`[TerminalManager] Creating session: port=${port}, sessionId=${sessionId}, shell=${shell}`)
     const terminal = new Terminal({
       cols: 120,
       rows: 30,
@@ -54,14 +55,18 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
 
     sessions.value.set(port, session)
+    console.log(`[TerminalManager] Session created successfully: port=${port}`)
     return session
   }
 
   function getSession(port: number): Session | undefined {
-    return sessions.value.get(port)
+    const session = sessions.value.get(port)
+    console.log(`[TerminalManager] getSession(${port}): ${session ? 'found' : 'not found'}`)
+    return session
   }
 
   function removeSession(port: number): void {
+    console.log(`[TerminalManager] removeSession(${port})`)
     const session = sessions.value.get(port)
     if (session) {
       if (session.ws) {
@@ -73,6 +78,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function setFocused(port: number | null): void {
+    console.log(`[TerminalManager] setFocused(${port})`)
     focusedPort.value = port
     if (port !== null) {
       const session = sessions.value.get(port)
@@ -83,12 +89,26 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function attach(port: number, container: HTMLElement): void {
+    console.log(`[TerminalManager] attach(${port}, container)`)
     const session = sessions.value.get(port)
-    if (!session) return
+    if (!session) {
+      console.warn(`[TerminalManager] attach: no session for port ${port}`)
+      return
+    }
 
     const element = session.terminal.element
-    if (!element) return
 
+    if (!element) {
+      // Terminal hasn't been opened yet - open it on the container
+      console.log(`[TerminalManager] Opening terminal on container for port ${port}`)
+      session.terminal.open(container)
+      session.fitAddon.fit()
+      console.log(`[TerminalManager] Terminal opened and fitted for port ${port}`)
+      return
+    }
+
+    // Terminal already open - move it to new container
+    console.log(`[TerminalManager] Moving existing terminal to new container for port ${port}`)
     if (element.parentNode) {
       element.remove()
     }
@@ -98,6 +118,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function detach(port: number): void {
+    console.log(`[TerminalManager] detach(${port})`)
     const session = sessions.value.get(port)
     if (!session?.terminal?.element) return
 
@@ -105,6 +126,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function setStatus(port: number, status: SessionStatus): void {
+    console.log(`[TerminalManager] setStatus(${port}, '${status}')`)
     const session = sessions.value.get(port)
     if (session) {
       session.status = status
@@ -112,6 +134,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function setWs(port: number, ws: WebSocket | null): void {
+    console.log(`[TerminalManager] setWs(${port}, ${ws ? 'WebSocket' : 'null'})`)
     const session = sessions.value.get(port)
     if (session) {
       session.ws = ws

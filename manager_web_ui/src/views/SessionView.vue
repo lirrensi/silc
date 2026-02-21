@@ -12,21 +12,27 @@ const manager = useTerminalManager()
 const port = computed(() => parseInt(route.params.port as string, 10))
 const session = computed(() => manager.getSession(port.value))
 
+console.log(`[SessionView] Setup for port ${port.value}`)
+
 onMounted(() => {
+  console.log(`[SessionView] onMounted, setting focused to ${port.value}`)
   manager.setFocused(port.value)
 })
 
 onUnmounted(() => {
+  console.log(`[SessionView] onUnmounted, clearing focus`)
   manager.setFocused(null)
 })
 
 function handleClose(): void {
+  console.log(`[SessionView] handleClose for port ${port.value}`)
   manager.detach(port.value)
   manager.setFocused(null)
   router.push('/')
 }
 
 async function handleKill(): Promise<void> {
+  console.log(`[SessionView] handleKill for port ${port.value}`)
   try {
     await closeSession(port.value)
     manager.removeSession(port.value)

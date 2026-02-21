@@ -100,31 +100,33 @@ class SilcDaemon:
         async def startup_event():
             write_daemon_log("Daemon API is ready to accept requests")
 
-        # Mount static files for assets (must be before catch-all routes)
-        static_dir = Path(__file__).parent.parent.parent / "static" / "manager"
-        if static_dir.exists():
+        # Mount static files for manager UI assets under /ui/assets
+        manager_static_dir = Path(__file__).parent.parent.parent / "static" / "manager"
+        if manager_static_dir.exists():
             app.mount(
-                "/assets",
-                StaticFiles(directory=str(static_dir / "assets")),
-                name="assets",
+                "/ui/assets",
+                StaticFiles(directory=str(manager_static_dir / "assets")),
+                name="ui-assets",
             )
 
         @app.get("/", response_class=HTMLResponse)
-        @app.get("/index.html", response_class=HTMLResponse)
-        async def manager_ui() -> HTMLResponse:
-            """Serve the manager web UI."""
-            static_dir = Path(__file__).parent.parent.parent / "static" / "manager"
-            index_path = static_dir / "index.html"
+        async def root_redirect() -> HTMLResponse:
+            """Redirect root to UI."""
+            return HTMLResponse(
+                '<html><head><meta http-equiv="refresh" content="0;url=/ui/"></head>'
+                "<body>Redirecting to <a href='/ui/'>SILC Manager UI</a>...</body></html>"
+            )
+
+        @app.get("/ui", response_class=HTMLResponse)
+        @app.get("/ui/", response_class=HTMLResponse)
+        @app.get("/ui/{path:path}", response_class=HTMLResponse)
+        async def manager_ui(path: str = "") -> HTMLResponse:
+            """Serve the manager web UI (SPA fallback for all /ui/* routes)."""
+            index_path = manager_static_dir / "index.html"
             if index_path.exists():
                 with open(index_path, "r", encoding="utf-8") as f:
                     return HTMLResponse(f.read())
             return HTMLResponse("<h1>Manager UI not found</h1>")
-
-        @app.get("/{path:path}", response_class=HTMLResponse)
-        async def serve_spa(path: str) -> HTMLResponse:
-            """Serve SPA fallback - return index.html for client-side routing."""
-            # Serve index.html for any path that falls through (Vue Router handles it)
-            return await manager_ui()
 
         @app.post("/sessions")
         async def create_session(
