@@ -142,11 +142,18 @@ The daemon exposes a management API on port 19999.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `GET` | `/` | Serve session manager web UI |
 | `POST` | `/sessions` | Create a new session |
 | `GET` | `/sessions` | List all active sessions |
 | `DELETE` | `/sessions/{port}` | Close a specific session |
 | `POST` | `/shutdown` | Graceful shutdown |
 | `POST` | `/killall` | Force kill all |
+
+### `GET /`
+
+**Response:** HTML content from `static/manager/index.html`.
+
+Serves the session manager SPA that allows users to view, create, and manage sessions from a browser.
 
 ### `POST /sessions`
 

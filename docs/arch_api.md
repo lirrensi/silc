@@ -260,7 +260,7 @@ Return session API token.
 
 ### `GET /web`
 
-Serve static Web UI.
+Serve static Web UI from `static/web/index.html`. Per-session terminal interface.
 
 ---
 

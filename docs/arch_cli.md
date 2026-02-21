@@ -62,6 +62,7 @@ The CLI provides user-friendly commands to interact with SILC:
 ```
 silc
 ├── start [--port] [--global] [--no-detach] [--token]
+├── manager
 ├── list
 ├── shutdown
 ├── killall
@@ -136,6 +137,18 @@ def start(port, is_global, no_detach, token):
     # 4. Create session via daemon API
     # 5. Print session info
 ```
+
+### `silc manager`
+
+```python
+@cli.command()
+def manager():
+    # 1. Check if daemon is running
+    # 2. Start daemon if needed (detached)
+    # 3. Open browser to http://127.0.0.1:19999/
+```
+
+Opens the session manager web UI. Auto-starts the daemon if not already running.
 
 ### `silc list`
 

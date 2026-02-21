@@ -14,6 +14,7 @@ from typing import Dict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from silc.api.server import create_app
@@ -91,6 +92,16 @@ class SilcDaemon:
         @app.on_event("startup")
         async def startup_event():
             write_daemon_log("Daemon API is ready to accept requests")
+
+        @app.get("/", response_class=HTMLResponse)
+        async def manager_ui() -> HTMLResponse:
+            """Serve the manager web UI."""
+            static_dir = Path(__file__).parent.parent.parent / "static" / "manager"
+            index_path = static_dir / "index.html"
+            if index_path.exists():
+                with open(index_path, "r", encoding="utf-8") as f:
+                    return HTMLResponse(f.read())
+            return HTMLResponse("<h1>Manager UI not found</h1>")
 
         @app.post("/sessions")
         async def create_session(

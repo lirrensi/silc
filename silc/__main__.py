@@ -755,6 +755,34 @@ def killall() -> None:
 
 
 @cli.command()
+def manager() -> None:
+    """Open the session manager web UI (starts daemon if needed)."""
+
+    daemon_responsive = _daemon_available()
+    daemon_running = daemon_responsive or is_daemon_running()
+
+    if not daemon_running:
+        click.echo("Starting daemon in background...", err=False)
+        _start_detached_daemon()
+        click.echo("Waiting for daemon to start...", err=False)
+        started = _wait_for_daemon_start_with_logs(timeout=10)
+        if not started:
+            click.echo(
+                "❌ Failed to start daemon (timed out waiting for it to be available)",
+                err=True,
+            )
+            _show_daemon_error_details()
+            return
+        click.echo("✓ Daemon started successfully", err=False)
+    elif daemon_responsive:
+        click.echo("✓ Daemon is already running", err=False)
+
+    manager_url = f"http://127.0.0.1:{DAEMON_PORT}/"
+    webbrowser.open_new_tab(manager_url)
+    click.echo(f"✨ Opening manager at {manager_url}")
+
+
+@cli.command()
 @click.option("--tail", default=100, help="Number of lines to show from end")
 def logs(tail: int) -> None:
     """Show daemon logs."""

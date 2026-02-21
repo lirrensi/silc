@@ -289,7 +289,7 @@ def create_app(session: SilcSession) -> FastAPI:
 
     @app.get("/web", response_class=HTMLResponse)
     async def web_ui() -> HTMLResponse:
-        static_dir = Path(__file__).parent.parent.parent / "static"
+        static_dir = Path(__file__).parent.parent.parent / "static" / "web"
         index_path = static_dir / "index.html"
         if index_path.exists():
             with open(index_path, "r", encoding="utf-8") as f:
