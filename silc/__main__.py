@@ -252,6 +252,9 @@ class SilcCLI(click.Group):
     port_subcommands = click.Group()
 
     def get_command(self, ctx, cmd_name):
+        # First check if it's a registered command (not a session name)
+        if cmd_name in self.commands:
+            return super().get_command(ctx, cmd_name)
         if cmd_name.isdigit():
             return SessionGroup(
                 port=int(cmd_name), commands=self.port_subcommands.commands
@@ -811,6 +814,70 @@ def restart_server() -> None:
         click.echo("✨ Daemon HTTP server restarted (sessions preserved)")
     except requests.RequestException as e:
         click.echo(f"❌ Failed to restart server: {e}", err=True)
+
+
+@cli.command()
+def resurrect() -> None:
+    """Restore sessions from previous state."""
+    try:
+        resp = requests.post(_daemon_url("/resurrect"), timeout=30)
+        resp.raise_for_status()
+        result = resp.json()
+
+        restored = result.get("restored", [])
+        failed = result.get("failed", [])
+
+        if restored:
+            click.echo(f"✨ Restored {len(restored)} session(s):")
+            for s in restored:
+                if s.get("status") == "relocated":
+                    click.echo(
+                        f"   {s['name']} → port {s['port']} (relocated from {s['original_port']})"
+                    )
+                else:
+                    click.echo(f"   {s['name']} → port {s['port']}")
+
+        if failed:
+            click.echo(f"⚠️  Failed to restore {len(failed)} session(s):")
+            for s in failed:
+                click.echo(
+                    f"   {s.get('name', 'unknown')}: {s.get('reason', 'unknown reason')}"
+                )
+
+        if not restored and not failed:
+            click.echo("No sessions to resurrect")
+
+    except requests.RequestException as e:
+        click.echo(f"❌ Failed to resurrect: {e}", err=True)
+
+
+@cli.command()
+def restart() -> None:
+    """Shutdown daemon and immediately restart (resurrects sessions)."""
+    # Graceful shutdown
+    try:
+        requests.post(_daemon_url("/shutdown"), timeout=35)
+    except requests.RequestException:
+        pass
+
+    # Wait for daemon to stop
+    if not _wait_for_daemon_stop(timeout=30):
+        click.echo("⚠️  Shutdown timed out; forcing killall", err=True)
+        kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
+        _wait_for_daemon_stop(timeout=5)
+
+    click.echo("✨ Daemon stopped, restarting...")
+
+    # Start new daemon
+    _start_detached_daemon()
+    started = _wait_for_daemon_start_with_logs(timeout=15)
+
+    if not started:
+        click.echo("❌ Failed to restart daemon", err=True)
+        _show_daemon_error_details()
+        return
+
+    click.echo("✨ Daemon restarted (sessions resurrected from previous state)")
 
 
 @cli.command()

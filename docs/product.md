@@ -161,6 +161,8 @@ silc 20000 run "htop"         # Use TUI apps remotely
 | `silc list` | List all active sessions |
 | `silc shutdown` | Gracefully shut down daemon and all sessions |
 | `silc killall` | Force kill daemon and all sessions |
+| `silc resurrect` | Restore sessions from previous state |
+| `silc restart` | Shutdown and immediately start (resurrects sessions) |
 | `silc restart-server` | Restart daemon HTTP server (sessions survive) |
 | `silc logs [--tail N]` | Show daemon logs |
 
@@ -745,7 +747,7 @@ Configuration is loaded from (highest to lowest priority):
 SILC deliberately does NOT:
 
 - **Provide encryption by default** — TLS is opt-in, requires certificates
-- **Persist sessions across reboots** — Sessions are ephemeral
+- **Persist shell state** — Only session metadata (name, port, cwd, shell) survives restart; running commands and output are lost
 - **Support multi-user authentication** — Single token per session
 - **Replace tmux/screen** — Different use case (API access vs. multiplexing)
 - **Provide shell isolation** — Commands run in user's shell environment
@@ -774,6 +776,8 @@ SILC deliberately does NOT:
 | `silc list` | List all sessions |
 | `silc shutdown` | Stop daemon |
 | `silc killall` | Force kill everything |
+| `silc resurrect` | Restore sessions from previous state |
+| `silc restart` | Shutdown and immediately start |
 
 | Port | Purpose |
 |------|---------|
@@ -783,5 +787,6 @@ SILC deliberately does NOT:
 | File | Purpose |
 |------|---------|
 | `~/.silc/silc.toml` | Configuration file |
+| `~/.silc/sessions.json` | Persistent session registry |
 | `~/.silc/logs/daemon.log` | Daemon log |
 | `~/.silc/logs/session_<port>.log` | Session log |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -160,10 +161,66 @@ def read_session_log(port: int, tail_lines: int | None = None) -> str:
     return "\n".join(lines)
 
 
+# Session persistence for resurrect feature
+SESSIONS_FILE = DATA_DIR / "sessions.json"
+
+
+def read_sessions_json() -> list[dict]:
+    """Read sessions.json, return empty list if not exists or invalid."""
+    if not SESSIONS_FILE.exists():
+        return []
+    try:
+        content = SESSIONS_FILE.read_text(encoding="utf-8")
+        data = json.loads(content)
+        return data.get("sessions", [])
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def write_sessions_json(sessions: list[dict]) -> None:
+    """Write sessions list to sessions.json atomically."""
+    SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    data = {"sessions": sessions}
+    # Write to temp file then rename for atomicity
+    temp_file = SESSIONS_FILE.with_suffix(".tmp")
+    try:
+        temp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temp_file.rename(SESSIONS_FILE)
+    except OSError:
+        # Fallback: direct write if rename fails (Windows edge case)
+        SESSIONS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    finally:
+        try:
+            temp_file.unlink()
+        except OSError:
+            pass
+
+
+def append_session_to_json(session: dict) -> None:
+    """Append a session entry to sessions.json."""
+    sessions = read_sessions_json()
+    # Remove any existing entry with same port or name
+    sessions = [
+        s
+        for s in sessions
+        if s.get("port") != session.get("port") and s.get("name") != session.get("name")
+    ]
+    sessions.append(session)
+    write_sessions_json(sessions)
+
+
+def remove_session_from_json(port: int) -> None:
+    """Remove a session entry by port from sessions.json."""
+    sessions = read_sessions_json()
+    sessions = [s for s in sessions if s.get("port") != port]
+    write_sessions_json(sessions)
+
+
 __all__ = [
     "DATA_DIR",
     "LOGS_DIR",
     "DAEMON_LOG",
+    "SESSIONS_FILE",
     "get_session_log_path",
     "rotate_daemon_log",
     "cleanup_session_log",
@@ -171,4 +228,8 @@ __all__ = [
     "write_session_log",
     "rotate_session_log",
     "read_session_log",
+    "read_sessions_json",
+    "write_sessions_json",
+    "append_session_to_json",
+    "remove_session_from_json",
 ]

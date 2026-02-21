@@ -87,6 +87,32 @@ class SessionEntry:
     last_access: datetime
 ```
 
+### `sessions.json`
+
+Persistent session registry stored at `~/.silc/sessions.json`.
+
+```json
+{
+  "sessions": [
+    {
+      "port": 20000,
+      "name": "happy-fox-42",
+      "session_id": "abc12345",
+      "shell": "bash",
+      "cwd": "/home/user/project",
+      "is_global": false,
+      "created_at": "2025-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+**Sync behavior:**
+- On session create: append entry to `sessions.json`
+- On session close: remove entry from `sessions.json`
+- On shutdown: do nothing (file persists as-is)
+- This file is the source of truth for resurrection
+
 ### `SilcDaemon`
 
 ```python
@@ -152,6 +178,7 @@ The daemon exposes a management API on port 19999.
 | `POST` | `/shutdown` | Graceful shutdown |
 | `POST` | `/killall` | Force kill all |
 | `POST` | `/restart-server` | Restart HTTP server without killing sessions |
+| `POST` | `/resurrect` | Restore sessions from sessions.json |
 
 ### `GET /`
 
@@ -236,6 +263,25 @@ Restarts the HTTP server layer while keeping all PTY sessions alive. The daemon 
 
 **Use case:** Recovering from HTTP issues without losing shell sessions.
 
+### `POST /resurrect`
+
+Explicitly trigger resurrection from `sessions.json`.
+
+**Response:**
+```json
+{
+  "restored": [
+    {"port": 20000, "name": "happy-fox-42", "status": "restored"},
+    {"port": 20001, "name": "clever-otter-7", "status": "relocated", "original_port": 20002}
+  ],
+  "failed": [
+    {"name": "stale-session", "reason": "name_collision"}
+  ]
+}
+```
+
+**Use case:** Manual restoration without restarting the daemon.
+
 ---
 
 ## Session Lifecycle
@@ -288,10 +334,56 @@ Restarts the HTTP server layer while keeping all PTY sessions alive. The daemon 
    d. await session.close()
    e. Kill orphaned processes on port
    f. registry.remove(port)
-   g. cleanup_session_log(port)
+   g. Remove entry from sessions.json
+   h. cleanup_session_log(port)
    ↓
-4. Session removed from memory
+4. Session removed from memory and persistent registry
 ```
+
+---
+
+## Session Persistence
+
+### File Location
+
+```
+~/.silc/sessions.json        # Linux/macOS
+%APPDATA%\silc\sessions.json # Windows
+```
+
+### Sync Strategy
+
+The daemon maintains a persistent `sessions.json` file that mirrors the in-memory registry:
+
+| Event | Action |
+|-------|--------|
+| Session created | Append entry to `sessions.json` |
+| Session closed | Remove entry from `sessions.json` |
+| Daemon shutdown | No action (file persists) |
+
+This ensures the session list survives:
+- Graceful shutdown
+- Crash / force kill
+- PC power loss
+
+### Resurrection
+
+On daemon start, the daemon reads `sessions.json` and attempts to restore each session:
+
+```
+1. Read sessions.json
+2. For each entry:
+   a. Try to bind to original port
+   b. If port taken → auto-relocate to next available
+   c. If name collision → silent fail, skip entry
+   d. Create session with preserved name, shell, cwd
+3. Write updated sessions.json with actual ports assigned
+```
+
+**Best-effort guarantees:**
+- Name is always preserved (unless collision with existing live session)
+- Port is attempted, relocated if unavailable
+- Shell and cwd are restored exactly
 
 ---
 
@@ -471,18 +563,21 @@ async def start():
     # 3. Setup signal handlers
     _setup_signals()
 
-    # 4. Create daemon API server
+    # 4. Load persisted sessions and resurrect
+    await _resurrect_sessions()
+
+    # 5. Create daemon API server
     config = uvicorn.Config(daemon_api_app, host="127.0.0.1", port=19999)
     self._daemon_server = uvicorn.Server(config)
 
-    # 5. Start background tasks
+    # 6. Start background tasks
     gc_task = asyncio.create_task(self._garbage_collect())
     shutdown_watcher = asyncio.create_task(self._watch_shutdown())
 
-    # 6. Run daemon server
+    # 7. Run daemon server
     await self._daemon_server.serve()
 
-    # 7. Cleanup on exit
+    # 8. Cleanup on exit
     gc_task.cancel()
     shutdown_watcher.cancel()
     remove_pidfile()
@@ -502,6 +597,9 @@ async def start():
 | Hard exit fallback | Hard exit watchdog MUST ensure process termination |
 | Unique names | Session names MUST be unique within a daemon instance |
 | Name format | Names MUST match `[a-z][a-z0-9-]*[a-z0-9]` pattern |
+| Persistent registry | sessions.json MUST always reflect current session state |
+| Resurrect best-effort | Resurrection MUST succeed if port available, relocate if not |
+| Name preservation | Session names MUST be preserved across resurrect (skip on collision) |
 
 ---
 

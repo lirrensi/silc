@@ -16,11 +16,23 @@ class SessionEntry:
     session_id: str
     shell_type: str
     created_at: datetime
+    is_global: bool = False
     last_access: datetime = field(default_factory=datetime.utcnow)
 
     def update_access(self) -> None:
         """Update last_access timestamp."""
         self.last_access = datetime.utcnow()
+
+    def to_json(self) -> dict:
+        """Serialize session entry for persistence."""
+        return {
+            "port": self.port,
+            "name": self.name,
+            "session_id": self.session_id,
+            "shell": self.shell_type,
+            "is_global": self.is_global,
+            "created_at": self.created_at.isoformat() + "Z",
+        }
 
 
 class SessionRegistry:
@@ -31,7 +43,12 @@ class SessionRegistry:
         self._name_index: Dict[str, int] = {}  # name -> port
 
     def add(
-        self, port: int, name: str, session_id: str, shell_type: str
+        self,
+        port: int,
+        name: str,
+        session_id: str,
+        shell_type: str,
+        is_global: bool = False,
     ) -> SessionEntry:
         """Add a new session entry.
 
@@ -47,6 +64,7 @@ class SessionRegistry:
             session_id=session_id,
             shell_type=shell_type,
             created_at=datetime.utcnow(),
+            is_global=is_global,
         )
         self._sessions[port] = entry
         self._name_index[name] = port

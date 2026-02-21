@@ -27,8 +27,10 @@ from silc.utils.names import generate_name, is_valid_name
 from silc.utils.persistence import (
     DAEMON_LOG,
     LOGS_DIR,
+    append_session_to_json,
     cleanup_session_log,
     get_session_log_path,
+    remove_session_from_json,
     rotate_daemon_log,
     write_daemon_log,
 )
@@ -196,7 +198,23 @@ class SilcDaemon:
 
                 self.sessions[selected_port] = session
                 entry = self.registry.add(
-                    selected_port, session_name, session.session_id, shell_info.type
+                    selected_port,
+                    session_name,
+                    session.session_id,
+                    shell_info.type,
+                    is_global=is_global,
+                )
+                # Persist to sessions.json
+                append_session_to_json(
+                    {
+                        "port": selected_port,
+                        "name": session_name,
+                        "session_id": session.session_id,
+                        "shell": shell_info.type,
+                        "is_global": is_global,
+                        "cwd": cwd,
+                        "created_at": entry.created_at.isoformat() + "Z",
+                    }
                 )
 
                 server = self._create_session_server(session, is_global=is_global)
@@ -394,6 +412,13 @@ class SilcDaemon:
             write_daemon_log("Server restart requested")
             self._restart_event.set()
             return {"status": "restarting"}
+
+        @app.post("/resurrect")
+        async def resurrect():
+            """Resurrect sessions from sessions.json."""
+            write_daemon_log("Resurrect requested")
+            result = await self._resurrect_sessions()
+            return result
 
         return app
 
@@ -603,10 +628,130 @@ class SilcDaemon:
         # Remove from registry
         self.registry.remove(port)
 
+        # Remove from persistent registry
+        remove_session_from_json(port)
+
         # Cleanup log
         cleanup_session_log(port)
 
         write_daemon_log(f"Session closed: port={port}")
+
+    async def _resurrect_sessions(self) -> dict:
+        """Restore sessions from sessions.json. Returns result summary."""
+        from silc.utils.persistence import read_sessions_json
+
+        result = {"restored": [], "failed": []}
+        sessions = read_sessions_json()
+
+        if not sessions:
+            write_daemon_log("No sessions to resurrect")
+            return result
+
+        write_daemon_log(f"Resurrecting {len(sessions)} sessions...")
+
+        for entry in sessions:
+            name = entry.get("name")
+            shell = entry.get("shell")
+            cwd = entry.get("cwd")
+            is_global = entry.get("is_global", False)
+            original_port = entry.get("port")
+
+            if not name or not shell:
+                result["failed"].append({"name": name, "reason": "missing_fields"})
+                continue
+
+            # Check for name collision
+            if self.registry.name_exists(name):
+                result["failed"].append({"name": name, "reason": "name_collision"})
+                write_daemon_log(f"Resurrect skip: name '{name}' already exists")
+                continue
+
+            # Find available port (try original first)
+            port = original_port
+            if port and port in self.sessions:
+                port = find_available_port(20000, 21000)
+
+            if port is None:
+                port = find_available_port(20000, 21000)
+
+            try:
+                session_socket = self._reserve_session_socket(port, is_global)
+            except OSError:
+                # Port still taken, try another
+                try:
+                    port = find_available_port(20000, 21000)
+                    session_socket = self._reserve_session_socket(port, is_global)
+                except OSError as exc:
+                    result["failed"].append(
+                        {"name": name, "reason": f"port_unavailable: {exc}"}
+                    )
+                    write_daemon_log(f"Resurrect failed: port unavailable for '{name}'")
+                    continue
+
+            try:
+                # Get shell info
+                from silc.utils.shell_detect import get_shell_info_by_type
+
+                shell_info = get_shell_info_by_type(shell)
+                if shell_info is None:
+                    self._close_session_socket(port)
+                    result["failed"].append(
+                        {"name": name, "reason": f"unknown_shell: {shell}"}
+                    )
+                    continue
+
+                # Create session
+                session = SilcSession(port, name, shell_info, cwd=cwd)
+                await session.start()
+
+                self.sessions[port] = session
+                registry_entry = self.registry.add(
+                    port, name, session.session_id, shell_info.type, is_global
+                )
+
+                server = self._create_session_server(session, is_global=is_global)
+                self.servers[port] = server
+
+                task = asyncio.create_task(server.serve(sockets=[session_socket]))
+                self._session_tasks[port] = task
+                self._attach_session_task(port, task)
+
+                status = (
+                    "restored"
+                    if original_port and port == original_port
+                    else "relocated"
+                )
+                result["restored"].append(
+                    {
+                        "port": port,
+                        "name": name,
+                        "status": status,
+                        "original_port": (
+                            original_port if status == "relocated" else None
+                        ),
+                    }
+                )
+                write_daemon_log(f"Resurrected: {name} on port {port}")
+
+                # Update sessions.json with actual port
+                append_session_to_json(
+                    {
+                        "port": port,
+                        "name": name,
+                        "session_id": session.session_id,
+                        "shell": shell_info.type,
+                        "is_global": is_global,
+                        "cwd": cwd,
+                        "created_at": registry_entry.created_at.isoformat() + "Z",
+                    }
+                )
+
+            except Exception as exc:
+                self._close_session_socket(port)
+                result["failed"].append({"name": name, "reason": str(exc)})
+                write_daemon_log(f"Resurrect failed for '{name}': {exc}")
+
+        return result
 
     async def _garbage_collect(self) -> None:
         """Periodic garbage collection of idle sessions."""
@@ -756,6 +901,9 @@ class SilcDaemon:
         write_pidfile(os.getpid())
         self._running = True
         self._setup_signals()
+
+        # Resurrect persisted sessions
+        await self._resurrect_sessions()
 
         # Create daemon server
         daemon_config = uvicorn.Config(
