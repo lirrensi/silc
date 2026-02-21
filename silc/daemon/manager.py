@@ -257,6 +257,7 @@ class SilcDaemon:
                 "name": session_name,
                 "session_id": session.session_id,
                 "shell": shell_info.type,
+                "cwd": cwd,
             }
 
         @app.get("/sessions")

@@ -450,8 +450,28 @@ The daemon exposes a management API on port 19999 for session lifecycle operatio
   "port": 20000,
   "name": "happy-fox-42",
   "session_id": "abc12345",
-  "shell": "bash"
+  "shell": "bash",
+  "cwd": "/home/user/project"
 }
+```
+
+### `GET /sessions`
+
+List all active sessions.
+
+**Response:**
+```json
+[
+  {
+    "port": 20000,
+    "name": "happy-fox-42",
+    "session_id": "abc12345",
+    "shell": "bash",
+    "cwd": "/home/user/project",
+    "idle_seconds": 5,
+    "alive": true
+  }
+]
 ```
 
 ### `GET /resolve/{name}`
