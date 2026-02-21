@@ -28,17 +28,14 @@ export function connectWebSocket(port: number): WebSocket | null {
     manager.setWs(port, ws)
 
     // Request terminal history
-    console.log(`[WebSocket] Requesting history for port ${port}`)
     ws.send(JSON.stringify({ event: 'load_history' }))
   }
 
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data)
-      console.log(`[WebSocket] Received message on port ${port}:`, msg.event, msg.data?.length ?? 0, 'chars')
 
       if (msg.event === 'history' && msg.data) {
-        console.log(`[WebSocket] Writing history (${msg.data.length} chars) to terminal`)
         session.terminal.clear()
         session.terminal.write(msg.data)
       } else if (msg.event === 'update' && msg.data) {
@@ -46,7 +43,6 @@ export function connectWebSocket(port: number): WebSocket | null {
       }
     } catch {
       // Raw text output
-      console.log(`[WebSocket] Received raw text on port ${port}:`, event.data?.length ?? 0, 'chars')
       session.terminal.write(event.data)
     }
   }
@@ -65,14 +61,12 @@ export function connectWebSocket(port: number): WebSocket | null {
   // Wire up terminal input to WebSocket
   // Dispose old handler if exists
   if (session.onDataDisposable) {
-    console.log(`[WebSocket] Disposing old onData handler for port ${port}`)
     session.onDataDisposable.dispose()
   }
 
   // Register new handler and store disposable
   session.onDataDisposable = session.terminal.onData((data: string) => {
     if (ws.readyState === WebSocket.OPEN) {
-      console.log(`[WebSocket] Sending input to port ${port}:`, JSON.stringify(data))
       ws.send(JSON.stringify({ event: 'type', text: data, nonewline: true }))
     }
   })

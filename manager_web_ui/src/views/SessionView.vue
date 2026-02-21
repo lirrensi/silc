@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTerminalManager } from '@/stores/terminalManager'
 import TerminalViewport from '@/components/TerminalViewport.vue'
@@ -12,27 +12,49 @@ const manager = useTerminalManager()
 const port = computed(() => parseInt(route.params.port as string, 10))
 const session = computed(() => manager.getSession(port.value))
 
-console.log(`[SessionView] Setup for port ${port.value}`)
-
 onMounted(() => {
-  console.log(`[SessionView] onMounted, setting focused to ${port.value}`)
   manager.setFocused(port.value)
+  refreshTerminal()
 })
 
 onUnmounted(() => {
-  console.log(`[SessionView] onUnmounted, clearing focus`)
   manager.setFocused(null)
 })
 
+// Refresh terminal when switching to this session
+watch(port, () => {
+  manager.setFocused(port.value)
+  refreshTerminal()
+})
+
+function refreshTerminal(): void {
+  const s = manager.getSession(port.value)
+  if (s?.ws && s.ws.readyState === WebSocket.OPEN) {
+    s.terminal.clear()
+    s.ws.send(JSON.stringify({ event: 'load_history' }))
+  }
+}
+
+async function handleClear(): Promise<void> {
+  const s = manager.getSession(port.value)
+  if (s) {
+    s.terminal.clear()
+    // Send clear to backend
+    try {
+      await fetch(`http://127.0.0.1:${port.value}/clear`, { method: 'POST' })
+    } catch (err) {
+      console.error('Clear failed:', err)
+    }
+  }
+}
+
 function handleClose(): void {
-  console.log(`[SessionView] handleClose for port ${port.value}`)
   manager.detach(port.value)
   manager.setFocused(null)
   router.push('/')
 }
 
 async function handleKill(): Promise<void> {
-  console.log(`[SessionView] handleKill for port ${port.value}`)
   try {
     await closeSession(port.value)
     manager.removeSession(port.value)
@@ -60,6 +82,13 @@ async function handleKill(): Promise<void> {
           title="Home"
         >
           🏠
+        </button>
+        <button
+          @click="refreshTerminal"
+          class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
+          title="Refresh"
+        >
+          ↻
         </button>
         <button
           @click="handleClose"
@@ -94,6 +123,12 @@ async function handleKill(): Promise<void> {
         class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
       >
         Ctrl+D
+      </button>
+      <button
+        @click="handleClear"
+        class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
+      >
+        Clear
       </button>
       <div class="flex gap-1">
         <button
