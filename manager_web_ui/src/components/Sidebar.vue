@@ -39,7 +39,7 @@ async function fetchSessions(): Promise<void> {
     // Sync sessions with daemon
     for (const daemonSession of data) {
       if (!manager.getSession(daemonSession.port)) {
-        manager.createSession(daemonSession.port, daemonSession.session_id, daemonSession.shell)
+        manager.createSession(daemonSession.port, daemonSession.session_id, daemonSession.shell, daemonSession.name, daemonSession.cwd)
       }
     }
   } catch (err) {
@@ -54,12 +54,19 @@ fetchSessions()
 <template>
   <aside class="w-48 bg-[#252526] border-r border-[#5e5e62] flex flex-col h-full">
     <!-- Header -->
-    <div class="p-3 border-b border-[#5e5e62]">
+    <div class="p-3 border-b border-[#5e5e62] flex gap-2">
       <button
         @click="handleCreateNewSession"
-        class="w-full px-3 py-2 bg-[#ff80bf] hover:bg-[#ff99cc] text-black font-medium rounded transition-colors text-sm"
+        class="flex-1 px-3 py-2 bg-[#ff80bf] hover:bg-[#ff99cc] text-black font-medium rounded transition-colors text-sm"
       >
-        + New
+        +
+      </button>
+      <button
+        @click="router.push('/')"
+        class="px-3 py-2 bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors text-sm"
+        title="Home"
+      >
+        🏠
       </button>
     </div>
 
@@ -73,7 +80,7 @@ fetchSessions()
         :class="{ 'bg-[#3d3d3d]': manager.focusedPort === session.port }"
       >
         <div class="w-2 h-2 rounded-full flex-shrink-0" :class="statusColor(session.status)"></div>
-        <span class="font-mono text-sm truncate">:{{ session.port }}</span>
+        <span class="text-sm truncate">{{ session.name || `:${session.port}` }}</span>
       </div>
     </div>
   </aside>

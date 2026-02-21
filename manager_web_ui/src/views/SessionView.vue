@@ -47,11 +47,20 @@ async function handleKill(): Promise<void> {
   <div class="session-view h-full flex flex-col">
     <!-- Tab Bar -->
     <div class="tab-bar flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-[#5e5e62]">
-      <div class="flex items-center gap-2">
-        <span class="font-mono text-lg">:{{ port }}</span>
-        <span class="text-sm text-[#a0a0a0]">{{ session?.shell ?? '' }}</span>
+      <div class="flex items-center gap-3">
+        <span class="font-mono text-lg text-[#ff80bf]">{{ session?.name ?? 'unnamed' }}</span>
+        <span class="font-mono text-sm text-[#a0a0a0]">:{{ port }}</span>
+        <span class="text-sm text-[#6b7280]">[{{ session?.shell ?? '' }}]</span>
+        <span v-if="session?.cwd" class="text-sm text-[#6b7280] truncate max-w-[200px]" :title="session.cwd">{{ session.cwd }}</span>
       </div>
       <div class="flex items-center gap-2">
+        <button
+          @click="router.push('/')"
+          class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
+          title="Home"
+        >
+          🏠
+        </button>
         <button
           @click="handleClose"
           class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"

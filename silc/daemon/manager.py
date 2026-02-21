@@ -147,7 +147,7 @@ class SilcDaemon:
                 cwd = request.cwd
                 session_name = request.name
             if selected_port is None:
-                selected_port = find_available_port(20000, 21000)
+                selected_port = self._find_available_session_port()
 
             if selected_port in self.sessions:
                 raise HTTPException(
@@ -282,6 +282,7 @@ class SilcDaemon:
                             "name": entry.name,
                             "session_id": entry.session_id,
                             "shell": entry.shell_type,
+                            "cwd": session.cwd,
                             "idle_seconds": status["idle_seconds"],
                             "alive": status["alive"],
                         }
@@ -466,6 +467,37 @@ class SilcDaemon:
         self._cleanup_tasks[port] = task
         task.add_done_callback(lambda t, port=port: self._cleanup_tasks.pop(port, None))
         return task
+
+    def _find_available_session_port(
+        self, start: int = 20000, end: int = 21000, max_attempts: int = 100
+    ) -> int:
+        """Find an available port for a new session.
+
+        This checks both daemon's internal session registry and actual port binding.
+        """
+        attempts = 0
+        for port in range(start, end):
+            if attempts >= max_attempts:
+                break
+            attempts += 1
+
+            # Skip ports already used by daemon
+            if port in self.sessions or port in self._session_sockets:
+                continue
+
+            # Try to actually bind the port
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("127.0.0.1", port))
+                sock.close()
+                return port
+            except OSError:
+                continue
+
+        raise RuntimeError(
+            f"Could not find an available port in range {start}-{end} after {max_attempts} attempts."
+        )
 
     def _reserve_session_socket(
         self, port: int, is_global: bool = False
@@ -756,14 +788,13 @@ class SilcDaemon:
         return result
 
     async def _garbage_collect(self) -> None:
-        """Periodic garbage collection of idle sessions."""
+        """Periodic garbage collection: log rotation only.
+
+        Sessions never expire - they stay alive indefinitely.
+        Idle tracking is kept for status/metrics only.
+        """
         while self._running and not self._shutdown_event.is_set():
             await asyncio.sleep(60)
-
-            # Cleanup timed out sessions
-            cleaned_ports = self.registry.cleanup_timeout(timeout_seconds=1800)
-            for port in cleaned_ports:
-                await self._ensure_cleanup_task(port)
 
             # Rotate daemon log
             rotate_daemon_log(max_lines=1000)

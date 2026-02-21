@@ -23,11 +23,11 @@ async function syncSessions(): Promise<void> {
 
     // Create sessions that don't exist
     for (const ds of daemonSessions) {
-      console.log(`[HomeView] Processing session port=${ds.port}, name=${ds.session_id}`)
+      console.log(`[HomeView] Processing session port=${ds.port}, name=${ds.name}`)
       let session = manager.getSession(ds.port)
       if (!session) {
         console.log(`[HomeView] Creating new session for port ${ds.port}`)
-        session = manager.createSession(ds.port, ds.session_id, ds.shell)
+        session = manager.createSession(ds.port, ds.session_id, ds.shell, ds.name, ds.cwd)
       }
       // Connect WebSocket for all sessions
       if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {

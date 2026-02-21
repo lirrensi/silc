@@ -106,16 +106,28 @@ class SilcSession:
         self._gc_task = asyncio.create_task(self._garbage_collect())
 
     async def _read_loop(self) -> None:
+        consecutive_empty_reads = 0
         while not self._closed:
             try:
                 data = await self.pty.read(4096)
                 if data:
+                    consecutive_empty_reads = 0
                     self.buffer.append(data)
                     self.last_output = datetime.utcnow()
                     write_session_log(
                         self.port, f"OUTPUT: {data.decode('utf-8', errors='replace')}"
                     )
                 else:
+                    # Empty read - check if shell process is still alive
+                    consecutive_empty_reads += 1
+                    if consecutive_empty_reads >= 3:
+                        if not self.pty.is_alive():
+                            write_session_log(
+                                self.port, "Shell process exited, closing session"
+                            )
+                            self._closed = True
+                            break
+                        consecutive_empty_reads = 0  # Reset if still alive
                     await asyncio.sleep(0.1)
             except asyncio.CancelledError:
                 break
@@ -123,17 +135,11 @@ class SilcSession:
                 break
 
     async def _garbage_collect(self) -> None:
-        # GC runs every 60s; closes session if:
-        # - idle > 1800s (30min)
-        # - not actively used (tui_active is False)
-        # - not currently running a command (run_lock not locked)
-        # - no TUI connection
+        # GC runs every 60s for log rotation.
+        # Sessions never expire - they stay alive indefinitely.
+        # Idle tracking is kept for status/metrics only.
         while not self._closed:
             await asyncio.sleep(60)
-            idle = (datetime.utcnow() - self.last_access).total_seconds()
-            if idle > 1800 and not self.tui_active and not self.run_lock.locked():
-                await self.close()
-                break
             self.rotate_logs()
 
     async def _ensure_helper_ready(self) -> None:

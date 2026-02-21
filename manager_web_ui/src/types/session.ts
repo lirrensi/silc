@@ -6,7 +6,9 @@ export type SessionStatus = 'active' | 'idle' | 'dead'
 export interface Session {
   port: number
   sessionId: string
+  name: string
   shell: string
+  cwd: string | null
   terminal: Terminal
   fitAddon: FitAddon
   ws: WebSocket | null
@@ -17,8 +19,10 @@ export interface Session {
 
 export interface DaemonSession {
   port: number
+  name: string
   session_id: string
   shell: string
+  cwd: string | null
   idle_seconds: number
   alive: boolean
 }

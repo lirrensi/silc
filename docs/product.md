@@ -636,10 +636,11 @@ Configuration is loaded from (highest to lowest priority):
 |--------|------|---------|-------------|
 | `default_timeout` | int | 600 | Default command timeout (seconds) |
 | `max_buffer_bytes` | int | 5242880 | Maximum buffer size (5MB) |
-| `idle_timeout` | int | 1800 | Session idle timeout (seconds) |
 | `gc_interval` | int | 60 | Garbage collection interval (seconds) |
 
-**Environment Variables:** `SILC_COMMAND_TIMEOUT`, `SILC_MAX_BUFFER_BYTES`, `SILC_IDLE_TIMEOUT`, `SILC_GC_INTERVAL`
+**Environment Variables:** `SILC_COMMAND_TIMEOUT`, `SILC_MAX_BUFFER_BYTES`, `SILC_GC_INTERVAL`
+
+> **Note:** Sessions never expire. They stay alive indefinitely until explicitly closed or killed. Idle time is tracked for status/metrics only.
 
 #### `[logging]`
 
@@ -660,7 +661,8 @@ Configuration is loaded from (highest to lowest priority):
 |-----------|-------------|
 | **Auto-start daemon** | `silc start` starts daemon if not running |
 | **Auto-create session** | `silc start` creates first session automatically |
-| **Idle cleanup** | Sessions idle > 30 minutes are garbage collected |
+| **No expiration** | Sessions stay alive indefinitely until explicitly closed |
+| **Shell exit detection** | Sessions automatically close when shell process exits |
 | **Graceful shutdown** | `silc shutdown` closes all sessions cleanly |
 | **Force kill** | `silc killall` terminates everything immediately |
 

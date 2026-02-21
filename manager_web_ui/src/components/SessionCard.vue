@@ -35,9 +35,10 @@ function statusColor(status: string): string {
     <div class="flex items-center justify-between px-2 py-1 bg-[#252526] border-b border-[#5e5e62]">
       <div class="flex items-center gap-2">
         <div class="w-2 h-2 rounded-full" :class="statusColor(session?.status ?? 'idle')"></div>
-        <span class="font-mono text-xs">:{{ port }}</span>
+        <span class="text-xs font-medium">{{ session?.name ?? 'unnamed' }}</span>
+        <span class="font-mono text-xs text-[#a0a0a0]">:{{ port }}</span>
       </div>
-      <span class="text-xs text-[#a0a0a0]">{{ session?.shell ?? '' }}</span>
+      <span class="text-xs text-[#6b7280]">{{ session?.shell ?? '' }}</span>
     </div>
 
     <!-- Terminal Preview (scaled down) -->

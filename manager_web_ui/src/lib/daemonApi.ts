@@ -2,8 +2,10 @@ const DAEMON_URL = 'http://127.0.0.1:19999'
 
 export interface DaemonSession {
   port: number
+  name: string
   session_id: string
   shell: string
+  cwd: string | null
   idle_seconds: number
   alive: boolean
 }

@@ -64,7 +64,7 @@ async function fetchAndCreateSession(): Promise<void> {
 
     if (daemonSession) {
       console.log(`[TerminalViewport] Found daemon session:`, daemonSession)
-      manager.createSession(props.port, daemonSession.session_id, daemonSession.shell)
+      manager.createSession(props.port, daemonSession.session_id, daemonSession.shell, daemonSession.name, daemonSession.cwd)
       attachAndConnect()
     } else {
       console.warn(`[TerminalViewport] No daemon session found for port ${props.port}`)

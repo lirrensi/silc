@@ -36,6 +36,9 @@ class PTYBase(ABC):
     @abstractmethod
     def kill(self) -> None: ...
 
+    @abstractmethod
+    def is_alive(self) -> bool: ...
+
 
 class StubPTY(PTYBase):
     """Fallback PTY used when a platform-specific backend cannot be loaded."""
@@ -57,6 +60,9 @@ class StubPTY(PTYBase):
 
     def kill(self) -> None:
         return None
+
+    def is_alive(self) -> bool:
+        return False
 
 
 class UnixPTY(PTYBase):
@@ -134,6 +140,12 @@ class UnixPTY(PTYBase):
                 os.close(self._master_fd)
             except OSError:
                 pass
+
+    def is_alive(self) -> bool:
+        """Check if the shell process is still running."""
+        if self._process is None:
+            return False
+        return self._process.poll() is None
 
 
 class WindowsPTY(PTYBase):
@@ -284,6 +296,21 @@ class WindowsPTY(PTYBase):
                 "winpty is required on Windows to run SILC."
             ) from winpty_error
         return module
+
+    def is_alive(self) -> bool:
+        """Check if the shell process is still running."""
+        if self._process is None:
+            return False
+        # Try poll() first (PtyProcess has this)
+        poll_fn = getattr(self._process, "poll", None)
+        if callable(poll_fn):
+            return poll_fn() is None
+        # Fallback: check via psutil
+        if self.pid:
+            import psutil
+
+            return psutil.pid_exists(self.pid)
+        return False
 
 
 def create_pty(

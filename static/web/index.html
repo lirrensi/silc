@@ -166,6 +166,26 @@
                 term.open(document.getElementById("terminal"));
                 term.focus();
 
+                // Handle Ctrl+Enter and other modified keys that xterm doesn't emit by default
+                term.attachCustomKeyEventHandler((event) => {
+                    if (event.type === "keydown") {
+                        // Ctrl+Enter: send modified enter sequence
+                        if (event.ctrlKey && event.key === "Enter") {
+                            // Send CSI sequence for Ctrl+Enter (modified key u sequence)
+                            sendViaWS("\x1b[13;5u");
+                            event.preventDefault();
+                            return false;
+                        }
+                        // Shift+Enter: send shift-enter sequence
+                        if (event.shiftKey && event.key === "Enter" && !event.ctrlKey) {
+                            sendViaWS("\x1b[13;2u");
+                            event.preventDefault();
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+
                 // Resize handling
                 const terminalEl = document.getElementById("terminal");
                 let resizeTimeout = null;

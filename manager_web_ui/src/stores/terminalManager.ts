@@ -27,8 +27,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   })
 
   // Actions
-  function createSession(port: number, sessionId: string, shell: string): Session {
-    console.log(`[TerminalManager] Creating session: port=${port}, sessionId=${sessionId}, shell=${shell}`)
+  function createSession(port: number, sessionId: string, shell: string, name: string = '', cwd: string | null = null): Session {
+    console.log(`[TerminalManager] Creating session: port=${port}, name=${name}, sessionId=${sessionId}, shell=${shell}, cwd=${cwd}`)
     const terminal = new Terminal({
       cols: 120,
       rows: 30,
@@ -50,7 +50,9 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const session: Session = {
       port,
       sessionId,
+      name,
       shell,
+      cwd,
       terminal,
       fitAddon,
       ws: null,
@@ -58,6 +60,31 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       status: 'idle',
       lastActivity: Date.now(),
     }
+
+    // Handle Ctrl+Enter and other modified keys that xterm doesn't emit by default
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type === 'keydown') {
+        // Helper to send via WebSocket
+        const sendKey = (text: string) => {
+          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
+          }
+        }
+        // Ctrl+Enter
+        if (event.ctrlKey && event.key === 'Enter') {
+          sendKey('\x1b[13;5u')
+          event.preventDefault()
+          return false
+        }
+        // Shift+Enter
+        if (event.shiftKey && event.key === 'Enter' && !event.ctrlKey) {
+          sendKey('\x1b[13;2u')
+          event.preventDefault()
+          return false
+        }
+      }
+      return true
+    })
 
     sessions.value.set(port, session)
     console.log(`[TerminalManager] Session created successfully: port=${port}`)
@@ -154,6 +181,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     // Notify backend
     try {
       await resizeSession(port, rows, cols)
+      // Request fresh output after resize
+      if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+        session.ws.send(JSON.stringify({ event: 'load_history' }))
+      }
     } catch (err) {
       console.error(`[TerminalManager] fit: failed to resize backend for port ${port}:`, err)
     }
