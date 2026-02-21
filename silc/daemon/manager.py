@@ -15,6 +15,7 @@ from typing import Dict
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from silc.api.server import create_app
@@ -93,7 +94,17 @@ class SilcDaemon:
         async def startup_event():
             write_daemon_log("Daemon API is ready to accept requests")
 
+        # Mount static files for assets (must be before catch-all routes)
+        static_dir = Path(__file__).parent.parent.parent / "static" / "manager"
+        if static_dir.exists():
+            app.mount(
+                "/assets",
+                StaticFiles(directory=str(static_dir / "assets")),
+                name="assets",
+            )
+
         @app.get("/", response_class=HTMLResponse)
+        @app.get("/index.html", response_class=HTMLResponse)
         async def manager_ui() -> HTMLResponse:
             """Serve the manager web UI."""
             static_dir = Path(__file__).parent.parent.parent / "static" / "manager"
@@ -102,6 +113,12 @@ class SilcDaemon:
                 with open(index_path, "r", encoding="utf-8") as f:
                     return HTMLResponse(f.read())
             return HTMLResponse("<h1>Manager UI not found</h1>")
+
+        @app.get("/{path:path}", response_class=HTMLResponse)
+        async def serve_spa(path: str) -> HTMLResponse:
+            """Serve SPA fallback - return index.html for client-side routing."""
+            # Serve index.html for any path that falls through (Vue Router handles it)
+            return await manager_ui()
 
         @app.post("/sessions")
         async def create_session(

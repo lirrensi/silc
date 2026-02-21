@@ -3,6 +3,9 @@
 # Run: pre-commit install to set up git hooks
 # Run: pre-commit run --all-files to check all files (including manual checks)
 
+# Global exclude patterns (build artifacts, plans, etc.)
+exclude: ^(static/manager/|plans/|dist/|build/|wheels/|.*\.egg-info/|__pycache__/)
+
 repos:
   # =============================================================================
   # AUTOMATIC FORMATTERS (run on every commit, auto-fix files)

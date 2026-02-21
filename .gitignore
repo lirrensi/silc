@@ -6,6 +6,9 @@ dist/
 wheels/
 *.egg-info/
 
+# Plans (development artifacts)
+plans/
+
 # Virtual environments
 .venv/
 .env
@@ -29,3 +32,4 @@ htmlcov/
 # Project-specific
 private/
 docs/archive/
+static/manager/
