@@ -149,6 +149,7 @@ silc 20000 run "htop"         # Use TUI apps remotely
 | `silc list` | List all active sessions |
 | `silc shutdown` | Gracefully shut down daemon and all sessions |
 | `silc killall` | Force kill daemon and all sessions |
+| `silc restart-server` | Restart daemon HTTP server (sessions survive) |
 | `silc logs [--tail N]` | Show daemon logs |
 
 ### Session Commands

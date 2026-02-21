@@ -148,6 +148,7 @@ The daemon exposes a management API on port 19999.
 | `DELETE` | `/sessions/{port}` | Close a specific session |
 | `POST` | `/shutdown` | Graceful shutdown |
 | `POST` | `/killall` | Force kill all |
+| `POST` | `/restart-server` | Restart HTTP server without killing sessions |
 
 ### `GET /`
 
@@ -191,6 +192,19 @@ Serves the session manager SPA that allows users to view, create, and manage ses
   }
 ]
 ```
+
+### `POST /restart-server`
+
+**Response:**
+```json
+{
+  "status": "restarting"
+}
+```
+
+Restarts the HTTP server layer while keeping all PTY sessions alive. The daemon process continues running; only the uvicorn server is stopped and restarted.
+
+**Use case:** Recovering from HTTP issues without losing shell sessions.
 
 ---
 

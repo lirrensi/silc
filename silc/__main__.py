@@ -754,6 +754,17 @@ def killall() -> None:
     click.echo("💀 SILC daemon and all sessions killed")
 
 
+@cli.command(name="restart-server")
+def restart_server() -> None:
+    """Restart the daemon HTTP server (sessions survive)."""
+    try:
+        resp = requests.post(_daemon_url("/restart-server"), timeout=5)
+        resp.raise_for_status()
+        click.echo("✨ Daemon HTTP server restarted (sessions preserved)")
+    except requests.RequestException as e:
+        click.echo(f"❌ Failed to restart server: {e}", err=True)
+
+
 @cli.command()
 def manager() -> None:
     """Open the session manager web UI (starts daemon if needed)."""

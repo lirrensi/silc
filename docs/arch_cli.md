@@ -66,6 +66,7 @@ silc
 ├── list
 ├── shutdown
 ├── killall
+├── restart-server
 ├── logs [--tail]
 ├── daemon (hidden)
 └── <port>
@@ -177,6 +178,16 @@ def killall():
     requests.post("http://127.0.0.1:19999/killall", timeout=3)
     kill_daemon(port=19999, force=True)
 ```
+
+### `silc restart-server`
+
+```python
+@cli.command(name="restart-server")
+def restart_server():
+    requests.post("http://127.0.0.1:19999/restart-server", timeout=5)
+```
+
+Restarts the daemon HTTP server without killing PTY sessions. Useful for recovering from HTTP issues while keeping shells alive.
 
 ---
 

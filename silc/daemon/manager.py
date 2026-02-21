@@ -81,6 +81,7 @@ class SilcDaemon:
         self._session_sockets: Dict[int, socket.socket] = {}
         self._running = False
         self._shutdown_event = asyncio.Event()
+        self._restart_event = asyncio.Event()
         self._daemon_api_app = self._create_daemon_api()
         self._session_tasks: Dict[int, asyncio.Task] = {}
         self._cleanup_tasks: Dict[int, asyncio.Task[None]] = {}
@@ -335,6 +336,13 @@ class SilcDaemon:
                 asyncio.create_task(self._hard_exit_after(delay=0.25, exit_code=1))
 
             return {"status": "killed"}
+
+        @app.post("/restart-server")
+        async def restart_server():
+            """Restart the HTTP server without killing sessions."""
+            write_daemon_log("Server restart requested")
+            self._restart_event.set()
+            return {"status": "restarting"}
 
         return app
 
@@ -593,6 +601,43 @@ class SilcDaemon:
         if self._daemon_server:
             self._daemon_server.should_exit = True
 
+    async def _watch_restart(self) -> None:
+        """Watch for restart requests and restart the HTTP server."""
+        while self._running and not self._shutdown_event.is_set():
+            await self._restart_event.wait()
+            if self._shutdown_event.is_set():
+                return
+
+            write_daemon_log("Restarting HTTP server...")
+
+            # Stop current server
+            if self._daemon_server:
+                self._daemon_server.should_exit = True
+                # Give it time to drain connections
+                await asyncio.sleep(0.5)
+
+            # Recreate and restart
+            self._daemon_api_app = self._create_daemon_api()
+            config = uvicorn.Config(
+                self._daemon_api_app,
+                host="127.0.0.1",
+                port=DAEMON_PORT,
+                log_level="info",
+                access_log=True,
+            )
+            self._daemon_server = uvicorn.Server(config)
+
+            # Clear the restart event before serving
+            self._restart_event.clear()
+
+            # Start serving in a new task (we're in a background task)
+            asyncio.create_task(self._daemon_server.serve())
+
+            write_daemon_log("HTTP server restarted")
+
+            # Small delay to prevent tight restart loops
+            await asyncio.sleep(0.1)
+
     def _setup_signals(self) -> None:
         """Setup signal handlers for graceful shutdown."""
 
@@ -674,6 +719,7 @@ class SilcDaemon:
         # Start GC task
         gc_task = asyncio.create_task(self._garbage_collect())
         shutdown_watcher = asyncio.create_task(self._watch_shutdown())
+        restart_watcher = asyncio.create_task(self._watch_restart())
 
         # Run daemon server
         try:
@@ -682,6 +728,7 @@ class SilcDaemon:
             # Cleanup on exit
             gc_task.cancel()
             shutdown_watcher.cancel()
+            restart_watcher.cancel()
             remove_pidfile()
             write_daemon_log("Silc daemon stopped")
             self._running = False
