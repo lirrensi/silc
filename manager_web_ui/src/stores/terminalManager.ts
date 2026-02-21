@@ -3,6 +3,10 @@ import { ref, computed } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { Session, SessionStatus } from '@/types/session'
+import { resizeSession } from '@/lib/daemonApi'
+
+const MAX_COLS = 256
+const MAX_ROWS = 64
 
 export const useTerminalManager = defineStore('terminalManager', () => {
   const sessions = ref<Map<number, Session>>(new Map())
@@ -50,6 +54,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       terminal,
       fitAddon,
       ws: null,
+      onDataDisposable: null,
       status: 'idle',
       lastActivity: Date.now(),
     }
@@ -71,6 +76,9 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     if (session) {
       if (session.ws) {
         session.ws.close()
+      }
+      if (session.onDataDisposable) {
+        session.onDataDisposable.dispose()
       }
       session.terminal.dispose()
       sessions.value.delete(port)
@@ -102,8 +110,9 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       // Terminal hasn't been opened yet - open it on the container
       console.log(`[TerminalManager] Opening terminal on container for port ${port}`)
       session.terminal.open(container)
-      session.fitAddon.fit()
-      console.log(`[TerminalManager] Terminal opened and fitted for port ${port}`)
+      console.log(`[TerminalManager] Terminal opened for port ${port}`)
+      // Fit after open
+      fit(port)
       return
     }
 
@@ -114,7 +123,40 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
 
     container.appendChild(element)
+    fit(port)
+  }
+
+  async function fit(port: number): Promise<void> {
+    const session = sessions.value.get(port)
+    if (!session?.terminal?.element) {
+      console.warn(`[TerminalManager] fit: no session/terminal for port ${port}`)
+      return
+    }
+
+    // Use FitAddon to calculate optimal dimensions
     session.fitAddon.fit()
+
+    // Get dimensions from terminal after fit
+    let cols = session.terminal.cols
+    let rows = session.terminal.rows
+
+    // Clamp to max
+    cols = Math.min(cols, MAX_COLS)
+    rows = Math.min(rows, MAX_ROWS)
+
+    console.log(`[TerminalManager] fit(${port}): cols=${cols}, rows=${rows}`)
+
+    // Resize terminal locally
+    if (session.terminal.cols !== cols || session.terminal.rows !== rows) {
+      session.terminal.resize(cols, rows)
+    }
+
+    // Notify backend
+    try {
+      await resizeSession(port, rows, cols)
+    } catch (err) {
+      console.error(`[TerminalManager] fit: failed to resize backend for port ${port}:`, err)
+    }
   }
 
   function detach(port: number): void {
@@ -153,6 +195,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     setFocused,
     attach,
     detach,
+    fit,
     setStatus,
     setWs,
   }

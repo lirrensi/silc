@@ -13,9 +13,19 @@ console.log(`[TerminalViewport] Setup for port ${props.port}, interactive=${prop
 
 const manager = useTerminalManager()
 const containerRef = ref<HTMLElement | null>(null)
+let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
   console.log(`[TerminalViewport] onMounted for port ${props.port}, containerRef=${containerRef.value ? 'exists' : 'null'}`)
+
+  // Set up ResizeObserver
+  if (containerRef.value) {
+    resizeObserver = new ResizeObserver(() => {
+      manager.fit(props.port)
+    })
+    resizeObserver.observe(containerRef.value)
+  }
+
   const session = manager.getSession(props.port)
   if (!session) {
     // Session doesn't exist in manager, need to fetch from daemon
@@ -30,6 +40,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   console.log(`[TerminalViewport] onUnmounted for port ${props.port}`)
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
   manager.detach(props.port)
 })
 

@@ -61,3 +61,16 @@ export async function closeSession(port: number): Promise<void> {
   }
   console.log(`[DaemonAPI] Session ${port} closed`)
 }
+
+export async function resizeSession(port: number, rows: number, cols: number): Promise<void> {
+  const url = `http://127.0.0.1:${port}/resize?rows=${rows}&cols=${cols}`
+  console.log(`[DaemonAPI] POST ${url}`)
+  const resp = await fetch(url, { method: 'POST' })
+  console.log(`[DaemonAPI] Response status: ${resp.status}`)
+  if (!resp.ok) {
+    const text = await resp.text()
+    console.error(`[DaemonAPI] Error response:`, text)
+    throw new Error(`Failed to resize session: HTTP ${resp.status}`)
+  }
+  console.log(`[DaemonAPI] Session ${port} resized to ${cols}x${rows}`)
+}

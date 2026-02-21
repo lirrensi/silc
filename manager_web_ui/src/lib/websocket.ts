@@ -63,7 +63,14 @@ export function connectWebSocket(port: number): WebSocket | null {
   }
 
   // Wire up terminal input to WebSocket
-  session.terminal.onData((data: string) => {
+  // Dispose old handler if exists
+  if (session.onDataDisposable) {
+    console.log(`[WebSocket] Disposing old onData handler for port ${port}`)
+    session.onDataDisposable.dispose()
+  }
+
+  // Register new handler and store disposable
+  session.onDataDisposable = session.terminal.onData((data: string) => {
     if (ws.readyState === WebSocket.OPEN) {
       console.log(`[WebSocket] Sending input to port ${port}:`, JSON.stringify(data))
       ws.send(JSON.stringify({ event: 'type', text: data, nonewline: true }))
