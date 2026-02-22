@@ -26,7 +26,9 @@ def _get_error_detail(response: requests.Response | None) -> str:
 def list_sessions() -> list[dict[str, Any]]:
     """List all active SILC sessions."""
     try:
-        resp = requests.get(f"http://127.0.0.1:{DAEMON_PORT}/sessions", timeout=5)
+        resp = requests.get(
+            f"http://127.0.0.1:{DAEMON_PORT}/sessions", timeout=(3.0, 10.0)
+        )
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException:
@@ -55,7 +57,7 @@ def start_session(
         resp = requests.post(
             f"http://127.0.0.1:{DAEMON_PORT}/sessions",
             json=payload,
-            timeout=10,
+            timeout=(3.0, 30.0),
         )
         resp.raise_for_status()
         return resp.json()
@@ -70,7 +72,7 @@ def close_session(port: int) -> dict[str, Any]:
     try:
         resp = requests.delete(
             f"http://127.0.0.1:{DAEMON_PORT}/sessions/{port}",
-            timeout=5,
+            timeout=(3.0, 10.0),
         )
         if resp.status_code == 404:
             return {"error": "Session not found", "status": "not_found"}
@@ -85,7 +87,7 @@ def get_status(port: int) -> dict[str, Any]:
     try:
         resp = requests.get(
             f"http://127.0.0.1:{port}/status",
-            timeout=5,
+            timeout=(3.0, 10.0),
         )
         if resp.status_code == 410:
             return {"alive": False, "error": "Session has ended"}
@@ -101,7 +103,7 @@ def resize(port: int, rows: int = 30, cols: int = 120) -> dict[str, Any]:
         resp = requests.post(
             f"http://127.0.0.1:{port}/resize",
             params={"rows": rows, "cols": cols},
-            timeout=5,
+            timeout=(3.0, 10.0),
         )
         if resp.status_code == 410:
             return {"error": "Session has ended", "status": "not_found"}
@@ -117,7 +119,7 @@ def read(port: int, lines: int = 100) -> dict[str, Any]:
         resp = requests.get(
             f"http://127.0.0.1:{port}/out",
             params={"lines": lines},
-            timeout=5,
+            timeout=(3.0, 30.0),
         )
         if resp.status_code == 410:
             return {"output": "", "error": "Session has ended"}
@@ -139,7 +141,7 @@ def send(port: int, text: str, timeout_ms: int = 5000) -> dict[str, Any]:
             f"http://127.0.0.1:{port}/in",
             data=(text + "\n").encode("utf-8"),
             headers={"Content-Type": "text/plain; charset=utf-8"},
-            timeout=5,
+            timeout=(3.0, 10.0),
         )
         if resp.status_code == 410:
             return {"output": "", "alive": False, "error": "Session has ended"}
@@ -196,7 +198,7 @@ def send_key(port: int, key: str) -> dict[str, Any]:
             f"http://127.0.0.1:{port}/in",
             data=sequence,
             headers={"Content-Type": "application/octet-stream"},
-            timeout=5,
+            timeout=(3.0, 10.0),
         )
         if resp.status_code == 410:
             return {"output": "", "alive": False, "error": "Session has ended"}
@@ -214,10 +216,11 @@ def send_key(port: int, key: str) -> dict[str, Any]:
 def run(port: int, command: str, timeout_ms: int = 60000) -> dict[str, Any]:
     """Execute a command with exit code capture (native shell only)."""
     try:
+        command_timeout = timeout_ms // 1000
         resp = requests.post(
             f"http://127.0.0.1:{port}/run",
-            json={"command": command, "timeout": timeout_ms // 1000},
-            timeout=(timeout_ms // 1000) + 10,  # Extra buffer for response
+            json={"command": command, "timeout": command_timeout},
+            timeout=(3.0, command_timeout + 10.0),
         )
         if resp.status_code == 410:
             return {

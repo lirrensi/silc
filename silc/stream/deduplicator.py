@@ -18,6 +18,7 @@ class LineDeduplicator:
         self.window_size = window_size
         self.similarity_threshold = similarity_threshold
         self._exact_cache: Set[str] = set()  # For O(1) exact match checks
+        self._cache_max_size: int = window_size * 2  # Bound cache growth
         self._ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")  # ANSI escape codes
 
     def compute_diff(
@@ -112,10 +113,14 @@ class LineDeduplicator:
         Args:
             existing_lines: Lines to add to cache
         """
+        # Bound cache: if over limit, clear and rebuild from recent lines only
+        if len(self._exact_cache) > self._cache_max_size:
+            self._exact_cache.clear()
+
         # Limit cache to window size
         lines_to_cache = existing_lines[-self.window_size :]
 
-        # Update cache with normalized lines (accumulate, don't clear)
+        # Update cache with normalized lines
         for line in lines_to_cache:
             normalized = self.normalize_line(line)
             if normalized:

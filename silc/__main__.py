@@ -438,7 +438,36 @@ def start(
             else:
                 click.echo("✓ Daemon started successfully", err=False)
 
-    # Daemon is running, create session
+    # Daemon is running, derive name from folder if not provided
+    if name is None:
+        import re
+        from pathlib import Path
+
+        folder_name = Path.cwd().name.lower()
+        # Sanitize: keep only alphanumeric and hyphens, remove leading/trailing hyphens
+        folder_name = re.sub(r"[^a-z0-9-]+", "-", folder_name)
+        folder_name = folder_name.strip("-")
+        # Ensure starts with letter (pad if needed)
+        if not folder_name or not folder_name[0].isalpha():
+            folder_name = "s" + (folder_name or "")
+
+        # Check for collision with existing sessions
+        try:
+            existing = requests.get(_daemon_url("/sessions"), timeout=2)
+            existing_names = (
+                {s["name"] for s in existing.json()} if existing.ok else set()
+            )
+        except requests.RequestException:
+            existing_names = set()
+
+        name = folder_name
+        if name in existing_names:
+            # Append suffix: name-2, name-3, etc.
+            suffix = 2
+            while f"{folder_name}-{suffix}" in existing_names:
+                suffix += 1
+            name = f"{folder_name}-{suffix}"
+
     click.echo("Creating new session...", err=False)
     try:
         payload: dict[str, object] = {}
@@ -458,11 +487,10 @@ def start(
         resp.raise_for_status()
         session = resp.json()
         session_name = session.get("name", "N/A")
-        click.echo(f"✨ SILC session started at port {session['port']}")
-        click.echo(f"   Name: {session_name}")
-        click.echo(f"   Session ID: {session['session_id']}")
-        click.echo(f"   Shell: {session['shell']}")
-        click.echo(f"   Use: silc {session_name} out")
+        click.echo(f"🎉 Session '{session_name}' is live!")
+        click.echo(f"   → Connect: silc {session_name} tui")
+        click.echo(f"   → Web UI:  silc {session_name} web")
+        click.echo(f"   → API:     curl http://localhost:{session['port']}/status")
     except requests.HTTPError as e:
         response = e.response
         detail = _get_error_detail(response)
@@ -754,14 +782,21 @@ def list_sessions() -> None:
             click.echo("No active sessions")
             return
 
-        click.echo("Active sessions:")
         for s in sessions:
             status_icon = "✓" if s["alive"] else "✗"
-            name = s.get("name", "N/A")
+            cwd_display = s.get("cwd", "?")
+            # Truncate cwd if too long
+            if len(cwd_display) > 40:
+                cwd_display = "..." + cwd_display[-37:]
+
+            click.echo(f"{s['name']}")
             click.echo(
-                f"  {s['port']:5} | {name:16} | {s['session_id']:8} | {s['shell']:6} | "
-                f"idle: {s['idle_seconds']:4}s {status_icon}"
+                f"  port: {s['port']} | shell: {s['shell']} | alive: {status_icon}"
             )
+            click.echo(f"  cwd: {cwd_display}")
+            click.echo(f"  idle: {s['idle_seconds']:.0f}s | session: {s['session_id']}")
+            click.echo()
+
     except requests.RequestException:
         click.echo("SILC daemon is not running")
 

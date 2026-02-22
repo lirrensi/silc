@@ -108,13 +108,15 @@ silc 20000 out                # View output
 ### Flow 2: Named Sessions
 
 ```bash
-silc start my-project         # Create session with name "my-project"
+silc start my-project         # Create session with explicit name "my-project"
 silc my-project run "ls -la"  # Execute command (by name)
 silc my-project out           # View output
 
-silc start                    # Auto name: "happy-fox-42"
-silc happy-fox-42 status      # Use auto-generated name
+silc start                    # Auto name from folder: "my-project" (if in ~/projects/my-project)
+silc my-project status        # Use folder-derived name
 ```
+
+**Folder-based naming:** When no name is provided, SILC derives the session name from the current working directory's folder name. Running `silc start` in `~/projects/my-app` creates a session named `my-app`.
 
 ### Flow 3: AI Agent Integration
 
@@ -211,9 +213,9 @@ All session commands use the syntax `silc <port-or-name> <command>`. You can ide
 
 **Name format:** `[a-z][a-z0-9-]*[a-z0-9]` (lowercase letters, numbers, hyphens; must start with letter, cannot end with hyphen).
 
-**Auto-generated names:** If no name is provided, one is auto-generated in the format `adjective-noun-number` (e.g., `happy-fox-42`).
+**Folder-based naming:** If no name is provided, SILC derives the session name from the current working directory's folder name. The folder name is sanitized (lowercased, invalid chars replaced with hyphens) to match the required format. Running `silc start` in `~/projects/MyApp` creates a session named `myapp`.
 
-**Name collision:** If a name is already in use, session creation fails with an error.
+**Name collision:** If a folder-derived name is already in use, SILC auto-appends a numeric suffix: `myapp-2`, `myapp-3`, etc. Explicit name collisions (via positional argument) still fail with an error.
 
 #### `silc <port-or-name> run`
 
@@ -771,8 +773,8 @@ Configuration is loaded from (highest to lowest priority):
 
 ### Name Collision
 
-- If a requested name is already in use, session creation fails with error
-- Auto-generated names retry with different suffix if collision occurs (rare)
+- If an explicit name is already in use, session creation fails with error
+- Folder-derived names auto-append a numeric suffix on collision: `myapp-2`, `myapp-3`, etc.
 - Use `silc list` to see existing session names
 
 ### Port Conflicts
@@ -839,8 +841,8 @@ SILC deliberately does NOT:
 
 | Command | Description |
 |---------|-------------|
-| `silc start` | Start daemon and create session (auto name) |
-| `silc start my-project` | Start session with name "my-project" |
+| `silc start` | Start daemon and create session (name from folder) |
+| `silc start my-project` | Start session with explicit name "my-project" |
 | `silc <port-or-name> run "<cmd>"` | Execute command |
 | `silc <port-or-name> out` | View output |
 | `silc <port-or-name> status` | Check session status |

@@ -150,8 +150,10 @@ class UnixPTY(PTYBase):
                     pass
             except psutil.NoSuchProcess:
                 pass
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).debug(f"UnixPTY.kill error: {e}")
 
         if hasattr(self, "_master_fd"):
             try:
@@ -175,7 +177,10 @@ class UnixPTY(PTYBase):
                 os.killpg(os.getpgid(self.pid), signal.SIGTERM)
             except ProcessLookupError:
                 pass
-            except Exception:
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).debug(f"UnixPTY.send_sigterm error: {e}")
                 pass
 
     def send_sigkill(self) -> None:
@@ -188,7 +193,10 @@ class UnixPTY(PTYBase):
                 os.killpg(os.getpgid(self.pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            except Exception:
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).debug(f"UnixPTY.send_sigkill error: {e}")
                 pass
 
 
@@ -277,8 +285,12 @@ class WindowsPTY(PTYBase):
                         p.terminate()
                     except psutil.NoSuchProcess:
                         pass
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import logging
+
+                        logging.getLogger(__name__).debug(
+                            f"WindowsPTY.kill terminate error: {e}"
+                        )
 
                 gone, alive = psutil.wait_procs(all_procs, timeout=0.5)
                 for p in alive:
@@ -286,13 +298,19 @@ class WindowsPTY(PTYBase):
                         p.kill()
                     except psutil.NoSuchProcess:
                         pass
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import logging
+
+                        logging.getLogger(__name__).debug(
+                            f"WindowsPTY.kill kill error: {e}"
+                        )
                 psutil.wait_procs(alive, timeout=0.3)
             except psutil.NoSuchProcess:
                 pass
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).debug(f"WindowsPTY.kill method error: {e}")
 
         for method_name in ("kill", "terminate", "close"):
             method = getattr(self._process, method_name, None)
@@ -301,8 +319,12 @@ class WindowsPTY(PTYBase):
                     method()
                 except OSError:
                     pass
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging
+
+                    logging.getLogger(__name__).debug(
+                        f"WindowsPTY.kill process method error: {e}"
+                    )
                 break
         if self._pty_handle and hasattr(self._pty_handle, "close"):
             try:
@@ -370,8 +392,10 @@ class WindowsPTY(PTYBase):
                         pass
             except psutil.NoSuchProcess:
                 pass
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).debug(f"WindowsPTY.send_sigterm error: {e}")
 
     def send_sigkill(self) -> None:
         """Forcefully kill child processes."""
@@ -387,8 +411,10 @@ class WindowsPTY(PTYBase):
                         pass
             except psutil.NoSuchProcess:
                 pass
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).debug(f"WindowsPTY.send_sigkill error: {e}")
 
 
 def create_pty(

@@ -58,6 +58,7 @@ def setup_uvicorn_logging():
 
 
 DAEMON_PORT = 19999
+MAX_SESSIONS = 100  # Prevent resource exhaustion
 
 
 class SessionCreateRequest(BaseModel):
@@ -91,6 +92,7 @@ class SilcDaemon:
         self._session_tasks: Dict[int, asyncio.Task] = {}
         self._cleanup_tasks: Dict[int, asyncio.Task[None]] = {}
         self._daemon_server: uvicorn.Server | None = None
+        self._session_create_lock = asyncio.Lock()  # Serialize session creation
 
     def _create_daemon_api(self) -> FastAPI:
         """Create daemon management API."""
@@ -139,126 +141,137 @@ class SilcDaemon:
             shell: str | None = None
             cwd: str | None = None
             session_name: str | None = None
-            if selected_port is None and request:
-                selected_port = request.port
-                is_global = request.is_global
-                token = request.token
-                shell = request.shell
-                cwd = request.cwd
-                session_name = request.name
-            if selected_port is None:
-                selected_port = self._find_available_session_port()
+            async with self._session_create_lock:
+                if selected_port is None and request:
+                    selected_port = request.port
+                    is_global = request.is_global
+                    token = request.token
+                    shell = request.shell
+                    cwd = request.cwd
+                    session_name = request.name
+                if selected_port is None:
+                    selected_port = self._find_available_session_port()
 
-            if selected_port in self.sessions:
-                raise HTTPException(
-                    status_code=400, detail=f"Port {selected_port} already in use"
-                )
-
-            # Handle name validation and generation
-            if session_name:
-                session_name = session_name.lower().strip()
-                if not is_valid_name(session_name):
+                if selected_port in self.sessions:
                     raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid name format. Must match [a-z][a-z0-9-]*[a-z0-9]",
-                    )
-                if self.registry.name_exists(session_name):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Session name '{session_name}' is already in use",
-                    )
-            else:
-                # Auto-generate name
-                for _ in range(10):  # Try 10 times to avoid collision
-                    session_name = generate_name()
-                    if not self.registry.name_exists(session_name):
-                        break
-                else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Failed to generate unique session name",
+                        status_code=400, detail=f"Port {selected_port} already in use"
                     )
 
-            session_socket = self._reserve_session_socket(selected_port, is_global)
-            try:
-                # Handle shell override
-                if shell:
-                    from silc.utils.shell_detect import get_shell_info_by_type
+                if len(self.sessions) >= MAX_SESSIONS:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Maximum session count ({MAX_SESSIONS}) reached. Close unused sessions.",
+                    )
 
-                    shell_info = get_shell_info_by_type(shell)
-                    if shell_info is None:
+                # Handle name validation and generation
+                if session_name:
+                    session_name = session_name.lower().strip()
+                    if not is_valid_name(session_name):
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Unknown shell type: {shell}. Supported: bash, zsh, sh, pwsh, cmd",
+                            detail=f"Invalid name format. Must match [a-z][a-z0-9-]*[a-z0-9]",
+                        )
+                    if self.registry.name_exists(session_name):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Session name '{session_name}' is already in use",
                         )
                 else:
-                    shell_info = detect_shell()
-                session = SilcSession(
-                    selected_port, session_name, shell_info, api_token=token, cwd=cwd
+                    # Auto-generate name
+                    for _ in range(10):  # Try 10 times to avoid collision
+                        session_name = generate_name()
+                        if not self.registry.name_exists(session_name):
+                            break
+                    else:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Failed to generate unique session name",
+                        )
+
+                session_socket = self._reserve_session_socket(selected_port, is_global)
+                try:
+                    # Handle shell override
+                    if shell:
+                        from silc.utils.shell_detect import get_shell_info_by_type
+
+                        shell_info = get_shell_info_by_type(shell)
+                        if shell_info is None:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Unknown shell type: {shell}. Supported: bash, zsh, sh, pwsh, cmd",
+                            )
+                    else:
+                        shell_info = detect_shell()
+                    session = SilcSession(
+                        selected_port,
+                        session_name,
+                        shell_info,
+                        api_token=token,
+                        cwd=cwd,
+                    )
+                    await session.start()
+
+                    self.sessions[selected_port] = session
+                    entry = self.registry.add(
+                        selected_port,
+                        session_name,
+                        session.session_id,
+                        shell_info.type,
+                        is_global=is_global,
+                    )
+                    # Persist to sessions.json
+                    append_session_to_json(
+                        {
+                            "port": selected_port,
+                            "name": session_name,
+                            "session_id": session.session_id,
+                            "shell": shell_info.type,
+                            "is_global": is_global,
+                            "cwd": cwd,
+                            "created_at": entry.created_at.isoformat() + "Z",
+                        }
+                    )
+
+                    server = self._create_session_server(session, is_global=is_global)
+                    self.servers[selected_port] = server
+
+                    # Start session server in background
+                    task = asyncio.create_task(server.serve(sockets=[session_socket]))
+                    self._session_tasks[selected_port] = task
+                    self._attach_session_task(selected_port, task)
+
+                    # Log if session is globally accessible
+                    if is_global:
+                        write_daemon_log(
+                            f"Session {selected_port} is globally accessible on 0.0.0.0 (RCE RISK)"
+                        )
+                        write_daemon_log(
+                            "WARNING: --global flag exposes session on all network interfaces."
+                        )
+                        write_daemon_log(
+                            "WARNING: API tokens are sent over plaintext HTTP - NOT SECURE."
+                        )
+                        write_daemon_log(
+                            "WARNING: Only use on trusted home networks, NEVER on public internet."
+                        )
+                        write_daemon_log(
+                            "WARNING: Consider using SSH tunneling or reverse proxy with TLS for remote access."
+                        )
+                except Exception:
+                    self._close_session_socket(selected_port)
+                    raise
+
+                write_daemon_log(
+                    f"Session created: port={selected_port}, name={session_name}, id={session.session_id}"
                 )
-                await session.start()
 
-                self.sessions[selected_port] = session
-                entry = self.registry.add(
-                    selected_port,
-                    session_name,
-                    session.session_id,
-                    shell_info.type,
-                    is_global=is_global,
-                )
-                # Persist to sessions.json
-                append_session_to_json(
-                    {
-                        "port": selected_port,
-                        "name": session_name,
-                        "session_id": session.session_id,
-                        "shell": shell_info.type,
-                        "is_global": is_global,
-                        "cwd": cwd,
-                        "created_at": entry.created_at.isoformat() + "Z",
-                    }
-                )
-
-                server = self._create_session_server(session, is_global=is_global)
-                self.servers[selected_port] = server
-
-                # Start session server in background
-                task = asyncio.create_task(server.serve(sockets=[session_socket]))
-                self._session_tasks[selected_port] = task
-                self._attach_session_task(selected_port, task)
-
-                # Log if session is globally accessible
-                if is_global:
-                    write_daemon_log(
-                        f"Session {selected_port} is globally accessible on 0.0.0.0 (RCE RISK)"
-                    )
-                    write_daemon_log(
-                        "WARNING: --global flag exposes session on all network interfaces."
-                    )
-                    write_daemon_log(
-                        "WARNING: API tokens are sent over plaintext HTTP - NOT SECURE."
-                    )
-                    write_daemon_log(
-                        "WARNING: Only use on trusted home networks, NEVER on public internet."
-                    )
-                    write_daemon_log(
-                        "WARNING: Consider using SSH tunneling or reverse proxy with TLS for remote access."
-                    )
-            except Exception:
-                self._close_session_socket(selected_port)
-                raise
-
-            write_daemon_log(
-                f"Session created: port={selected_port}, name={session_name}, id={session.session_id}"
-            )
-
-            return {
-                "port": selected_port,
-                "name": session_name,
-                "session_id": session.session_id,
-                "shell": shell_info.type,
-                "cwd": cwd,
-            }
+                return {
+                    "port": selected_port,
+                    "name": session_name,
+                    "session_id": session.session_id,
+                    "shell": shell_info.type,
+                    "cwd": cwd,
+                }
 
         @app.get("/sessions")
         async def list_sessions():

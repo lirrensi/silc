@@ -131,7 +131,8 @@ class SilcSession:
                     await asyncio.sleep(0.1)
             except asyncio.CancelledError:
                 break
-            except Exception:
+            except Exception as e:
+                write_session_log(self.port, f"Read loop error: {e}")
                 break
 
     async def _garbage_collect(self) -> None:
@@ -395,7 +396,7 @@ class SilcSession:
             )
             fallback_lines = [
                 line
-                for line in fallback_text.split("\\n")
+                for line in fallback_text.split("\n")
                 if not SILC_SENTINEL_PATTERN.search(line)
             ]
             self.current_run_cmd = None
