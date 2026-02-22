@@ -330,14 +330,160 @@ class SilcDaemon:
                 "alive": session is not None and session.pty.pid is not None,
             }
 
-        @app.delete("/sessions/{port}")
+        @app.post("/sessions/{port}/close")
         async def close_session(port: int):
-            """Close a specific session."""
+            """Gracefully close a session."""
             if port not in self.sessions:
                 raise HTTPException(status_code=404, detail="Session not found")
 
             await self._ensure_cleanup_task(port)
             return {"status": "closed"}
+
+        @app.post("/sessions/{port}/kill")
+        async def kill_session(port: int):
+            """Force kill a session."""
+            if port not in self.sessions:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            session = self.sessions.get(port)
+            if session:
+                try:
+                    await asyncio.wait_for(session.force_kill(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    write_daemon_log(f"Timeout force-killing session PTY: port={port}")
+                except Exception as exc:
+                    write_daemon_log(
+                        f"Error force-killing session PTY: port={port}, error={exc}"
+                    )
+
+            await self._ensure_cleanup_task(port)
+            return {"status": "killed"}
+
+        @app.post("/sessions/{port}/restart")
+        async def restart_session(port: int):
+            """Restart a session with the same port, name, cwd, and shell type."""
+            if port not in self.sessions:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            session = self.sessions.get(port)
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            # Capture session properties before cleanup
+            name = session.name
+            shell_info = session.shell_info
+            cwd = session.cwd
+            is_global = False
+
+            # Check if session was global by checking the registry
+            entry = self.registry.get(port)
+            if entry:
+                is_global = getattr(entry, "is_global", False)
+
+            # Get the socket before cleanup (we'll reuse it)
+            session_socket = self._session_sockets.get(port)
+
+            # Kill the old session but keep the socket
+            try:
+                await asyncio.wait_for(session.force_kill(), timeout=1.0)
+            except asyncio.TimeoutError:
+                write_daemon_log(
+                    f"Timeout force-killing session PTY during restart: port={port}"
+                )
+            except Exception as exc:
+                write_daemon_log(
+                    f"Error force-killing session PTY during restart: port={port}, error={exc}"
+                )
+
+            # Remove from sessions dict but NOT from registry (we're keeping the identity)
+            self.sessions.pop(port, None)
+
+            # Cancel the old server task
+            old_task = self._session_tasks.pop(port, None)
+            if old_task:
+                old_task.cancel()
+                try:
+                    await asyncio.wait_for(old_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+            # Remove old server
+            self.servers.pop(port, None)
+
+            # Create new session with same properties
+            try:
+                new_session = SilcSession(
+                    port,
+                    name,
+                    shell_info,
+                    cwd=cwd,
+                )
+                await new_session.start()
+
+                self.sessions[port] = new_session
+
+                # Update registry with new session_id
+                self.registry.remove(port)
+                self.registry.add(
+                    port,
+                    name,
+                    new_session.session_id,
+                    shell_info.type,
+                    is_global=is_global,
+                )
+
+                # Update sessions.json
+                append_session_to_json(
+                    {
+                        "port": port,
+                        "name": name,
+                        "session_id": new_session.session_id,
+                        "shell": shell_info.type,
+                        "is_global": is_global,
+                        "cwd": cwd,
+                        "created_at": datetime.utcnow().isoformat() + "Z",
+                    }
+                )
+
+                # Reuse existing socket or create new one
+                if not session_socket:
+                    try:
+                        session_socket = self._reserve_session_socket(port, is_global)
+                    except OSError:
+                        # Port taken, find new one
+                        new_port = find_available_port(20000, 21000)
+                        session_socket = self._reserve_session_socket(
+                            new_port, is_global
+                        )
+                        port = new_port
+
+                # Create new server
+                server = self._create_session_server(new_session, is_global=is_global)
+                self.servers[port] = server
+
+                # Start server in background
+                task = asyncio.create_task(server.serve(sockets=[session_socket]))
+                self._session_tasks[port] = task
+                self._attach_session_task(port, task)
+
+                write_daemon_log(f"Session restarted: port={port}, name={name}")
+
+                return {
+                    "status": "restarted",
+                    "port": port,
+                    "name": name,
+                    "shell": shell_info.type,
+                }
+
+            except Exception as exc:
+                write_daemon_log(f"Error restarting session: port={port}, error={exc}")
+                # Fallback: cleanup the broken state
+                self._close_session_socket(port)
+                self.sessions.pop(port, None)
+                self.registry.remove(port)
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to restart session: {exc}"
+                )
 
         @app.post("/shutdown")
         async def shutdown():

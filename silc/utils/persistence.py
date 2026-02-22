@@ -91,7 +91,7 @@ def rotate_daemon_log(max_lines: int | None = None) -> None:
         return
     lines = DAEMON_LOG.read_text(encoding="utf-8").splitlines()
     if len(lines) > max_lines:
-        DAEMON_LOG.write_text("\\n".join(lines[-max_lines:]) + "\\n", encoding="utf-8")
+        DAEMON_LOG.write_text("\n".join(lines[-max_lines:]) + "\n", encoding="utf-8")
 
 
 def cleanup_session_log(port: int) -> None:
@@ -147,7 +147,7 @@ def rotate_session_log(port: int, max_lines: int | None = None) -> None:
         return
     lines = log_path.read_text(encoding="utf-8").splitlines()
     if len(lines) > max_lines:
-        log_path.write_text("\\n".join(lines[-max_lines:]) + "\\n", encoding="utf-8")
+        log_path.write_text("\n".join(lines[-max_lines:]) + "\n", encoding="utf-8")
 
 
 def read_session_log(port: int, tail_lines: int | None = None) -> str:

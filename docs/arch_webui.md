@@ -245,6 +245,8 @@ interface CreateSessionResponse {
 listSessions(): Promise<DaemonSession[]>
 createSession(options?: { port?, shell?, cwd? }): Promise<CreateSessionResponse>
 closeSession(port: number): Promise<void>
+killSession(port: number): Promise<void>
+restartSession(port: number): Promise<void>
 resizeSession(port: number, rows: number, cols: number): Promise<void>
 sendSigterm(port: number): Promise<void>
 sendSigkill(port: number): Promise<void>
@@ -333,7 +335,8 @@ Grid view of all sessions with preview terminals.
 
 **Behavior:**
 - On mount: sync sessions from daemon
-- Display 2-column grid of session cards
+- Display 2-column grid of session cards with 16px gap (gap-4)
+- Container has 16px padding (p-4)
 - Non-interactive terminal previews (scaled 2x)
 - Click card → navigate to session view
 
@@ -353,21 +356,33 @@ Full interactive terminal view for a single session.
 port: number  // From route params
 ```
 
+**Tab Bar Display:**
+- Session name (pink, prominent)
+- Port number (gray, monospace)
+- Shell type in brackets
+- Working directory with folder icon (truncated if needed)
+
 **Features:**
 - Interactive terminal with keyboard input
-- Control bar: SIGINT, SIGTERM, SIGKILL, Clear, Paste
+- Signal buttons: SIGINT, SIGTERM, SIGKILL (sent to foreground process)
+- Lifecycle buttons: Close, Kill, Restart (managed by daemon)
 - Arrow key buttons for navigation
-- Tab bar: session name, port, shell, cwd
-- Actions: Close Tab, Kill, Refresh, Home
+- Actions: Refresh, Home
 
 **Actions:**
 ```typescript
+// Signal actions (sent to foreground process, require shell alive)
+handleInterrupt(): void      // Send SIGINT (Ctrl+C)
+handleSigterm(): void        // Send SIGTERM (graceful termination)
+handleSigkill(): void        // Send SIGKILL (force termination)
+
+// Lifecycle actions (managed by daemon, always work)
+handleClose(): void          // Gracefully close session, return home
+handleKill(): void           // Force kill session, return home
+handleRestart(): void        // Restart session (same port/name/cwd/shell)
+
+// Other actions
 handleClear(): void          // Clear terminal
-handleClose(): void          // Detach and return home
-handleKill(): void           // Kill session entirely
-handleInterrupt(): void      // Send SIGINT
-handleSigterm(): void        // Send SIGTERM
-handleSigkill(): void        // Send SIGKILL
 handlePaste(): void          // Paste from clipboard
 scrollToBottom(): void       // Scroll terminal to bottom
 sendViaWs(text): void        // Send text via WebSocket
@@ -382,10 +397,17 @@ sendViaWs(text): void        // Send text via WebSocket
 Session list navigation.
 
 **Features:**
-- Create new session button (+)
-- Home button
-- Session list with status indicators
-- Active session highlighting
+- **Resizable width** — Drag the right edge to resize (180px–400px)
+- **Create new session** — Modal dialog with optional working directory input
+- **Home button** — Navigate to home view
+- **Session list** — Name, status indicator, and port number
+- **Active session highlighting** — Current session highlighted
+
+**New Session Modal:**
+- Optional working directory path input
+- Cross-platform path normalization (Windows backslash, Unix forward slash)
+- Handles mixed separators automatically
+- Path validation and normalization on submit
 
 **Status Colors:**
 - `active` → Green (`#4ade80`)
@@ -399,10 +421,14 @@ Preview card for a session in the grid view.
 **Size:** 50vw × 50vh
 
 **Features:**
-- Scaled terminal preview (2x)
+- Scaled terminal preview (2x) with padding
 - Status indicator
 - Session name, port, shell
 - Click to open session view
+
+**Layout:**
+- Fixed header (40px) with session info
+- Terminal preview area with 8px padding
 
 ### TerminalViewport
 
@@ -419,6 +445,10 @@ interactive?: boolean  // Enable input and resize
 - `interactive=false`: Static preview
 - Auto-connect WebSocket if not connected
 - Debounced resize (100ms)
+
+**Styling:**
+- Container has 8px padding (p-2)
+- Terminal screen has internal 4px padding
 
 ---
 

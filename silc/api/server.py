@@ -216,16 +216,6 @@ def create_app(session: SilcSession) -> FastAPI:
         session.resize(rows, cols)
         return {"status": "resized", "rows": rows, "cols": cols}
 
-    @app.post("/close", dependencies=[Depends(_require_token)])
-    async def close() -> dict:
-        await session.close()
-        return {"status": "closed"}
-
-    @app.post("/kill", dependencies=[Depends(_require_token)])
-    async def kill() -> dict:
-        await session.force_kill()
-        return {"status": "killed"}
-
     # /tui/activate and /tui/deactivate endpoints removed; tui_active is managed via websocket connection
 
     @app.get("/token", dependencies=[Depends(_require_token)])

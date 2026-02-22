@@ -239,9 +239,10 @@ Send Ctrl+C (SIGINT) to the foreground process in the shell.
 
 Send SIGTERM to the foreground process group (graceful termination).
 
-Unlike `/kill` which destroys the entire session, this sends a termination signal
-to the currently running foreground process in the shell, allowing the session
-to continue.
+This sends a termination signal to the currently running foreground process
+in the shell, allowing the session to continue. The session itself is NOT affected.
+
+For session lifecycle operations (close, kill, restart), use the daemon API instead.
 
 **Response:**
 ```json
@@ -258,6 +259,8 @@ Send SIGKILL to the foreground process group (force termination).
 
 Nuclear option for processes that don't respond to SIGTERM. The session remains
 alive and usable.
+
+For session lifecycle operations (close, kill, restart), use the daemon API instead.
 
 **Response:**
 ```json
@@ -283,14 +286,6 @@ Resize terminal dimensions.
 **Query Parameters:**
 - `rows` (int, required)
 - `cols` (int, required)
-
-### `POST /close`
-
-Gracefully close session.
-
-### `POST /kill`
-
-Force kill session.
 
 ### `GET /token`
 

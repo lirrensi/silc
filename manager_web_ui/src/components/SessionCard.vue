@@ -41,8 +41,8 @@ function statusColor(status: string): string {
       <span class="text-sm text-[#6b7280]">{{ session?.shell ?? '' }}</span>
     </div>
 
-    <!-- Terminal Preview (CSS cover style) -->
-    <div class="preview-container">
+    <!-- Terminal Preview (CSS cover style) with padding -->
+    <div class="preview-container p-2">
       <div class="terminal-cover">
         <slot></slot>
       </div>
@@ -58,8 +58,13 @@ function statusColor(status: string): string {
 
 .preview-container {
   position: absolute;
-  inset: 0;
+  top: 40px; /* Account for header height */
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow: hidden;
+  padding: 8px;
+  box-sizing: border-box;
 }
 
 .terminal-cover {

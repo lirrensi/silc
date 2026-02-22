@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTerminalManager } from '@/stores/terminalManager'
 import TerminalViewport from '@/components/TerminalViewport.vue'
-import { closeSession, sendSigterm, sendSigkill, sendInterrupt } from '@/lib/daemonApi'
+import { closeSession, killSession, restartSession, sendSigterm, sendSigkill, sendInterrupt } from '@/lib/daemonApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,19 +48,32 @@ async function handleClear(): Promise<void> {
   }
 }
 
-function handleClose(): void {
-  manager.detach(port.value)
-  manager.setFocused(null)
-  router.push('/')
+async function handleClose(): Promise<void> {
+  try {
+    await closeSession(port.value)
+    router.push('/')
+  } catch (err) {
+    console.error('Failed to close session:', err)
+  }
 }
 
 async function handleKill(): Promise<void> {
   try {
-    await closeSession(port.value)
-    manager.removeSession(port.value)
+    await killSession(port.value)
     router.push('/')
   } catch (err) {
     console.error('Failed to kill session:', err)
+  }
+}
+
+async function handleRestart(): Promise<void> {
+  try {
+    await restartSession(port.value)
+    // Refresh the session connection
+    manager.setWs(port.value, null)
+    await manager.getSession(port.value)
+  } catch (err) {
+    console.error('Failed to restart session:', err)
   }
 }
 
@@ -103,13 +116,13 @@ function scrollToBottom(): void {
   <div class="session-view h-full flex flex-col">
     <!-- Tab Bar -->
     <div class="tab-bar flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-[#5e5e62]">
-      <div class="flex items-center gap-3">
-        <span class="font-mono text-lg text-[#ff80bf]">{{ session?.name ?? 'unnamed' }}</span>
-        <span class="font-mono text-sm text-[#a0a0a0]">:{{ port }}</span>
-        <span class="text-sm text-[#6b7280]">[{{ session?.shell ?? '' }}]</span>
-        <span v-if="session?.cwd" class="text-sm text-[#6b7280] truncate max-w-[200px]" :title="session.cwd">{{ session.cwd }}</span>
+      <div class="flex items-center gap-3 min-w-0 flex-1">
+        <span class="font-mono text-lg text-[#ff80bf] flex-shrink-0">{{ session?.name ?? 'unnamed' }}</span>
+        <span class="font-mono text-sm text-[#a0a0a0] flex-shrink-0">:{{ port }}</span>
+        <span class="text-sm text-[#6b7280] flex-shrink-0">[{{ session?.shell ?? '' }}]</span>
+        <span v-if="session?.cwd" class="text-sm text-[#a0a0a0] truncate" :title="session.cwd">📁 {{ session.cwd }}</span>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 flex-shrink-0">
         <button
           @click="router.push('/')"
           class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
@@ -166,6 +179,13 @@ function scrollToBottom(): void {
         title="SIGKILL - Force kill (nuclear option)"
       >
         SIGKILL
+      </button>
+      <button
+        @click="handleRestart"
+        class="px-3 py-1 text-sm bg-[#3b82f6]/20 hover:bg-[#3b82f6]/40 border border-[#3b82f6]/50 text-[#60a5fa] rounded transition-colors"
+        title="Restart session (same port/name/cwd/shell)"
+      >
+        Restart
       </button>
       <button
         @click="handleClear"

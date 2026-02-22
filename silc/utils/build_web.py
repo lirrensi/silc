@@ -18,7 +18,6 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-
 # Package managers to try, in order of preference
 PACKAGE_MANAGERS = [
     (["pnpm"], "pnpm"),

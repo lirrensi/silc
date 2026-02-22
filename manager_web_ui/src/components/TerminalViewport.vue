@@ -97,12 +97,16 @@ function attachAndConnect(): void {
 <template>
   <div
     ref="containerRef"
-    class="terminal-viewport w-full h-full bg-[#1e1e1e]"
+    class="terminal-viewport w-full h-full bg-[#1e1e1e] p-2 box-border"
   ></div>
 </template>
 
 <style scoped>
 .terminal-viewport :deep(.xterm) {
   height: 100%;
+}
+
+.terminal-viewport :deep(.xterm-screen) {
+  padding: 4px;
 }
 </style>

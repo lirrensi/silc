@@ -174,11 +174,13 @@ The daemon exposes a management API on port 19999.
 | `POST` | `/sessions` | Create a new session |
 | `GET` | `/sessions` | List all active sessions |
 | `GET` | `/resolve/{name}` | Resolve session name to session info |
-| `DELETE` | `/sessions/{port}` | Close a specific session |
-| `POST` | `/shutdown` | Graceful shutdown |
-| `POST` | `/killall` | Force kill all |
+| `POST` | `/sessions/{port}/close` | Gracefully close a session |
+| `POST` | `/sessions/{port}/kill` | Force kill a session |
+| `POST` | `/sessions/{port}/restart` | Restart session (same port/name/cwd/shell) |
 | `POST` | `/restart-server` | Restart HTTP server without killing sessions |
 | `POST` | `/resurrect` | Restore sessions from sessions.json |
+| `POST` | `/shutdown` | Graceful shutdown |
+| `POST` | `/killall` | Force kill all |
 
 ### `GET /`
 
@@ -249,6 +251,63 @@ Resolve a session name to full session info.
 
 **Errors:**
 - `404` — Session name not found
+
+### `POST /sessions/{port}/close`
+
+Gracefully close a session. Works even if the session's HTTP server is unresponsive.
+
+**Response:**
+```json
+{
+  "status": "closed"
+}
+```
+
+**Errors:**
+- `404` — Session not found
+
+**Use case:** Normal session termination. Releases port, cleans up PTY, removes from registry.
+
+### `POST /sessions/{port}/kill`
+
+Force kill a session. Works even if the session's HTTP server is unresponsive.
+
+**Response:**
+```json
+{
+  "status": "killed"
+}
+```
+
+**Errors:**
+- `404` — Session not found
+
+**Use case:** Terminating stuck or dead sessions. Forces PTY termination, kills orphaned processes on port.
+
+### `POST /sessions/{port}/restart`
+
+Restart a session with the same port, name, cwd, and shell type.
+
+**Response:**
+```json
+{
+  "status": "restarted",
+  "port": 20000,
+  "name": "happy-fox-42",
+  "shell": "bash"
+}
+```
+
+**Errors:**
+- `404` — Session not found
+
+**Behavior:**
+- Preserves: port, name, cwd, shell type, is_global flag
+- Kills old PTY cleanly
+- Creates new PTY with same configuration
+- Restarts session's HTTP server on same socket
+
+**Use case:** Getting a fresh shell without losing port assignment or session identity.
 
 ### `POST /restart-server`
 

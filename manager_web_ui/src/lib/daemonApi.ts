@@ -41,9 +41,23 @@ export async function createSession(options?: {
 }
 
 export async function closeSession(port: number): Promise<void> {
-  const resp = await fetch(`${DAEMON_URL}/sessions/${port}`, { method: 'DELETE' })
+  const resp = await fetch(`${DAEMON_URL}/sessions/${port}/close`, { method: 'POST' })
   if (!resp.ok) {
     throw new Error(`Failed to close session: HTTP ${resp.status}`)
+  }
+}
+
+export async function killSession(port: number): Promise<void> {
+  const resp = await fetch(`${DAEMON_URL}/sessions/${port}/kill`, { method: 'POST' })
+  if (!resp.ok) {
+    throw new Error(`Failed to kill session: HTTP ${resp.status}`)
+  }
+}
+
+export async function restartSession(port: number): Promise<void> {
+  const resp = await fetch(`${DAEMON_URL}/sessions/${port}/restart`, { method: 'POST' })
+  if (!resp.ok) {
+    throw new Error(`Failed to restart session: HTTP ${resp.status}`)
   }
 }
 

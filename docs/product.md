@@ -182,8 +182,9 @@ All session commands use the syntax `silc <port-or-name> <command>`. You can ide
 | `silc <port-or-name> clear` | Clear the terminal screen |
 | `silc <port-or-name> reset` | Reset terminal state |
 | `silc <port-or-name> resize <rows> <cols>` | Resize terminal dimensions |
-| `silc <port-or-name> close` | Gracefully close the session |
-| `silc <port-or-name> kill` | Force kill the session |
+| `silc <port-or-name> close` | Gracefully close the session (via daemon) |
+| `silc <port-or-name> kill` | Force kill the session (via daemon) |
+| `silc <port-or-name> restart` | Restart session with same port/name/cwd/shell |
 | `silc <port-or-name> logs [--tail N]` | Show session logs |
 | `silc <port-or-name> tui` | Launch native TUI client |
 | `silc <port-or-name> web` | Open web UI in browser |
@@ -259,8 +260,6 @@ The API is exposed by the FastAPI server. All endpoints (except `/web`) require 
 | `POST` | `/clear` | Clear the terminal screen |
 | `POST` | `/reset` | Reset terminal state |
 | `POST` | `/resize` | Resize PTY dimensions |
-| `POST` | `/close` | Gracefully close the session |
-| `POST` | `/kill` | Force kill the session |
 | `GET` | `/token` | Return the current session token |
 | `GET` | `/web` | Serve the static web UI |
 
@@ -469,7 +468,9 @@ The daemon exposes a management API on port 19999 for session lifecycle operatio
 | `POST` | `/sessions` | Create a new session |
 | `GET` | `/sessions` | List all active sessions |
 | `GET` | `/resolve/{name}` | Resolve session name to session info |
-| `DELETE` | `/sessions/{port}` | Close a specific session |
+| `POST` | `/sessions/{port}/close` | Gracefully close a session |
+| `POST` | `/sessions/{port}/kill` | Force kill a session |
+| `POST` | `/sessions/{port}/restart` | Restart session (same port/name/cwd/shell) |
 | `POST` | `/shutdown` | Graceful shutdown |
 | `POST` | `/killall` | Force kill all |
 
@@ -785,9 +786,16 @@ Configuration is loaded from (highest to lowest priority):
 
 ### Session Not Responding
 
+**Signals** (require shell to be alive):
 - Use `silc <port> interrupt` to send Ctrl+C
-- Use `silc <port> kill` to force terminate
-- Use `silc killall` as last resort
+- Use `silc <port> sigterm` for graceful termination
+- Use `silc <port> sigkill` for force termination
+
+**Lifecycle commands** (always work, managed by daemon):
+- Use `silc <port> close` to gracefully close the session
+- Use `silc <port> kill` to force kill the session
+- Use `silc <port> restart` to restart with same port/name/cwd/shell
+- Use `silc killall` as last resort to kill everything
 
 ### Daemon Not Starting
 
@@ -847,6 +855,9 @@ SILC deliberately does NOT:
 | `silc <port-or-name> out` | View output |
 | `silc <port-or-name> status` | Check session status |
 | `silc <port-or-name> tui` | Launch TUI |
+| `silc <port-or-name> close` | Gracefully close session |
+| `silc <port-or-name> kill` | Force kill session |
+| `silc <port-or-name> restart` | Restart session (same port/name/cwd/shell) |
 | `silc list` | List all sessions |
 | `silc shutdown` | Stop daemon |
 | `silc killall` | Force kill everything |

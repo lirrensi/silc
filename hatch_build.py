@@ -11,7 +11,6 @@ from typing import List, Optional, Tuple
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
-
 # Package managers to try, in order of preference
 PACKAGE_MANAGERS: List[Tuple[List[str], str]] = [
     (["pnpm"], "pnpm"),

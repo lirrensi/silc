@@ -742,17 +742,17 @@ def resize(ctx: click.Context, rows: int, cols: int) -> None:
 @cli.port_subcommands.command()
 @click.pass_context
 def close(ctx: click.Context) -> None:
-    """Close the session gracefully."""
+    """Gracefully close the session."""
     port = ctx.parent.params["port"] if ctx.parent else 0
     try:
-        resp = requests.post(f"http://127.0.0.1:{port}/close", timeout=5)
-        if resp.status_code == 410:
-            click.echo(f"❌ Session on port {port} has already ended", err=True)
+        resp = requests.post(_daemon_url(f"/sessions/{port}/close"), timeout=5)
+        if resp.status_code == 404:
+            click.echo(f"❌ Session on port {port} not found", err=True)
             return
         resp.raise_for_status()
         click.echo("✨ Session closed")
     except requests.RequestException:
-        click.echo(f"❌ Session on port {port} does not exist", err=True)
+        click.echo(f"❌ Failed to close session on port {port}", err=True)
 
 
 @cli.port_subcommands.command()
@@ -761,14 +761,31 @@ def kill(ctx: click.Context) -> None:
     """Force kill the session."""
     port = ctx.parent.params["port"] if ctx.parent else 0
     try:
-        resp = requests.post(f"http://127.0.0.1:{port}/kill", timeout=5)
-        if resp.status_code == 410:
-            click.echo(f"❌ Session on port {port} has already ended", err=True)
+        resp = requests.post(_daemon_url(f"/sessions/{port}/kill"), timeout=5)
+        if resp.status_code == 404:
+            click.echo(f"❌ Session on port {port} not found", err=True)
             return
         resp.raise_for_status()
         click.echo("💀 Session killed")
     except requests.RequestException:
-        click.echo(f"❌ Session on port {port} does not exist", err=True)
+        click.echo(f"❌ Failed to kill session on port {port}", err=True)
+
+
+@cli.port_subcommands.command(name="restart")
+@click.pass_context
+def restart_session(ctx: click.Context) -> None:
+    """Restart session with same port/name/cwd/shell."""
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    try:
+        resp = requests.post(_daemon_url(f"/sessions/{port}/restart"), timeout=10)
+        if resp.status_code == 404:
+            click.echo(f"❌ Session on port {port} not found", err=True)
+            return
+        resp.raise_for_status()
+        data = resp.json()
+        click.echo(f"🔄 Session restarted: {data['name']} on port {data['port']}")
+    except requests.RequestException:
+        click.echo(f"❌ Failed to restart session on port {port}", err=True)
 
 
 @cli.command(name="list")
@@ -784,7 +801,7 @@ def list_sessions() -> None:
 
         for s in sessions:
             status_icon = "✓" if s["alive"] else "✗"
-            cwd_display = s.get("cwd", "?")
+            cwd_display = s.get("cwd") or "?"
             # Truncate cwd if too long
             if len(cwd_display) > 40:
                 cwd_display = "..." + cwd_display[-37:]
