@@ -22,56 +22,31 @@ The console script `silc` is exposed after the editable install.
 silc start --port 8000   # launches server and TUI
 ```
 
-## Linting & Formatting
+### Building the Web UI
 
-The project uses **Black**, **isort**, **flake8**, and **mypy**.  All tools are configured via `pyproject.toml` and a `pre‑commit` hook.
+The manager web UI (`manager_web_ui/`) is a Vue 3 + Vite application that gets compiled to `static/manager/`.
 
+The build system automatically detects and uses whichever package manager is available: **pnpm** → **npm** → **yarn**.
+
+**For development** (editable install):
 ```bash
-# Run all linters
-pre-commit run --all-files
+# Build once (auto-detects package manager)
+silc-build-web
+# or
+python -m silc.utils.build_web
+
+# Or watch mode (in a separate terminal)
+cd manager_web_ui && pnpm dev    # or: npm run dev / yarn dev
 ```
 
-### Black
-- 88‑character line width.
-- Hook rewrites files; no `--check`.
-
-### isort
-- Groups: `stdlib`, `thirdparty`, `localfolder`.
-- Alphabetical within groups.
-- Imports sorted before the first non‑import.
-
-### flake8
-- Syntax, unused imports, style.
-- Ignores `E501`.
-
-### mypy
-- Type check `silc/` with `--strict`.
-
-## Type Checking
-
+**For packaging** (wheel/sdist):
 ```bash
-mypy silc/
+# The build hook automatically compiles the web UI
+pip install build
+python -m build
 ```
 
-2011first CLI and FastAPI service that manages terminal sessions and a Textual UI.
-
-The repository is centered around the `silc/` package, with tests in `tests/` and documentation in `docs/`.
-
-## Build & Install
-
-```bash
-# Editable install with production dependencies
-pip install -e .
-
-# Editable install with test dependencies
-pip install -e .[test]
-```
-
-The console script `silc` is exposed after the editable install.
-
-```bash
-silc start --port 8000   # launches server and TUI
-```
+The build artifact includes the compiled web UI in `static/manager/`.
 
 ## Linting & Formatting
 
@@ -207,6 +182,9 @@ pytest --cov=silc tests/
 
 # Lint single file
 flake8 silc/core/session.py
+
+# Build web UI
+silc-build-web
 ```
 
 ---

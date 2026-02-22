@@ -13,6 +13,7 @@ This index maps the SILC architecture components. Each component can be rewritte
 | [arch_api.md](arch_api.md) | FastAPI server, endpoints, WebSocket — HTTP/WebSocket interface |
 | [arch_cli.md](arch_cli.md) | CLI commands, argument parsing — command-line interface |
 | [arch_tui.md](arch_tui.md) | Native TUI client, installer — terminal user interface |
+| [arch_webui.md](arch_webui.md) | Vue 3 web UI, xterm.js, session management — browser interface |
 | [arch_stream.md](arch_stream.md) | Streaming service, deduplication — file output streaming |
 | [arch_mcp.md](arch_mcp.md) | MCP server for AI agent integration |
 
@@ -24,8 +25,8 @@ This index maps the SILC architecture components. Each component can be rewritte
 ┌─────────────────────────────────────────────────────────────────┐
 │                         User Interfaces                          │
 ├─────────────────┬─────────────────┬─────────────────────────────┤
-│   arch_cli.md   │   arch_tui.md   │        arch_api.md          │
-│   (CLI)         │   (TUI)         │   (HTTP/WebSocket)          │
+│   arch_cli.md   │   arch_tui.md   │     arch_webui.md          │
+│   (CLI)         │   (TUI)         │     (Web UI)                │
 └────────┬────────┴────────┬────────┴──────────────┬──────────────┘
          │                 │                       │
          └─────────────────┼───────────────────────┘
@@ -63,6 +64,10 @@ arch_cli ──────► arch_api ──────► arch_core ──�
 
 arch_tui ──────► arch_api (WebSocket)
 
+arch_webui ────► arch_daemon (session management)
+        │
+        └──► arch_api (WebSocket per session)
+
 arch_mcp ──────► arch_daemon (session management)
         │
         └──► arch_api (session operations)
@@ -78,6 +83,7 @@ Each component can be rewritten in a different language/framework:
 |-----------|----------------------|
 | arch_cli | Go CLI, Rust CLI, Shell script |
 | arch_tui | Go TUI (bubbletea), Rust TUI (ratatui) |
+| arch_webui | React, Svelte, SolidJS, Elm |
 | arch_api | Flask, Go (gin), Rust (actix-web) |
 | arch_daemon | Go, Rust, systemd service |
 | arch_core | Rust (portable-pty), Go |
