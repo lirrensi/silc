@@ -427,6 +427,14 @@ class SilcSession:
     async def interrupt(self) -> None:
         await self.pty.write(b"\x03")
 
+    async def send_sigterm(self) -> None:
+        """Send SIGTERM to the foreground process group."""
+        self.pty.send_sigterm()
+
+    async def send_sigkill(self) -> None:
+        """Send SIGKILL to the foreground process group."""
+        self.pty.send_sigkill()
+
     async def clear_buffer(self) -> None:
         self.buffer.clear()
 

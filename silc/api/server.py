@@ -186,6 +186,18 @@ def create_app(session: SilcSession) -> FastAPI:
         await session.interrupt()
         return {"status": "interrupted"}
 
+    @app.post("/sigterm", dependencies=[Depends(_require_token)])
+    async def sigterm() -> dict:
+        _check_alive()
+        await session.send_sigterm()
+        return {"status": "sigterm_sent"}
+
+    @app.post("/sigkill", dependencies=[Depends(_require_token)])
+    async def sigkill() -> dict:
+        _check_alive()
+        await session.send_sigkill()
+        return {"status": "sigkill_sent"}
+
     @app.post("/clear", dependencies=[Depends(_require_token)])
     async def clear_screen() -> dict:
         _check_alive()

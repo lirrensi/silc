@@ -228,7 +228,45 @@ ls -la
 
 ### `POST /interrupt`
 
-Send Ctrl+C to session.
+Send Ctrl+C (SIGINT) to the foreground process in the shell.
+
+**Response:**
+```json
+{"status": "interrupted"}
+```
+
+### `POST /sigterm`
+
+Send SIGTERM to the foreground process group (graceful termination).
+
+Unlike `/kill` which destroys the entire session, this sends a termination signal
+to the currently running foreground process in the shell, allowing the session
+to continue.
+
+**Response:**
+```json
+{"status": "sigterm_sent"}
+```
+
+**Implementation:**
+- Unix: Uses `os.killpg()` to signal the process group
+- Windows: Uses psutil to gracefully terminate child processes
+
+### `POST /sigkill`
+
+Send SIGKILL to the foreground process group (force termination).
+
+Nuclear option for processes that don't respond to SIGTERM. The session remains
+alive and usable.
+
+**Response:**
+```json
+{"status": "sigkill_sent"}
+```
+
+**Implementation:**
+- Unix: Uses `os.killpg()` with `signal.SIGKILL`
+- Windows: Uses psutil to forcefully kill child processes
 
 ### `POST /clear`
 

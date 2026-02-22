@@ -54,3 +54,24 @@ export async function resizeSession(port: number, rows: number, cols: number): P
     throw new Error(`Failed to resize session: HTTP ${resp.status}`)
   }
 }
+
+export async function sendSigterm(port: number): Promise<void> {
+  const resp = await fetch(`http://127.0.0.1:${port}/sigterm`, { method: 'POST' })
+  if (!resp.ok) {
+    throw new Error(`Failed to send SIGTERM: HTTP ${resp.status}`)
+  }
+}
+
+export async function sendSigkill(port: number): Promise<void> {
+  const resp = await fetch(`http://127.0.0.1:${port}/sigkill`, { method: 'POST' })
+  if (!resp.ok) {
+    throw new Error(`Failed to send SIGKILL: HTTP ${resp.status}`)
+  }
+}
+
+export async function sendInterrupt(port: number): Promise<void> {
+  const resp = await fetch(`http://127.0.0.1:${port}/interrupt`, { method: 'POST' })
+  if (!resp.ok) {
+    throw new Error(`Failed to send interrupt: HTTP ${resp.status}`)
+  }
+}

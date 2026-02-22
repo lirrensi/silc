@@ -251,7 +251,9 @@ The API is exposed by the FastAPI server. All endpoints (except `/web`) require 
 | `GET` | `/stream` | Server-sent events stream of terminal output |
 | `POST` | `/in` | Send raw input to the session |
 | `POST` | `/run` | Execute a shell command |
-| `POST` | `/interrupt` | Send Ctrl+C to the session |
+| `POST` | `/interrupt` | Send Ctrl+C (SIGINT) to foreground process |
+| `POST` | `/sigterm` | Send SIGTERM to foreground process group |
+| `POST` | `/sigkill` | Send SIGKILL to foreground process group |
 | `POST` | `/clear` | Clear the terminal screen |
 | `POST` | `/reset` | Reset terminal state |
 | `POST` | `/resize` | Resize PTY dimensions |
@@ -369,6 +371,54 @@ ls -la
   "status": "resized",
   "rows": 40,
   "cols": 120
+}
+```
+
+#### `POST /interrupt`
+
+Send Ctrl+C (SIGINT) to the foreground process in the shell.
+
+**Response:**
+```json
+{
+  "status": "interrupted"
+}
+```
+
+#### `POST /sigterm`
+
+Send SIGTERM to the foreground process group (graceful termination). The session remains alive.
+
+**Response:**
+```json
+{
+  "status": "sigterm_sent"
+}
+```
+
+**Note:** On Windows, this gracefully terminates child processes via psutil.
+
+#### `POST /sigkill`
+
+Send SIGKILL to the foreground process group (force termination). Use when processes don't respond to SIGTERM. The session remains alive.
+
+**Response:**
+```json
+{
+  "status": "sigkill_sent"
+}
+```
+
+**Note:** On Windows, this forcefully kills child processes via psutil.
+
+#### `POST /kill`
+
+Force kill the **entire session** (PTY and shell). The session will be destroyed.
+
+**Response:**
+```json
+{
+  "status": "killed"
 }
 ```
 

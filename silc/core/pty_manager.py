@@ -39,6 +39,16 @@ class PTYBase(ABC):
     @abstractmethod
     def is_alive(self) -> bool: ...
 
+    @abstractmethod
+    def send_sigterm(self) -> None:
+        """Send SIGTERM to foreground process group (graceful)."""
+        ...
+
+    @abstractmethod
+    def send_sigkill(self) -> None:
+        """Send SIGKILL to foreground process group (force)."""
+        ...
+
 
 class StubPTY(PTYBase):
     """Fallback PTY used when a platform-specific backend cannot be loaded."""
@@ -63,6 +73,14 @@ class StubPTY(PTYBase):
 
     def is_alive(self) -> bool:
         return False
+
+    def send_sigterm(self) -> None:
+        """No-op for stub PTY."""
+        return None
+
+    def send_sigkill(self) -> None:
+        """No-op for stub PTY."""
+        return None
 
 
 class UnixPTY(PTYBase):
@@ -146,6 +164,32 @@ class UnixPTY(PTYBase):
         if self._process is None:
             return False
         return self._process.poll() is None
+
+    def send_sigterm(self) -> None:
+        """Send SIGTERM to the foreground process group."""
+        if self.pid:
+            try:
+                import os
+                import signal
+
+                os.killpg(os.getpgid(self.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except Exception:
+                pass
+
+    def send_sigkill(self) -> None:
+        """Send SIGKILL to the foreground process group."""
+        if self.pid:
+            try:
+                import os
+                import signal
+
+                os.killpg(os.getpgid(self.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except Exception:
+                pass
 
 
 class WindowsPTY(PTYBase):
@@ -311,6 +355,40 @@ class WindowsPTY(PTYBase):
 
             return psutil.pid_exists(self.pid)
         return False
+
+    def send_sigterm(self) -> None:
+        """Gracefully terminate child processes (Windows has no SIGTERM)."""
+        import psutil
+
+        if self.pid:
+            try:
+                proc = psutil.Process(self.pid)
+                for child in proc.children(recursive=True):
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+            except psutil.NoSuchProcess:
+                pass
+            except Exception:
+                pass
+
+    def send_sigkill(self) -> None:
+        """Forcefully kill child processes."""
+        import psutil
+
+        if self.pid:
+            try:
+                proc = psutil.Process(self.pid)
+                for child in proc.children(recursive=True):
+                    try:
+                        child.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+            except psutil.NoSuchProcess:
+                pass
+            except Exception:
+                pass
 
 
 def create_pty(

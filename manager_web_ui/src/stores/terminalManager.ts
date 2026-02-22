@@ -69,7 +69,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       writePending: false,
     }
 
-    // Handle Ctrl+Enter and Shift+Enter (keys xterm doesn't emit by default)
+    // Handle special keys BEFORE xterm processes them
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true
 
@@ -87,6 +87,19 @@ export const useTerminalManager = defineStore('terminalManager', () => {
           session.ws.send(JSON.stringify({ event: 'type', text: '\x1b[13;2u', nonewline: true }))
         }
         return false
+      }
+
+      // Ctrl+V - paste clipboard directly to terminal via WebSocket
+      // Return false to prevent xterm AND browser from doing anything
+      if (event.ctrlKey && event.key === 'v' && !event.shiftKey && !event.altKey) {
+        navigator.clipboard.readText().then(text => {
+          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
+          }
+        }).catch(() => {
+          // Clipboard access denied - ignore silently
+        })
+        return false // CRITICAL: stops xterm + browser from handling this
       }
 
       return true
@@ -107,6 +120,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       const element = session.terminal.element as HTMLElement & {
         _silcPasteHandler?: (e: Event) => void
         _silcKeydownHandler?: (e: KeyboardEvent) => void
+        _silcPasteEventHandler?: (e: Event) => void
       }
       if (element) {
         if (element._silcPasteHandler) {
@@ -114,6 +128,9 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         }
         if (element._silcKeydownHandler) {
           element.removeEventListener('keydown', element._silcKeydownHandler, true)
+        }
+        if (element._silcPasteEventHandler) {
+          element.removeEventListener('paste', element._silcPasteEventHandler, true)
         }
       }
 
@@ -175,6 +192,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const typedElement = element as HTMLElement & {
       _silcPasteHandler?: (e: Event) => void
       _silcKeydownHandler?: (e: KeyboardEvent) => void
+      _silcPasteEventHandler?: (e: Event) => void
     }
 
     // Remove existing handlers if any
@@ -182,7 +200,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       element.removeEventListener('contextmenu', typedElement._silcPasteHandler)
     }
     if (typedElement._silcKeydownHandler) {
-      element.removeEventListener('keydown', typedElement._silcKeydownHandler)
+      element.removeEventListener('keydown', typedElement._silcKeydownHandler, true)
+    }
+    if (typedElement._silcPasteEventHandler) {
+      element.removeEventListener('paste', typedElement._silcPasteEventHandler, true)
     }
 
     // Right-click paste
@@ -199,7 +220,15 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     element.addEventListener('contextmenu', pasteHandler)
     typedElement._silcPasteHandler = pasteHandler
 
-    // Block browser's native Ctrl+C/V handling at DOM level
+    // Prevent browser's native paste dialog
+    const pasteEventHandler = (e: Event) => {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    element.addEventListener('paste', pasteEventHandler, true)
+    typedElement._silcPasteEventHandler = pasteEventHandler
+
+    // Block browser's native Ctrl+C/V handling at DOM level (capture phase)
     const keydownHandler = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return
 
@@ -212,8 +241,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         return
       }
 
-      // Ctrl+V - block browser paste (we handle it in attachCustomKeyEventHandler)
-      if (e.code === 'KeyV') {
+      // Ctrl+V - block browser paste dialog (we handle paste ourselves)
+      if (e.code === 'KeyV' && !e.shiftKey && !e.altKey) {
         e.preventDefault()
         e.stopPropagation()
         navigator.clipboard.readText().then(text => {
@@ -223,6 +252,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         }).catch(() => {
           // Clipboard access denied - ignore silently
         })
+        return
       }
     }
     element.addEventListener('keydown', keydownHandler, true) // capture phase

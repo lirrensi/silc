@@ -138,6 +138,16 @@ class PTYBase(ABC):
 
     @abstractmethod
     def kill(self) -> None: ...
+
+    @abstractmethod
+    def send_sigterm(self) -> None:
+        """Send SIGTERM to foreground process group (graceful)."""
+        ...
+
+    @abstractmethod
+    def send_sigkill(self) -> None:
+        """Send SIGKILL to foreground process group (force)."""
+        ...
 ```
 
 ### `UnixPTY`
@@ -164,6 +174,28 @@ process = subprocess.Popen(
 os.close(slave_fd)
 ```
 
+**Signal handling:**
+
+Unix uses process groups (created via `preexec_fn=os.setsid`). Signal the entire group:
+
+```python
+import signal
+
+def send_sigterm(self) -> None:
+    if self.pid:
+        try:
+            os.killpg(os.getpgid(self.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+def send_sigkill(self) -> None:
+    if self.pid:
+        try:
+            os.killpg(os.getpgid(self.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+```
+
 ### `WindowsPTY`
 
 **Implementation:**
@@ -183,9 +215,44 @@ pty_handle = winpty.PTY(cols=120, rows=30)
 process = pty_handle.spawn(command, env=env)
 ```
 
+**Signal handling:**
+
+Windows lacks POSIX signals. Use psutil to find and terminate child processes
+of the shell (foreground jobs), NOT the shell itself:
+
+```python
+import psutil
+
+def send_sigterm(self) -> None:
+    if self.pid:
+        try:
+            proc = psutil.Process(self.pid)
+            for child in proc.children(recursive=True):
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+        except psutil.NoSuchProcess:
+            pass
+
+def send_sigkill(self) -> None:
+    if self.pid:
+        try:
+            proc = psutil.Process(self.pid)
+            for child in proc.children(recursive=True):
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+        except psutil.NoSuchProcess:
+            pass
+```
+
 ### `StubPTY`
 
 Fallback when platform-specific PTY cannot be loaded. All methods are no-ops.
+
+Signal methods (`send_sigterm`, `send_sigkill`) are also no-ops.
 
 ### Factory: `create_pty()`
 

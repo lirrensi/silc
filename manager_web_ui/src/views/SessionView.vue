@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTerminalManager } from '@/stores/terminalManager'
 import TerminalViewport from '@/components/TerminalViewport.vue'
-import { closeSession } from '@/lib/daemonApi'
+import { closeSession, sendSigterm, sendSigkill, sendInterrupt } from '@/lib/daemonApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -63,6 +63,40 @@ async function handleKill(): Promise<void> {
     console.error('Failed to kill session:', err)
   }
 }
+
+function sendViaWs(text: string): void {
+  const s = manager.getSession(port.value)
+  if (s?.ws && s.ws.readyState === WebSocket.OPEN) {
+    s.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
+  }
+}
+
+async function handleInterrupt(): Promise<void> {
+  await sendInterrupt(port.value)
+}
+
+async function handleSigterm(): Promise<void> {
+  await sendSigterm(port.value)
+}
+
+async function handleSigkill(): Promise<void> {
+  await sendSigkill(port.value)
+}
+
+function handlePaste(): void {
+  navigator.clipboard.readText().then(text => {
+    sendViaWs(text)
+  }).catch(() => {
+    // Clipboard access denied
+  })
+}
+
+function scrollToBottom(): void {
+  const s = manager.getSession(port.value)
+  if (s?.terminal) {
+    s.terminal.scrollToBottom()
+  }
+}
 </script>
 
 <template>
@@ -113,16 +147,25 @@ async function handleKill(): Promise<void> {
     <!-- Control Bar -->
     <div class="control-bar flex items-center gap-2 px-4 py-2 bg-[#252526] border-t border-[#5e5e62]">
       <button
-        @click="session?.terminal?.write('\x03')"
+        @click="handleInterrupt"
         class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
+        title="SIGINT (Ctrl+C) - Interrupt current process"
       >
-        Ctrl+C
+        SIGINT
       </button>
       <button
-        @click="session?.terminal?.write('\x04')"
+        @click="handleSigterm"
         class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
+        title="SIGTERM - Graceful termination"
       >
-        Ctrl+D
+        SIGTERM
+      </button>
+      <button
+        @click="handleSigkill"
+        class="px-3 py-1 text-sm bg-[#f87171]/20 hover:bg-[#f87171]/40 border border-[#f87171]/50 text-[#f87171] rounded transition-colors"
+        title="SIGKILL - Force kill (nuclear option)"
+      >
+        SIGKILL
       </button>
       <button
         @click="handleClear"
@@ -130,27 +173,42 @@ async function handleKill(): Promise<void> {
       >
         Clear
       </button>
-      <div class="flex gap-1">
+      <div class="w-px h-6 bg-[#5e5e62] mx-1"></div>
+      <button
+        @click="handlePaste"
+        class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
+        title="Paste from clipboard"
+      >
+        Paste
+      </button>
+      <button
+        @click="scrollToBottom"
+        class="px-3 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
+        title="Scroll to bottom"
+      >
+        ↓ Bottom
+      </button>
+      <div class="flex gap-1 ml-2">
         <button
-          @click="session?.terminal?.write('\x1b[A')"
+          @click="sendViaWs('\x1b[A')"
           class="px-2 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
         >
           ↑
         </button>
         <button
-          @click="session?.terminal?.write('\x1b[D')"
+          @click="sendViaWs('\x1b[D')"
           class="px-2 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
         >
           ←
         </button>
         <button
-          @click="session?.terminal?.write('\x1b[B')"
+          @click="sendViaWs('\x1b[B')"
           class="px-2 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
         >
           ↓
         </button>
         <button
-          @click="session?.terminal?.write('\x1b[C')"
+          @click="sendViaWs('\x1b[C')"
           class="px-2 py-1 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
         >
           →
