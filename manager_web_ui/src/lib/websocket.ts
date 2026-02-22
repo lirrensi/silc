@@ -37,13 +37,13 @@ export function connectWebSocket(port: number): WebSocket | null {
 
       if (msg.event === 'history' && msg.data) {
         session.terminal.clear()
-        session.terminal.write(msg.data)
+        manager.safeWrite(port, msg.data)
       } else if (msg.event === 'update' && msg.data) {
-        session.terminal.write(msg.data)
+        manager.safeWrite(port, msg.data)
       }
     } catch {
       // Raw text output
-      session.terminal.write(event.data)
+      manager.safeWrite(port, event.data)
     }
   }
 

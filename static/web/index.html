@@ -91,6 +91,7 @@
         </div>
 
         <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-unicode11@0.9.0/lib/addon-unicode11.js"></script>
 
         <script>
             (async function () {
@@ -152,6 +153,8 @@
                     cols: 120,
                     rows: 30,
                     scrollback: 5000,
+                    convertEol: true,
+                    allowProposedApi: true,
                     theme: {
                         background: "#1e1e1e",
                         foreground: "#ffffff",
@@ -166,23 +169,86 @@
                 term.open(document.getElementById("terminal"));
                 term.focus();
 
-                // Handle Ctrl+Enter and other modified keys that xterm doesn't emit by default
-                term.attachCustomKeyEventHandler((event) => {
-                    if (event.type === "keydown") {
-                        // Ctrl+Enter: send modified enter sequence
-                        if (event.ctrlKey && event.key === "Enter") {
-                            // Send CSI sequence for Ctrl+Enter (modified key u sequence)
-                            sendViaWS("\x1b[13;5u");
-                            event.preventDefault();
-                            return false;
-                        }
-                        // Shift+Enter: send shift-enter sequence
-                        if (event.shiftKey && event.key === "Enter" && !event.ctrlKey) {
-                            sendViaWS("\x1b[13;2u");
-                            event.preventDefault();
-                            return false;
-                        }
+                // Unicode11 for proper emoji/CJK character width handling
+                term.loadAddon(new Unicode11Addon());
+                term.unicode.activeVersion = "11";
+
+                // Block browser's native Ctrl+C/V handling at DOM level
+                document.getElementById("terminal").addEventListener("keydown", (e) => {
+                    if (!e.ctrlKey) return;
+
+                    // Ctrl+C with selection - block browser copy
+                    if (e.code === "KeyC" && term.hasSelection()) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(term.getSelection());
+                        term.clearSelection();
+                        return;
                     }
+
+                    // Ctrl+V - block browser paste
+                    if (e.code === "KeyV") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        navigator.clipboard.readText().then(text => {
+                            sendViaWS(text);
+                        }).catch(() => {});
+                        return;
+                    }
+                }, true); // capture phase
+
+                // Right-click paste (Windows Terminal style)
+                document.getElementById("terminal").addEventListener("contextmenu", (e) => {
+                    e.preventDefault();
+                    navigator.clipboard.readText().then(text => {
+                        sendViaWS(text);
+                    }).catch(() => {});
+                });
+
+                // Buffered write queue to prevent escape sequence splitting
+                const writeQueue = [];
+                let writePending = false;
+
+                const safeWrite = (data) => {
+                    writeQueue.push(data);
+                    if (!writePending) {
+                        processWriteQueue();
+                    }
+                };
+
+                const processWriteQueue = () => {
+                    if (writeQueue.length === 0) {
+                        writePending = false;
+                        return;
+                    }
+                    writePending = true;
+                    const combined = writeQueue.join('');
+                    writeQueue.length = 0;
+                    term.write(combined, () => {
+                        if (writeQueue.length > 0) {
+                            processWriteQueue();
+                        } else {
+                            writePending = false;
+                        }
+                    });
+                };
+
+                // Handle Ctrl+Enter and Shift+Enter (keys xterm doesn't emit by default)
+                term.attachCustomKeyEventHandler((event) => {
+                    if (event.type !== "keydown") return true;
+
+                    // Ctrl+Enter
+                    if (event.ctrlKey && event.key === "Enter") {
+                        sendViaWS("\x1b[13;5u");
+                        return false;
+                    }
+
+                    // Shift+Enter
+                    if (event.shiftKey && event.key === "Enter" && !event.ctrlKey) {
+                        sendViaWS("\x1b[13;2u");
+                        return false;
+                    }
+
                     return true;
                 });
 
@@ -224,15 +290,15 @@
                         if (msg.event === "history") {
                             term.clear();
                             if (msg.data) {
-                                term.write(msg.data);
+                                safeWrite(msg.data);
                             }
                             return;
                         }
                         if (msg.event === "update") {
-                            term.write(msg.data);
+                            safeWrite(msg.data);
                         }
                     } catch (e) {
-                        term.write(event.data);
+                        safeWrite(event.data);
                     }
                 };
 

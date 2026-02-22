@@ -12,11 +12,23 @@ const props = defineProps<{
 const manager = useTerminalManager()
 const containerRef = ref<HTMLElement | null>(null)
 let resizeObserver: ResizeObserver | null = null
+let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// Simple debounce to prevent resize storms
+function debouncedFit(port: number): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+  }
+  debounceTimer = setTimeout(() => {
+    manager.fit(port)
+    debounceTimer = null
+  }, 100)
+}
 
 onMounted(() => {
   if (containerRef.value) {
     resizeObserver = new ResizeObserver(() => {
-      manager.fit(props.port)
+      debouncedFit(props.port)
     })
     resizeObserver.observe(containerRef.value)
   }
@@ -31,6 +43,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 import type { Session, SessionStatus } from '@/types/session'
 import { resizeSession } from '@/lib/daemonApi'
 
@@ -32,6 +33,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       cols: 120,
       rows: 30,
       scrollback: 5000,
+      convertEol: true,
+      allowProposedApi: true,
       theme: {
         background: '#1e1e1e',
         foreground: '#ffffff',
@@ -46,6 +49,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
 
+    // Unicode11 for proper emoji/CJK character width handling
+    terminal.loadAddon(new Unicode11Addon())
+    terminal.unicode.activeVersion = '11'
+
     const session: Session = {
       port,
       sessionId,
@@ -58,30 +65,30 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       onDataDisposable: null,
       status: 'idle',
       lastActivity: Date.now(),
+      writeQueue: [],
+      writePending: false,
     }
 
-    // Handle Ctrl+Enter and other modified keys that xterm doesn't emit by default
+    // Handle Ctrl+Enter and Shift+Enter (keys xterm doesn't emit by default)
     terminal.attachCustomKeyEventHandler((event) => {
-      if (event.type === 'keydown') {
-        // Helper to send via WebSocket
-        const sendKey = (text: string) => {
-          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-            session.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
-          }
+      if (event.type !== 'keydown') return true
+
+      // Ctrl+Enter
+      if (event.ctrlKey && event.key === 'Enter') {
+        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+          session.ws.send(JSON.stringify({ event: 'type', text: '\x1b[13;5u', nonewline: true }))
         }
-        // Ctrl+Enter
-        if (event.ctrlKey && event.key === 'Enter') {
-          sendKey('\x1b[13;5u')
-          event.preventDefault()
-          return false
-        }
-        // Shift+Enter
-        if (event.shiftKey && event.key === 'Enter' && !event.ctrlKey) {
-          sendKey('\x1b[13;2u')
-          event.preventDefault()
-          return false
-        }
+        return false
       }
+
+      // Shift+Enter
+      if (event.shiftKey && event.key === 'Enter' && !event.ctrlKey) {
+        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+          session.ws.send(JSON.stringify({ event: 'type', text: '\x1b[13;2u', nonewline: true }))
+        }
+        return false
+      }
+
       return true
     })
 
@@ -96,12 +103,31 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   function removeSession(port: number): void {
     const session = sessions.value.get(port)
     if (session) {
+      // Clean up DOM event handlers
+      const element = session.terminal.element as HTMLElement & {
+        _silcPasteHandler?: (e: Event) => void
+        _silcKeydownHandler?: (e: KeyboardEvent) => void
+      }
+      if (element) {
+        if (element._silcPasteHandler) {
+          element.removeEventListener('contextmenu', element._silcPasteHandler)
+        }
+        if (element._silcKeydownHandler) {
+          element.removeEventListener('keydown', element._silcKeydownHandler, true)
+        }
+      }
+
+      // Clean up WebSocket
       if (session.ws) {
         session.ws.close()
       }
+
+      // Clean up terminal data listener
       if (session.onDataDisposable) {
         session.onDataDisposable.dispose()
       }
+
+      // Dispose terminal (also cleans up addons and attachCustomKeyEventHandler)
       session.terminal.dispose()
       sessions.value.delete(port)
     }
@@ -125,6 +151,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     if (!element) {
       session.terminal.open(container)
+      setupBrowserEventHandlers(session)
       fit(port)
       return
     }
@@ -133,7 +160,73 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       element.remove()
     }
     container.appendChild(element)
+    setupBrowserEventHandlers(session)
     fit(port)
+  }
+
+  /**
+   * Set up DOM-level event handlers to prevent browser interference
+   * with our custom clipboard handling (Ctrl+C/V, right-click paste).
+   */
+  function setupBrowserEventHandlers(session: Session): void {
+    const element = session.terminal.element
+    if (!element) return
+
+    const typedElement = element as HTMLElement & {
+      _silcPasteHandler?: (e: Event) => void
+      _silcKeydownHandler?: (e: KeyboardEvent) => void
+    }
+
+    // Remove existing handlers if any
+    if (typedElement._silcPasteHandler) {
+      element.removeEventListener('contextmenu', typedElement._silcPasteHandler)
+    }
+    if (typedElement._silcKeydownHandler) {
+      element.removeEventListener('keydown', typedElement._silcKeydownHandler)
+    }
+
+    // Right-click paste
+    const pasteHandler = (e: Event) => {
+      e.preventDefault()
+      navigator.clipboard.readText().then(text => {
+        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+          session.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
+        }
+      }).catch(() => {
+        // Clipboard access denied - ignore silently
+      })
+    }
+    element.addEventListener('contextmenu', pasteHandler)
+    typedElement._silcPasteHandler = pasteHandler
+
+    // Block browser's native Ctrl+C/V handling at DOM level
+    const keydownHandler = (e: KeyboardEvent) => {
+      if (!e.ctrlKey) return
+
+      // Ctrl+C with selection - block browser copy
+      if (e.code === 'KeyC' && session.terminal.hasSelection()) {
+        e.preventDefault()
+        e.stopPropagation()
+        navigator.clipboard.writeText(session.terminal.getSelection())
+        session.terminal.clearSelection()
+        return
+      }
+
+      // Ctrl+V - block browser paste (we handle it in attachCustomKeyEventHandler)
+      if (e.code === 'KeyV') {
+        e.preventDefault()
+        e.stopPropagation()
+        navigator.clipboard.readText().then(text => {
+          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
+          }
+        }).catch(() => {
+          // Clipboard access denied - ignore silently
+        })
+      }
+    }
+    element.addEventListener('keydown', keydownHandler, true) // capture phase
+    typedElement._silcKeydownHandler = keydownHandler
   }
 
   async function fit(port: number): Promise<void> {
@@ -182,6 +275,43 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
   }
 
+  /**
+   * Safe buffered write to terminal.
+   * Buffers writes and processes them sequentially with callback
+   * to prevent escape sequence splitting across chunks.
+   */
+  function safeWrite(port: number, data: string): void {
+    const session = sessions.value.get(port)
+    if (!session) return
+
+    session.writeQueue.push(data)
+
+    if (!session.writePending) {
+      processWriteQueue(port)
+    }
+  }
+
+  function processWriteQueue(port: number): void {
+    const session = sessions.value.get(port)
+    if (!session || session.writeQueue.length === 0) {
+      if (session) session.writePending = false
+      return
+    }
+
+    session.writePending = true
+    const combined = session.writeQueue.join('')
+    session.writeQueue.length = 0
+
+    session.terminal.write(combined, () => {
+      // Check if more data arrived while we were writing
+      if (session.writeQueue.length > 0) {
+        processWriteQueue(port)
+      } else {
+        session.writePending = false
+      }
+    })
+  }
+
   return {
     sessions,
     focusedPort,
@@ -197,5 +327,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     fit,
     setStatus,
     setWs,
+    safeWrite,
   }
 })

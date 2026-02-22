@@ -15,6 +15,9 @@ export interface Session {
   onDataDisposable: IDisposable | null
   status: SessionStatus
   lastActivity: number
+  // Buffered write queue for safe terminal writes
+  writeQueue: string[]
+  writePending: boolean
 }
 
 export interface DaemonSession {
