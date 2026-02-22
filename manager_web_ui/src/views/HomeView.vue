@@ -32,14 +32,14 @@ async function syncSessions(): Promise<void> {
 </script>
 
 <template>
-  <div class="home-view p-4 h-full overflow-y-auto">
-    <h1 class="text-2xl font-bold text-[#ff80bf] mb-4">Sessions</h1>
+  <div class="home-view h-full overflow-y-auto">
+    <h1 class="text-2xl font-bold text-[#ff80bf] mb-4 p-4">Sessions</h1>
 
     <div v-if="manager.sessionList.length === 0" class="text-[#a0a0a0] text-center py-8">
       No active sessions. Click "+ New" to create one.
     </div>
 
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div v-else class="grid grid-cols-2 gap-0">
       <SessionCard v-for="session in manager.sessionList" :key="session.port" :port="session.port">
         <TerminalViewport :port="session.port" :interactive="false" />
       </SessionCard>

@@ -26,7 +26,8 @@ function debouncedFit(port: number): void {
 }
 
 onMounted(() => {
-  if (containerRef.value) {
+  // Only set up ResizeObserver for interactive terminals
+  if (props.interactive && containerRef.value) {
     resizeObserver = new ResizeObserver(() => {
       debouncedFit(props.port)
     })
