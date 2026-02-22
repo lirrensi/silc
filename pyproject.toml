@@ -1,6 +1,6 @@
 [project]
 name = "silc"
-version = "0.3.0"
+version = "0.3.1"
 description = "Shared interactive linked command that lets agents and humans peer into the same shell."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -50,4 +50,9 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "pre-commit>=4.5.1",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests (require daemon)",
 ]

@@ -237,13 +237,15 @@ def _build_server(session: SilcSession, host: str) -> uvicorn.Server:
 class SessionGroup(click.Group):
     def __init__(self, port: int | None = None, name: str | None = None, **kwargs):
         self.port = port
-        self.name = name
+        self.session_name = (
+            name  # Use session_name to avoid conflict with click.Group.name
+        )
         super().__init__(**kwargs)
 
     def invoke(self, ctx):
         # Resolve name to port if needed
-        if self.name and not self.port:
-            self.port = _resolve_name(self.name)
+        if self.session_name and not self.port:
+            self.port = _resolve_name(self.session_name)
         ctx.params["port"] = self.port
         return super().invoke(ctx)
 
@@ -747,12 +749,13 @@ def close(ctx: click.Context) -> None:
     try:
         resp = requests.post(_daemon_url(f"/sessions/{port}/close"), timeout=5)
         if resp.status_code == 404:
-            click.echo(f"❌ Session on port {port} not found", err=True)
-            return
+            click.echo(f"Error: Session on port {port} not found", err=True)
+            sys.exit(1)
         resp.raise_for_status()
-        click.echo("✨ Session closed")
+        click.echo("Session closed")
     except requests.RequestException:
-        click.echo(f"❌ Failed to close session on port {port}", err=True)
+        click.echo(f"Error: Failed to close session on port {port}", err=True)
+        sys.exit(1)
 
 
 @cli.port_subcommands.command()
@@ -763,12 +766,13 @@ def kill(ctx: click.Context) -> None:
     try:
         resp = requests.post(_daemon_url(f"/sessions/{port}/kill"), timeout=5)
         if resp.status_code == 404:
-            click.echo(f"❌ Session on port {port} not found", err=True)
-            return
+            click.echo(f"Error: Session on port {port} not found", err=True)
+            sys.exit(1)
         resp.raise_for_status()
-        click.echo("💀 Session killed")
+        click.echo("Session killed")
     except requests.RequestException:
-        click.echo(f"❌ Failed to kill session on port {port}", err=True)
+        click.echo(f"Error: Failed to kill session on port {port}", err=True)
+        sys.exit(1)
 
 
 @cli.port_subcommands.command(name="restart")
@@ -779,13 +783,14 @@ def restart_session(ctx: click.Context) -> None:
     try:
         resp = requests.post(_daemon_url(f"/sessions/{port}/restart"), timeout=10)
         if resp.status_code == 404:
-            click.echo(f"❌ Session on port {port} not found", err=True)
-            return
+            click.echo(f"Error: Session on port {port} not found", err=True)
+            sys.exit(1)
         resp.raise_for_status()
         data = resp.json()
-        click.echo(f"🔄 Session restarted: {data['name']} on port {data['port']}")
+        click.echo(f"Session restarted: {data['name']} on port {data['port']}")
     except requests.RequestException:
-        click.echo(f"❌ Failed to restart session on port {port}", err=True)
+        click.echo(f"Error: Failed to restart session on port {port}", err=True)
+        sys.exit(1)
 
 
 @cli.command(name="list")

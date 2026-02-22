@@ -1,3 +1,4 @@
+# Python artifacts
 __pycache__
 *.pyc
 *.pyo
@@ -8,20 +9,41 @@ __pycache__
 *.egg-info
 dist
 build
+
+# Test and cache directories
 .pytest_cache
 .ruff_cache
 .uv_cache
+
+# Virtual environments
 .venv-*
+venv
+venv-win
+
+# Git
 .git
 .gitignore
-.env
-*.md
+
+# IDE
 .vscode
 .idea
 .history
-manual_tests
-docs
-tests
+
+# Environment files
+.env
+.env.*
+
+# Documentation (not needed in image)
+*.md
+docs/
+
+# Tests (not needed in image)
+tests/
+
+# Build artifacts
 *.spec
 build*.py
 install.*
+
+# Keep the web UI source (needed for Docker build)
+!manager_web_ui/

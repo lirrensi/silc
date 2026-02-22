@@ -1,3 +1,22 @@
+# =============================================================================
+# SILC Docker Compose
+# =============================================================================
+# Start SILC as a containerized service with web UI access.
+#
+# Usage:
+#   docker-compose up -d          # Start in background
+#   docker-compose logs -f        # View logs
+#   docker-compose down           # Stop
+#
+# Access:
+#   Manager UI: http://localhost:19999/
+#   Session UI: http://localhost:20000/web (after creating a session)
+#   REST API:   curl http://localhost:19999/sessions
+#
+# Note: Each session gets its own port (20000, 20001, ...).
+#       Expose only the ports you need, or use a larger range.
+# =============================================================================
+
 version: "3.8"
 
 services:
@@ -5,17 +24,43 @@ services:
     build: .
     image: silc:latest
     container_name: silc-daemon
+
     ports:
+      # Manager API + Web UI (required)
       - "19999:19999"
-      - "20000-21000:20000-21000"
+      # Session ports - expose as many as you need
+      # For a few sessions:
+      - "20000:20000"
+      - "20001:20001"
+      - "20002:20002"
+      - "20003:20003"
+      - "20004:20004"
+      # Or use a range (may not work on all Docker versions):
+      # - "20000-21000:20000-21000"
+
+    # Required for PTY (pseudo-terminal) support
     stdin_open: true
     tty: true
+
     restart: unless-stopped
+
     volumes:
+      # Persist SILC data (sessions.json, logs)
       - silc-data:/root/.silc
+
     environment:
-      - SILC_PORT_RANGE=20000-21000
+      # Daemon configuration (optional, defaults shown)
       - SILC_DAEMON_PORT=19999
+      - SILC_PORT_RANGE=20000-21000
+      - SILC_LOG_LEVEL=INFO
+
+    # Health check to verify daemon is responsive
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:19999/sessions', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 volumes:
   silc-data:

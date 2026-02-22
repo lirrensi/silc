@@ -345,6 +345,92 @@ cd manager_web_ui && pnpm dev
 
 ---
 
+## 🐳 Docker Deployment
+
+SILC can run inside Docker, giving you a containerized terminal management environment with full Web UI and REST API access.
+
+### Quick Start
+
+```bash
+# Build and run
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
+```
+
+### Access Points
+
+| Interface | URL | Description |
+|-----------|-----|-------------|
+| **Manager UI** | `http://localhost:19999/` | Create and manage sessions |
+| **Session Web UI** | `http://localhost:20000/web` | Terminal for session on port 20000 |
+| **REST API** | `http://localhost:19999/sessions` | List all sessions |
+| **Session API** | `http://localhost:20000/status` | Status of specific session |
+
+### Creating Sessions via REST API
+
+```bash
+# Create a new session
+curl -X POST http://localhost:19999/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-project"}'
+
+# Response: {"port": 20000, "name": "my-project", ...}
+
+# Run a command in the session
+curl -X POST http://localhost:20000/run \
+  -H "Content-Type: application/json" \
+  -d '{"command": "ls -la"}'
+
+# Get terminal output
+curl http://localhost:20000/out?lines=50
+```
+
+### Port Configuration
+
+Each session gets its own port (20000, 20001, etc.). The `docker-compose.yml` exposes ports 20000-20004 by default. To expose more sessions:
+
+```yaml
+# In docker-compose.yml, add more ports:
+ports:
+  - "19999:19999"
+  - "20000:20000"
+  - "20001:20001"
+  - "20002:20002"
+  # ... add as many as you need
+```
+
+### Important Notes
+
+⚠️ **Terminals run INSIDE the container**, not on your host machine. This means:
+- Sessions have access to the container's filesystem and tools
+- Changes persist in the container (use volumes for persistence)
+- This is ideal for containerized dev environments or isolated workspaces
+
+For **host machine access**, run SILC natively (`pip install -e .`) instead of Docker.
+
+### Custom Environment Variables
+
+```yaml
+environment:
+  - SILC_DAEMON_PORT=19999
+  - SILC_PORT_RANGE=20000-21000
+  - SILC_LOG_LEVEL=DEBUG
+```
+
+### Building the Image Manually
+
+```bash
+docker build -t silc:latest .
+docker run -d -p 19999:19999 -p 20000-20010:20000-20010 silc:latest
+```
+
+---
+
 ## 🎮 The Manageable VI — All Interfaces
 
 SILC v3 unifies all terminal interaction into one manageable VI:
