@@ -66,6 +66,16 @@ def _daemon_available(timeout: float = 2.0) -> bool:
         return False
 
 
+def _get_daemon_defaults(timeout: float = 2.0) -> dict[str, object]:
+    try:
+        resp = requests.get(_daemon_url("/defaults"), timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload if isinstance(payload, dict) else {}
+    except requests.RequestException:
+        return {}
+
+
 def _daemon_port_open(timeout: float = 0.2) -> bool:
     """Best-effort check whether something is listening on the daemon port."""
 
@@ -249,9 +259,38 @@ class SessionGroup(click.Group):
         ctx.params["port"] = self.port
         return super().invoke(ctx)
 
+    def format_usage(self, ctx, formatter):
+        root_name = ctx.find_root().info_name or "silc"
+        formatter.write_usage(root_name, "<port|name> [OPTIONS] COMMAND [ARGS]...")
+
+    def format_help_text(self, ctx, formatter):
+        formatter.write_paragraph()
+        formatter.write_text(
+            "These commands act on an existing session. "
+            "Target it with `silc <port> <command>` or `silc <name> <command>`."
+        )
+
 
 class SilcCLI(click.Group):
     port_subcommands = click.Group()
+
+    def _command_rows(self, ctx, command_names: list[str]) -> list[tuple[str, str]]:
+        rows: list[tuple[str, str]] = []
+        for name in command_names:
+            command = self.get_command(ctx, name)
+            if command is None or command.hidden:
+                continue
+            rows.append((name, command.get_short_help_str()))
+        return rows
+
+    def _resource_command_rows(self, ctx) -> list[tuple[str, str]]:
+        rows: list[tuple[str, str]] = []
+        for name in self.port_subcommands.list_commands(ctx):
+            command = self.port_subcommands.get_command(ctx, name)
+            if command is None or command.hidden:
+                continue
+            rows.append((name, command.get_short_help_str()))
+        return rows
 
     def get_command(self, ctx, cmd_name):
         # First check if it's a registered command (not a session name)
@@ -268,6 +307,30 @@ class SilcCLI(click.Group):
     def list_commands(self, ctx):
         commands = super().list_commands(ctx)
         return [c for c in commands if c != "port"]
+
+    def format_help_text(self, ctx, formatter):
+        formatter.write_paragraph()
+        formatter.write_text(
+            "Use global commands directly. "
+            "Use `silc <port|name> <command>` for commands that operate on a "
+            "specific session resource."
+        )
+
+    def format_commands(self, ctx, formatter):
+        global_rows = self._command_rows(ctx, self.list_commands(ctx))
+        resource_rows = self._resource_command_rows(ctx)
+
+        if global_rows:
+            with formatter.section("Global Commands"):
+                formatter.write_dl(global_rows)
+
+        if resource_rows:
+            with formatter.section("Resource-Dependent Commands"):
+                formatter.write_text(
+                    "Prefix these with a session selector: `silc <port|name> <command>`"
+                )
+                formatter.write_paragraph()
+                formatter.write_dl(resource_rows)
 
 
 @click.group(cls=SilcCLI, invoke_without_command=True)
@@ -515,7 +578,7 @@ def _get_daemon_python_executable() -> str:
     return str(python)
 
 
-def _start_detached_daemon() -> None:
+def _start_detached_daemon(*, share: bool = False) -> None:
     """Start daemon in background (detached)."""
     python_exec = _get_daemon_python_executable()
 
@@ -530,6 +593,8 @@ def _start_detached_daemon() -> None:
         stderr_handle = subprocess.PIPE
 
     cmd = [python_exec, "-m", "silc", "daemon"]
+    if share:
+        cmd.extend(["--host", "0.0.0.0", "--share-mode"])
     common_kwargs = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
@@ -556,11 +621,13 @@ def _start_detached_daemon() -> None:
 
 
 @cli.command(name="daemon", hidden=True)
-def run_as_daemon() -> None:
+@click.option("--host", type=str, default="127.0.0.1")
+@click.option("--share-mode", is_flag=True, default=False)
+def run_as_daemon(host: str, share_mode: bool) -> None:
     """Internal command: run as daemon (do not call directly)."""
     from silc.daemon.manager import SilcDaemon
 
-    daemon = SilcDaemon()
+    daemon = SilcDaemon(host=host, share_mode=share_mode)
     asyncio.run(daemon.start())
 
 
@@ -911,6 +978,9 @@ def resurrect() -> None:
 @cli.command()
 def restart() -> None:
     """Shutdown daemon and immediately restart (resurrects sessions)."""
+    defaults = _get_daemon_defaults(timeout=2)
+    share_mode = bool(defaults.get("share_mode"))
+
     # Graceful shutdown
     try:
         requests.post(_daemon_url("/shutdown"), timeout=35)
@@ -926,7 +996,7 @@ def restart() -> None:
     click.echo("✨ Daemon stopped, restarting...")
 
     # Start new daemon
-    _start_detached_daemon()
+    _start_detached_daemon(share=share_mode)
     started = _wait_for_daemon_start_with_logs(timeout=15)
 
     if not started:
@@ -937,16 +1007,50 @@ def restart() -> None:
     click.echo("✨ Daemon restarted (sessions resurrected from previous state)")
 
 
+def _warn_share_mode() -> None:
+    click.echo(
+        click.style(
+            "WARNING: LAN share mode exposes your manager and shells to the network.",
+            fg="yellow",
+            bold=True,
+        ),
+        err=True,
+    )
+    click.echo(
+        click.style(
+            "Anyone on this network can hit your WebSocket/session endpoints and run commands on your machine.",
+            fg="yellow",
+            bold=True,
+        ),
+        err=True,
+    )
+    click.echo(
+        click.style(
+            "Only use this on a trusted home LAN behind a firewall. Otherwise you are volunteering for RCE.",
+            fg="yellow",
+            bold=True,
+        ),
+        err=True,
+    )
+
+
 @cli.command()
-def manager() -> None:
+@click.option("--share", is_flag=True, help="Expose manager and sessions on LAN.")
+def manager(share: bool) -> None:
     """Open the session manager web UI (starts daemon if needed)."""
+
+    if share:
+        _warn_share_mode()
 
     daemon_responsive = _daemon_available()
     daemon_running = daemon_responsive or is_daemon_running()
 
+    defaults = _get_daemon_defaults() if daemon_responsive else {}
+    daemon_share_mode = bool(defaults.get("share_mode"))
+
     if not daemon_running:
         click.echo("Starting daemon in background...", err=False)
-        _start_detached_daemon()
+        _start_detached_daemon(share=share)
         click.echo("Waiting for daemon to start...", err=False)
         started = _wait_for_daemon_start_with_logs(timeout=10)
         if not started:
@@ -959,8 +1063,31 @@ def manager() -> None:
         click.echo("✓ Daemon started successfully", err=False)
     elif daemon_responsive:
         click.echo("✓ Daemon is already running", err=False)
+        if share and not daemon_share_mode:
+            click.echo("Restarting daemon in LAN share mode...", err=False)
+            try:
+                requests.post(_daemon_url("/shutdown"), timeout=35)
+            except requests.RequestException:
+                pass
+
+            if not _wait_for_daemon_stop(timeout=30):
+                click.echo("⚠️  Shutdown timed out; forcing killall", err=True)
+                kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
+                _wait_for_daemon_stop(timeout=5)
+
+            _start_detached_daemon(share=True)
+            started = _wait_for_daemon_start_with_logs(timeout=15)
+            if not started:
+                click.echo("❌ Failed to restart daemon in share mode", err=True)
+                _show_daemon_error_details()
+                return
+            defaults = _get_daemon_defaults(timeout=5)
 
     manager_url = f"http://127.0.0.1:{DAEMON_PORT}/"
+    if share:
+        share_url = defaults.get("manager_url") if defaults else None
+        if isinstance(share_url, str) and share_url:
+            click.echo(f"📱 Scan/share this LAN URL: {share_url}")
     webbrowser.open_new_tab(manager_url)
     click.echo(f"✨ Opening manager at {manager_url}")
 
@@ -1099,16 +1226,16 @@ def logs(ctx: click.Context, tail: int) -> None:
         click.echo(f"❌ Session on port {port} does not exist", err=True)
 
 
+# Register streaming commands
+cli.port_subcommands.add_command(stream_file_render)
+cli.port_subcommands.add_command(stream_file_append)
+cli.port_subcommands.add_command(stream_stop)
+cli.port_subcommands.add_command(stream_status)
+
+
 def main() -> None:
     cli()
 
 
 if __name__ == "__main__":
     main()
-
-
-# Register streaming commands
-cli.port_subcommands.add_command(stream_file_render)
-cli.port_subcommands.add_command(stream_file_append)
-cli.port_subcommands.add_command(stream_stop)
-cli.port_subcommands.add_command(stream_status)

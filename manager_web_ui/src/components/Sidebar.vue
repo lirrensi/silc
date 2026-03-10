@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
+import QRCode from 'qrcode'
 import { useRouter } from 'vue-router'
 import { useTerminalManager } from '@/stores/terminalManager'
-import { listSessions, createSession } from '@/lib/daemonApi'
+import { listSessions, createSession, getDefaults } from '@/lib/daemonApi'
 
 const router = useRouter()
 const manager = useTerminalManager()
@@ -18,6 +19,10 @@ const maxWidth = 400
 // New session modal state
 const showNewSessionModal = ref(false)
 const newSessionPath = ref('')
+const defaultSessionPath = ref('')
+const shareMode = ref(false)
+const shareUrl = ref('')
+const shareQrCode = ref('')
 
 function statusColor(status: string): string {
   switch (status) {
@@ -33,7 +38,7 @@ function selectSession(port: number): void {
 }
 
 function openNewSessionModal(): void {
-  newSessionPath.value = ''
+  newSessionPath.value = defaultSessionPath.value
   showNewSessionModal.value = true
 }
 
@@ -102,19 +107,49 @@ onUnmounted(() => {
 async function fetchSessions(): Promise<void> {
   try {
     const data = await listSessions()
-    // Sync sessions with daemon
-    for (const daemonSession of data) {
-      if (!manager.getSession(daemonSession.port)) {
-        manager.createSession(daemonSession.port, daemonSession.session_id, daemonSession.shell, daemonSession.name, daemonSession.cwd)
-      }
-    }
+    manager.reconcileSessions(data)
   } catch (err) {
     console.error('Failed to fetch sessions:', err)
   }
 }
 
-// Fetch on mount
-fetchSessions()
+async function fetchDefaults(): Promise<void> {
+  try {
+    const defaults = await getDefaults()
+    defaultSessionPath.value = normalizePath(defaults.cwd)
+    shareMode.value = defaults.share_mode
+    shareUrl.value = defaults.manager_url
+
+    if (defaults.share_mode && defaults.manager_url) {
+      shareQrCode.value = await QRCode.toDataURL(defaults.manager_url, {
+        width: 164,
+        margin: 1,
+        color: {
+          dark: '#111111',
+          light: '#facc15',
+        },
+      })
+    } else {
+      shareQrCode.value = ''
+    }
+  } catch (err) {
+    console.error('Failed to fetch defaults:', err)
+  }
+}
+
+async function copyShareUrl(): Promise<void> {
+  if (!shareUrl.value) return
+  try {
+    await navigator.clipboard.writeText(shareUrl.value)
+  } catch (err) {
+    console.error('Failed to copy share URL:', err)
+  }
+}
+
+onMounted(() => {
+  void fetchSessions()
+  void fetchDefaults()
+})
 </script>
 
 <template>
@@ -155,6 +190,26 @@ fetchSessions()
       </div>
     </div>
 
+    <div v-if="shareMode && shareUrl" class="border-t border-[#5e5e62] bg-[#facc15]/10 p-3">
+      <p class="text-[11px] font-bold uppercase tracking-[0.24em] text-[#facc15]">LAN Share</p>
+      <p class="mt-2 text-xs leading-5 text-[#f3f4f6]">
+        Anybody on your network can open this manager and poke your shells.
+      </p>
+      <img
+        v-if="shareQrCode"
+        :src="shareQrCode"
+        alt="QR code for manager LAN URL"
+        class="mx-auto mt-3 h-40 w-40 rounded-xl border border-[#facc15]/40 bg-[#facc15] p-2"
+      />
+      <button
+        @click="copyShareUrl"
+        class="mt-3 w-full rounded border border-[#facc15]/40 bg-[#facc15]/15 px-3 py-2 text-left text-xs text-[#fef3c7] transition-colors hover:bg-[#facc15]/25"
+        :title="shareUrl"
+      >
+        {{ shareUrl }}
+      </button>
+    </div>
+
     <!-- Resize Handle -->
     <div
       class="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-[#ff80bf]/30 transition-colors"
@@ -177,11 +232,14 @@ fetchSessions()
               v-model="newSessionPath"
               type="text"
               class="w-full px-3 py-2 bg-[#1e1e1e] border border-[#5e5e62] rounded text-white text-sm focus:outline-none focus:border-[#ff80bf]"
-              placeholder="e.g., /home/user/project or C:\Users\project"
+              :placeholder="defaultSessionPath || 'e.g., /home/user/project or C:\\Users\\project'"
               @keydown.enter="handleCreateNewSession"
               @keydown.esc="closeNewSessionModal"
               autofocus
             />
+            <p class="mt-2 text-xs text-[#6b7280]">
+              Defaults to your home directory on the daemon machine.
+            </p>
           </div>
           <div class="flex gap-2 justify-end">
             <button

@@ -47,10 +47,37 @@ def find_package_manager() -> Optional[Tuple[List[str], str]]:
     return None
 
 
+def get_install_command(
+    cmd: List[str], manager_name: str, manager_ui_dir: Path
+) -> List[str]:
+    """Return the dependency install command for the selected package manager."""
+    if manager_name == "pnpm":
+        lockfile = manager_ui_dir / "pnpm-lock.yaml"
+        return cmd + (
+            ["install", "--frozen-lockfile"] if lockfile.exists() else ["install"]
+        )
+    if manager_name == "npm":
+        lockfile = manager_ui_dir / "package-lock.json"
+        return cmd + (["ci"] if lockfile.exists() else ["install"])
+    if manager_name == "yarn":
+        lockfile = manager_ui_dir / "yarn.lock"
+        return cmd + (
+            ["install", "--frozen-lockfile"] if lockfile.exists() else ["install"]
+        )
+    return cmd + ["install"]
+
+
+def get_build_command(cmd: List[str], manager_name: str) -> List[str]:
+    """Return the build command for the selected package manager."""
+    if manager_name == "npm":
+        return cmd + ["run", "build"]
+    return cmd + ["build"]
+
+
 class WebUIBuildHook(BuildHookInterface):
     """Build hook that compiles the Vue.js manager UI before packaging."""
 
-    PLUGIN_NAME = "webui-build"
+    PLUGIN_NAME = "custom"
 
     def initialize(self, version: str, build_data: dict) -> None:
         """Build the manager web UI before the wheel is packaged."""
@@ -80,14 +107,28 @@ class WebUIBuildHook(BuildHookInterface):
             return
 
         cmd, version_info = pkg_mgr
+        manager_name = cmd[0]
         self.app.display_info(f"[INFO] Using {version_info}")
-        self.app.display_info("[BUILD] Building manager web UI...")
 
         try:
             # On Windows, use shell=True for .cmd/.bat files
             use_shell = sys.platform == "win32"
+            node_modules_dir = manager_ui_dir / "node_modules"
+            if not node_modules_dir.exists():
+                self.app.display_info(
+                    "[BUILD] Installing manager web UI dependencies..."
+                )
+                subprocess.run(
+                    get_install_command(cmd, manager_name, manager_ui_dir),
+                    cwd=manager_ui_dir,
+                    check=True,
+                    capture_output=False,
+                    shell=use_shell,
+                )
+
+            self.app.display_info("[BUILD] Building manager web UI...")
             subprocess.run(
-                cmd + ["build"],
+                get_build_command(cmd, manager_name),
                 cwd=manager_ui_dir,
                 check=True,
                 capture_output=False,

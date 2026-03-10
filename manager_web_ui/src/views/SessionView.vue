@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTerminalManager } from '@/stores/terminalManager'
 import TerminalViewport from '@/components/TerminalViewport.vue'
-import { closeSession, killSession, restartSession, sendSigterm, sendSigkill, sendInterrupt } from '@/lib/daemonApi'
+import { closeSession, killSession, restartSession, sendSigterm, sendSigkill, sendInterrupt, getSessionHttpUrl } from '@/lib/daemonApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,7 +41,7 @@ async function handleClear(): Promise<void> {
     s.terminal.clear()
     // Send clear to backend
     try {
-      await fetch(`http://127.0.0.1:${port.value}/clear`, { method: 'POST' })
+      await fetch(`${getSessionHttpUrl(port.value)}/clear`, { method: 'POST' })
     } catch (err) {
       console.error('Clear failed:', err)
     }
@@ -51,6 +51,7 @@ async function handleClear(): Promise<void> {
 async function handleClose(): Promise<void> {
   try {
     await closeSession(port.value)
+    manager.removeSession(port.value)
     router.push('/')
   } catch (err) {
     console.error('Failed to close session:', err)
@@ -60,6 +61,7 @@ async function handleClose(): Promise<void> {
 async function handleKill(): Promise<void> {
   try {
     await killSession(port.value)
+    manager.removeSession(port.value)
     router.push('/')
   } catch (err) {
     console.error('Failed to kill session:', err)

@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import type { Session, SessionStatus } from '@/types/session'
+import type { Session, SessionStatus, DaemonSession } from '@/types/session'
 import { resizeSession } from '@/lib/daemonApi'
 
 const MAX_COLS = 256
@@ -111,6 +111,16 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
   function getSession(port: number): Session | undefined {
     return sessions.value.get(port)
+  }
+
+  function updateSessionMetadata(daemonSession: DaemonSession): void {
+    const session = sessions.value.get(daemonSession.port)
+    if (!session) return
+
+    session.sessionId = daemonSession.session_id
+    session.name = daemonSession.name
+    session.shell = daemonSession.shell
+    session.cwd = daemonSession.cwd
   }
 
   function removeSession(port: number): void {
@@ -305,6 +315,30 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
   }
 
+  function reconcileSessions(daemonSessions: DaemonSession[]): void {
+    const daemonPorts = new Set(daemonSessions.map(session => session.port))
+
+    for (const daemonSession of daemonSessions) {
+      if (!sessions.value.has(daemonSession.port)) {
+        createSession(
+          daemonSession.port,
+          daemonSession.session_id,
+          daemonSession.shell,
+          daemonSession.name,
+          daemonSession.cwd,
+        )
+      } else {
+        updateSessionMetadata(daemonSession)
+      }
+    }
+
+    for (const port of Array.from(sessions.value.keys())) {
+      if (!daemonPorts.has(port)) {
+        removeSession(port)
+      }
+    }
+  }
+
   /**
    * Safe buffered write to terminal.
    * Buffers writes and processes them sequentially with callback
@@ -357,6 +391,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     fit,
     setStatus,
     setWs,
+    reconcileSessions,
     safeWrite,
   }
 })

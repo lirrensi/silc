@@ -108,6 +108,30 @@ class TestCLIHelp:
         assert "Traceback" not in result.stderr
         assert result.returncode == 0
 
+    def test_help_separates_global_and_resource_commands(self):
+        """`silc --help` separates global and session-scoped commands."""
+        result = run_cli(["--help"])
+        output = result.stdout or result.stderr
+
+        assert "Global Commands:" in output
+        assert "Resource-Dependent Commands:" in output
+        assert "silc <port|name> <command>" in output
+        assert "manager" in output
+        assert "stream-file-render" in output
+
+    def test_resource_help_uses_selector_usage(self):
+        """`silc <name> --help` explains selector-based session commands."""
+        from click.testing import CliRunner
+
+        from silc.__main__ import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["web", "--help"])
+
+        assert result.exit_code == 0
+        assert "<port|name> [OPTIONS] COMMAND [ARGS]..." in result.output
+        assert "These commands act on an existing session" in result.output
+
 
 # ============================================================================
 # Integration tests (daemon needed)

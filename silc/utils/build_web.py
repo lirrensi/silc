@@ -54,6 +54,32 @@ def find_package_manager() -> Optional[List[str]]:
     return None
 
 
+def get_install_command(pkg_mgr: List[str], manager_ui_dir: Path) -> List[str]:
+    """Return the dependency install command for the selected package manager."""
+    manager_name = pkg_mgr[0]
+    if manager_name == "pnpm":
+        lockfile = manager_ui_dir / "pnpm-lock.yaml"
+        return pkg_mgr + (
+            ["install", "--frozen-lockfile"] if lockfile.exists() else ["install"]
+        )
+    if manager_name == "npm":
+        lockfile = manager_ui_dir / "package-lock.json"
+        return pkg_mgr + (["ci"] if lockfile.exists() else ["install"])
+    if manager_name == "yarn":
+        lockfile = manager_ui_dir / "yarn.lock"
+        return pkg_mgr + (
+            ["install", "--frozen-lockfile"] if lockfile.exists() else ["install"]
+        )
+    return pkg_mgr + ["install"]
+
+
+def get_build_command(pkg_mgr: List[str]) -> List[str]:
+    """Return the build command for the selected package manager."""
+    if pkg_mgr[0] == "npm":
+        return pkg_mgr + ["run", "build"]
+    return pkg_mgr + ["build"]
+
+
 def build_web_ui() -> int:
     """Build the manager web UI.
 
@@ -84,14 +110,23 @@ def build_web_ui() -> int:
     pkg_mgr_name = pkg_mgr[0]
     print(f"[BUILD] Building manager web UI using {pkg_mgr_name}...")
 
-    # Build command
-    build_cmd = pkg_mgr + ["build"]
+    node_modules_dir = manager_ui_dir / "node_modules"
 
     try:
         # On Windows, use shell=True for .cmd/.bat files
         use_shell = sys.platform == "win32"
+        if not node_modules_dir.exists():
+            print("[BUILD] Installing manager web UI dependencies...")
+            subprocess.run(
+                get_install_command(pkg_mgr, manager_ui_dir),
+                cwd=manager_ui_dir,
+                check=True,
+                capture_output=False,
+                shell=use_shell,
+            )
+
         subprocess.run(
-            build_cmd,
+            get_build_command(pkg_mgr),
             cwd=manager_ui_dir,
             check=True,
             capture_output=False,

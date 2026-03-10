@@ -73,13 +73,21 @@ class SessionCreateRequest(BaseModel):
 class SilcDaemon:
     """Main daemon managing multiple SILC sessions."""
 
-    def __init__(self, *, enable_hard_exit: bool | None = None):
+    def __init__(
+        self,
+        *,
+        enable_hard_exit: bool | None = None,
+        host: str = "127.0.0.1",
+        share_mode: bool = False,
+    ):
         # Hard-exit is needed for the detached daemon mode (Windows in particular)
         # but must be disabled for in-process tests.
         if enable_hard_exit is None:
             enable_hard_exit = os.environ.get("PYTEST_CURRENT_TEST") is None
 
         self._enable_hard_exit = enable_hard_exit
+        self._host = host
+        self._share_mode = share_mode
 
         self.registry = SessionRegistry()
         self.sessions: Dict[int, SilcSession] = {}
@@ -149,6 +157,7 @@ class SilcDaemon:
                     shell = request.shell
                     cwd = request.cwd
                     session_name = request.name
+                is_global = is_global or self._share_mode
                 if selected_port is None:
                     selected_port = self._find_available_session_port()
 
@@ -310,6 +319,15 @@ class SilcDaemon:
                         )
 
             return sessions
+
+        @app.get("/defaults")
+        async def get_defaults():
+            """Expose daemon-side defaults for manager UI helpers."""
+            return {
+                "cwd": str(Path.home()),
+                "share_mode": self._share_mode,
+                "manager_url": self._get_manager_url(),
+            }
 
         @app.get("/resolve/{name}")
         async def resolve_session(name: str):
@@ -847,7 +865,7 @@ class SilcDaemon:
             name = entry.get("name")
             shell = entry.get("shell")
             cwd = entry.get("cwd")
-            is_global = entry.get("is_global", False)
+            is_global = entry.get("is_global", False) or self._share_mode
             original_port = entry.get("port")
 
             if not name or not shell:
@@ -1009,7 +1027,7 @@ class SilcDaemon:
             self._daemon_api_app = self._create_daemon_api()
             config = uvicorn.Config(
                 self._daemon_api_app,
-                host="127.0.0.1",
+                host=self._host,
                 port=DAEMON_PORT,
                 log_level="info",
                 access_log=True,
@@ -1101,7 +1119,7 @@ class SilcDaemon:
         # Create daemon server
         daemon_config = uvicorn.Config(
             self._daemon_api_app,
-            host="127.0.0.1",
+            host=self._host,
             port=DAEMON_PORT,
             log_level="info",
             access_log=True,
@@ -1128,6 +1146,33 @@ class SilcDaemon:
     def is_running(self) -> bool:
         """Check if daemon is running."""
         return self._running
+
+    def _get_manager_url(self) -> str:
+        host = self._get_share_host() if self._share_mode else "127.0.0.1"
+        return f"http://{host}:{DAEMON_PORT}/ui/"
+
+    def _get_share_host(self) -> str:
+        if not self._share_mode:
+            return "127.0.0.1"
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("8.8.8.8", 80))
+                candidate = sock.getsockname()[0]
+                if candidate and not candidate.startswith("127."):
+                    return candidate
+        except OSError:
+            pass
+
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                candidate = info[4][0]
+                if candidate and not candidate.startswith("127."):
+                    return candidate
+        except OSError:
+            pass
+
+        return "127.0.0.1"
 
 
 __all__ = ["SilcDaemon", "DAEMON_PORT"]

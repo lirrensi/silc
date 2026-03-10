@@ -1,6 +1,6 @@
 [project]
 name = "silc"
-version = "0.3.1"
+version = "0.3.3"
 description = "Shared interactive linked command that lets agents and humans peer into the same shell."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -40,7 +40,7 @@ test = [
 packages = ["silc"]
 include = ["static/manager/**/*"]
 
-[tool.hatch.build.hooks.webui]
+[tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
 
 [build-system]

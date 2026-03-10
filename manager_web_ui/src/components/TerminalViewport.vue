@@ -65,10 +65,10 @@ watch(() => props.port, (newPort, oldPort) => {
 async function fetchAndCreateSession(): Promise<void> {
   try {
     const sessions = await listSessions()
+    manager.reconcileSessions(sessions)
     const daemonSession = sessions.find((s) => s.port === props.port)
 
     if (daemonSession) {
-      manager.createSession(props.port, daemonSession.session_id, daemonSession.shell, daemonSession.name, daemonSession.cwd)
       attachAndConnect()
     }
   } catch (err) {

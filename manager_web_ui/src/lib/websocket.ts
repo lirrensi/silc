@@ -1,6 +1,5 @@
 import { useTerminalManager } from '@/stores/terminalManager'
-
-const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+import { getSessionHttpUrl } from '@/lib/daemonApi'
 
 export function connectWebSocket(port: number): WebSocket | null {
   console.log(`[WebSocket] connectWebSocket(${port})`)
@@ -18,7 +17,8 @@ export function connectWebSocket(port: number): WebSocket | null {
     session.ws.close()
   }
 
-  const wsUrl = `${WS_PROTOCOL}//127.0.0.1:${port}/ws`
+  const wsBase = getSessionHttpUrl(port).replace(/^http/, 'ws')
+  const wsUrl = `${wsBase}/ws`
   console.log(`[WebSocket] Connecting to ${wsUrl}`)
   const ws = new WebSocket(wsUrl)
 
