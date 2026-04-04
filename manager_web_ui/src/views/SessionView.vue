@@ -3,7 +3,7 @@
 // PURPOSE: Render an interactive session view with lifecycle controls and terminal recovery actions.
 // OWNS: Session-specific terminal controls, reconnect flows, and history refresh orchestration.
 // EXPORTS: SessionView - routed interactive session page.
-// DOCS: agent_chat/plan_web_terminal_fidelity_2026-04-04.md
+// DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -17,7 +17,7 @@ import {
   sendSigkill,
   sendSigterm,
 } from '@/lib/daemonApi'
-import { connectWebSocket } from '@/lib/websocket'
+import { connectWebSocket, requestHistoryFrame, sendInputFrame } from '@/lib/websocket'
 import { useTerminalManager } from '@/stores/terminalManager'
 
 const route = useRoute()
@@ -147,7 +147,7 @@ async function refreshTerminal(): Promise<void> {
     await manager.flushWrites(port.value)
     s.terminal.reset()
     const historyLoaded = manager.waitForHistoryRefresh(port.value)
-    s.ws.send(JSON.stringify({ event: 'load_history' }))
+    requestHistoryFrame(s.ws)
     await new Promise<void>((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         manager.resolveHistoryRefresh(port.value)
@@ -329,7 +329,7 @@ async function reconnectSession(targetPort: number, waitForFreshSession: boolean
 function sendViaWs(text: string): void {
   const s = manager.getSession(port.value)
   if (s?.ws && s.ws.readyState === WebSocket.OPEN) {
-    s.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
+    sendInputFrame(s.ws, text)
   }
 }
 

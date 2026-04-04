@@ -29,7 +29,7 @@ pnpm dev
 
 The app will be available at `http://localhost:5173`.
 
-**Note:** The SILC daemon must be running for the web UI to function. Start it with `silc start` or `silc manager`.
+**Note:** The SILC daemon must be running for the web UI to function. Start it with `silc start`, `silc manager`, or `silc desktop`.
 
 ## Production Build
 
@@ -50,6 +50,9 @@ The recommended way to use this UI:
 ```bash
 # Open manager in browser (starts daemon if needed)
 silc manager
+
+# Or open the same UI in a desktop window
+silc desktop
 ```
 
 This serves the compiled web UI from `static/manager/` via the daemon's HTTP server.

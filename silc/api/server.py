@@ -1,9 +1,16 @@
+# FILE: silc/api/server.py
+# PURPOSE: Expose session HTTP and websocket controls for SILC sessions.
+# OWNS: FastAPI endpoints, websocket framing, auth, and websocket lifecycle.
+# EXPORTS: create_app - build a per-session FastAPI app.
+# DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
+
 """FastAPI server exposing SILC session controls."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import struct
 import sys
 from ipaddress import AddressValueError, ip_address
 from pathlib import Path
@@ -96,6 +103,35 @@ def create_app(session: SilcSession) -> FastAPI:
 
     # Include streaming router with authentication
     app.include_router(api_endpoints.router, dependencies=[Depends(_require_token)])
+
+    def encode_ws_frame(header: dict[str, object], payload: bytes = b"") -> bytes:
+        header_bytes = json.dumps(
+            header, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        return struct.pack(">I", len(header_bytes)) + header_bytes + payload
+
+    def decode_ws_frame(frame: bytes) -> tuple[dict[str, object], bytes]:
+        if len(frame) < 4:
+            raise ValueError("frame too short")
+
+        header_length = struct.unpack(">I", frame[:4])[0]
+        if len(frame) < 4 + header_length:
+            raise ValueError("frame truncated")
+
+        header_bytes = frame[4 : 4 + header_length]
+        payload = frame[4 + header_length :]
+
+        try:
+            header = json.loads(header_bytes.decode("utf-8"))
+        except UnicodeDecodeError as exc:
+            raise ValueError("invalid frame header encoding") from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid frame header json") from exc
+
+        if not isinstance(header, dict):
+            raise ValueError("frame header must be object")
+
+        return header, payload
 
     def _check_alive() -> None:
         """Check if session is alive, raise exception if not."""
@@ -250,9 +286,11 @@ def create_app(session: SilcSession) -> FastAPI:
 
         send_lock = asyncio.Lock()
 
-        async def safe_send(payload: dict[str, str]) -> None:
+        async def safe_send_frame(
+            header: dict[str, object], payload: bytes = b""
+        ) -> None:
             async with send_lock:
-                await websocket.send_json(payload)
+                await websocket.send_bytes(encode_ws_frame(header, payload))
 
         def title_listener(updated_session: SilcSession) -> None:
             if updated_session is not session:
@@ -262,9 +300,9 @@ def create_app(session: SilcSession) -> FastAPI:
                 if active_websocket is not websocket:
                     return
                 try:
-                    await safe_send(
+                    await safe_send_frame(
                         {
-                            "event": "title",
+                            "type": "title",
                             "title": updated_session.title,
                             "title_updated_at": (
                                 updated_session.title_updated_at.isoformat() + "Z"
@@ -283,51 +321,48 @@ def create_app(session: SilcSession) -> FastAPI:
             while True:
                 new_bytes, cursor = session.buffer.get_since(cursor)
                 if new_bytes:
-                    await safe_send(
-                        {
-                            "event": "update",
-                            "data": new_bytes.decode("utf-8", errors="replace"),
-                        }
-                    )
+                    await safe_send_frame({"type": "output"}, new_bytes)
                 await asyncio.sleep(0.1)
 
         sender_task = asyncio.create_task(send_updates())
         try:
             while True:
-                data = await websocket.receive_text()
                 try:
-                    message = json.loads(data)
-                    event_type = message.get("event")
-                    if event_type == "type":
-                        text = message.get("text", "")
-                        nonewline = message.get("nonewline", False)
+                    frame = await websocket.receive_bytes()
+                except WebSocketDisconnect:
+                    raise
+                except RuntimeError:
+                    await websocket.close(
+                        code=1002, reason="Expected binary websocket frame"
+                    )
+                    return
 
-                        if nonewline:
-                            await session.write_input(text)
-                        else:
-                            # Match /in endpoint behavior: strip newlines, add platform newline
-                            text = text.rstrip("\r\n")
-                            newline = "\r\n" if sys.platform == "win32" else "\n"
-                            text += newline
-                            await session.write_input(text)
-                    elif event_type == "load_history":
-                        raw_bytes = session.buffer.get_bytes()
-                        await safe_send(
-                            {
-                                "event": "history",
-                                "data": raw_bytes.decode("utf-8", errors="replace"),
-                            }
-                        )
-                        await safe_send(
-                            {
-                                "event": "title",
-                                "title": session.title,
-                                "title_updated_at": session.title_updated_at.isoformat()
-                                + "Z",
-                            }
-                        )
-                except json.JSONDecodeError:
-                    pass
+                try:
+                    header, payload = decode_ws_frame(frame)
+                except ValueError:
+                    await websocket.close(code=1002, reason="Malformed websocket frame")
+                    return
+
+                message_type = header.get("type")
+                if message_type == "input":
+                    nonewline = bool(header.get("nonewline", False))
+                    text = payload.decode("utf-8", errors="replace")
+
+                    if nonewline:
+                        await session.write_input(text)
+                    else:
+                        text = text.rstrip("\r\n")
+                        newline = "\r\n" if sys.platform == "win32" else "\n"
+                        await session.write_input(text + newline)
+                elif message_type == "load_history":
+                    await safe_send_frame(
+                        {"type": "history"}, session.buffer.get_bytes()
+                    )
+                else:
+                    await websocket.close(
+                        code=1002, reason="Unsupported websocket message"
+                    )
+                    return
         except WebSocketDisconnect:
             pass
         finally:

@@ -13,7 +13,7 @@ The Manager Web UI is a single-page application (SPA) that provides:
 - **Real-time Updates** — WebSocket streaming of terminal output
 - **Multi-session View** — Grid view of all active sessions
 
-Users access it via `silc manager` command, which opens the browser to the web UI.
+Users access it via `silc manager` (browser tab) or `silc desktop` (native webview window).
 
 ---
 
@@ -159,7 +159,7 @@ interface Session {
   onDataDisposable: IDisposable | null  // Terminal input handler
   status: SessionStatus        // 'active' | 'idle' | 'dead'
   lastActivity: number         // Timestamp for idle tracking
-  writeQueue: string[]         // Buffered writes
+   writeQueue: Uint8Array[]     // Buffered binary writes
   writePending: boolean        // Write in progress flag
 }
 
@@ -186,7 +186,7 @@ detach(port): void
 fit(port): Promise<void>
 setStatus(port, status): void
 setWs(port, ws | null): void
-safeWrite(port, data: string): void
+  safeWrite(port, data: Uint8Array): void
 ```
 
 **Terminal Configuration:**
@@ -264,23 +264,19 @@ Manages WebSocket connections to session endpoints.
 **Protocol:**
 - Protocol selection: `wss:` if page is HTTPS, otherwise `ws:`
 
-**Server Messages:**
-```typescript
-// Output update
-{ event: "update", data: "terminal output..." }
-
-// History response
-{ event: "history", data: "full terminal history..." }
+**Binary Envelope:**
+```text
+[4-byte big-endian header length][JSON header UTF-8 bytes][raw payload bytes]
 ```
+
+**Server Messages:**
+- `{"type":"output"}` + raw PTY bytes
+- `{"type":"history"}` + raw PTY bytes
+- `{"type":"title","title":...,"title_updated_at":...}` + empty payload
 
 **Client Messages:**
-```typescript
-// Send input
-{ event: "type", text: "ls -la", nonewline: boolean }
-
-// Request history
-{ event: "load_history" }
-```
+- `{"type":"input","nonewline":true}` + UTF-8 input bytes
+- `{"type":"load_history"}` + empty payload
 
 **Functions:**
 ```typescript
@@ -291,9 +287,9 @@ disconnectWebSocket(port: number): void
 **Connection Lifecycle:**
 1. Close existing connection for port (if any)
 2. Create new WebSocket
-3. On open: set status 'active', request history
-4. Wire terminal input → WebSocket send
-5. On message: write to terminal
+3. Set `binaryType = 'arraybuffer'`
+4. On open: set status 'active', request history
+5. On message: decode binary frame and write payload bytes to terminal
 6. On close: set status 'idle'
 7. On error: set status 'dead'
 

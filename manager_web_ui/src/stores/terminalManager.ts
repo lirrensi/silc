@@ -2,7 +2,7 @@
 // PURPOSE: Manage frontend terminal session lifecycle, visible-first attachment, measured resize, and recovery actions.
 // OWNS: Browser terminal instances, resize propagation, write buffering, and renderer lifecycle.
 // EXPORTS: useTerminalManager - Pinia store for terminal session state and actions.
-// DOCS: agent_chat/plan_web_terminal_fidelity_2026-04-04.md
+// DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 import { FitAddon } from '@xterm/addon-fit'
 import type { WebglAddon } from '@xterm/addon-webgl'
@@ -25,6 +25,7 @@ import {
 } from '@/lib/terminalRenderer'
 import { getTerminalTheme } from '@/lib/themes'
 import type { ResolvedTheme } from '@/lib/themes'
+import { sendInputFrame } from '@/lib/websocketFrame'
 import type { DaemonSession, Session, SessionStatus } from '@/types/session'
 
 const MAX_COLS = 256
@@ -116,14 +117,14 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
       if (event.ctrlKey && event.key === 'Enter') {
         if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-          session.ws.send(JSON.stringify({ event: 'type', text: '\x1b[13;5u', nonewline: true }))
+          sendInputFrame(session.ws, '\x1b[13;5u')
         }
         return false
       }
 
       if (event.shiftKey && event.key === 'Enter' && !event.ctrlKey) {
         if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-          session.ws.send(JSON.stringify({ event: 'type', text: '\x1b[13;2u', nonewline: true }))
+          sendInputFrame(session.ws, '\x1b[13;2u')
         }
         return false
       }
@@ -131,7 +132,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       if (event.ctrlKey && event.key === 'v' && !event.shiftKey && !event.altKey) {
         navigator.clipboard.readText().then(text => {
           if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-            session.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
+            sendInputFrame(session.ws, text)
           }
         }).catch(() => {
           // Clipboard access denied - ignore silently
@@ -411,7 +412,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       e.preventDefault()
       navigator.clipboard.readText().then(text => {
         if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-          session.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
+          sendInputFrame(session.ws, text)
         }
       }).catch(() => {
         // Clipboard access denied - ignore silently
@@ -443,7 +444,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         e.stopPropagation()
         navigator.clipboard.readText().then(text => {
           if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-            session.ws.send(JSON.stringify({ event: 'type', text, nonewline: true }))
+            sendInputFrame(session.ws, text)
           }
         }).catch(() => {
           // Clipboard access denied - ignore silently
@@ -622,9 +623,13 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
   }
 
-  function safeWrite(port: number, data: string): void {
+  function safeWrite(port: number, data: Uint8Array): void {
     const session = sessions.value.get(port)
     if (!session) return
+
+    if (data.byteLength === 0) {
+      return
+    }
 
     session.writeQueue.push(data)
 
@@ -648,10 +653,16 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     session.writePending = true
     session.writeInFlight = true
-    const combined = session.writeQueue.join('')
-    session.writeQueue.length = 0
+    const chunk = session.writeQueue.shift()
 
-    session.terminal.write(combined, () => {
+    if (!chunk) {
+      session.writePending = false
+      session.writeInFlight = false
+      resolveFlushWaiters(session)
+      return
+    }
+
+    session.terminal.write(chunk, () => {
       session.writeInFlight = false
 
       if (session.writeQueue.length > 0) {

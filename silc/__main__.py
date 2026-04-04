@@ -174,6 +174,47 @@ def _show_daemon_error_details() -> None:
         click.echo(f"\n⚠️  Could not fetch daemon error details: {e}", err=True)
 
 
+def _spawn_detached_process(cmd: list[str], stderr_name: str) -> None:
+    """Launch a detached child process with optional stderr logging."""
+
+    stderr_handle: object = subprocess.PIPE
+    try:
+        from silc.utils.persistence import LOGS_DIR
+
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        stderr_handle = open(LOGS_DIR / stderr_name, "a", encoding="utf-8")
+    except Exception:
+        stderr_handle = subprocess.PIPE
+
+    common_kwargs = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": stderr_handle,
+    }
+
+    try:
+        if sys.platform == "win32":
+            creationflags = (
+                subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.DETACHED_PROCESS
+                | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            subprocess.Popen(
+                cmd,
+                creationflags=creationflags,
+                startupinfo=startupinfo,
+                **common_kwargs,
+            )
+        else:
+            subprocess.Popen(cmd, start_new_session=True, **common_kwargs)
+    finally:
+        if hasattr(stderr_handle, "close"):
+            stderr_handle.close()
+
+
 def _fetch_session_token(port: int, timeout: float = 2.0) -> str | None:
     """Try to fetch the token for a running session (local only)."""
     try:
@@ -582,42 +623,76 @@ def _start_detached_daemon(*, share: bool = False) -> None:
     """Start daemon in background (detached)."""
     python_exec = _get_daemon_python_executable()
 
-    stderr_log_path = None
-    try:
-        from silc.utils.persistence import LOGS_DIR
-
-        LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        stderr_log_path = LOGS_DIR / "daemon_stderr.log"
-        stderr_handle = open(stderr_log_path, "a", encoding="utf-8")
-    except Exception:
-        stderr_handle = subprocess.PIPE
-
     cmd = [python_exec, "-m", "silc", "daemon"]
     if share:
         cmd.extend(["--host", "0.0.0.0", "--share-mode"])
-    common_kwargs = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": stderr_handle,
-    }
+    _spawn_detached_process(cmd, "daemon_stderr.log")
 
-    if sys.platform == "win32":
-        creationflags = (
-            subprocess.CREATE_NEW_PROCESS_GROUP
-            | subprocess.DETACHED_PROCESS
-            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        )
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = subprocess.SW_HIDE
-        subprocess.Popen(
-            cmd,
-            creationflags=creationflags,
-            startupinfo=startupinfo,
-            **common_kwargs,
-        )
-    else:
-        subprocess.Popen(cmd, start_new_session=True, **common_kwargs)
+
+def _launch_desktop_webview(manager_url: str) -> None:
+    """Open the manager UI in a detached native window."""
+
+    try:
+        import webview  # noqa: F401
+    except ImportError as exc:
+        raise click.ClickException(
+            "pywebview is required for the desktop command. Install pywebview and try again."
+        ) from exc
+
+    python_exec = _get_daemon_python_executable()
+    cmd = [python_exec, "-m", "silc", "desktop-window", "--url", manager_url]
+    _spawn_detached_process(cmd, "desktop_stderr.log")
+
+
+def _ensure_manager_ready(share: bool) -> tuple[str, dict[str, object]] | None:
+    """Start or reuse the daemon, preserving the current manager flow."""
+
+    if share:
+        _warn_share_mode()
+
+    daemon_responsive = _daemon_available()
+    daemon_running = daemon_responsive or is_daemon_running()
+
+    defaults = _get_daemon_defaults() if daemon_responsive else {}
+    daemon_share_mode = bool(defaults.get("share_mode"))
+
+    if not daemon_running:
+        click.echo("Starting daemon in background...", err=False)
+        _start_detached_daemon(share=share)
+        click.echo("Waiting for daemon to start...", err=False)
+        started = _wait_for_daemon_start_with_logs(timeout=10)
+        if not started:
+            click.echo(
+                "❌ Failed to start daemon (timed out waiting for it to be available)",
+                err=True,
+            )
+            _show_daemon_error_details()
+            return None
+        click.echo("✓ Daemon started successfully", err=False)
+    elif daemon_responsive:
+        click.echo("✓ Daemon is already running", err=False)
+        if share and not daemon_share_mode:
+            click.echo("Restarting daemon in LAN share mode...", err=False)
+            try:
+                requests.post(_daemon_url("/shutdown"), timeout=35)
+            except requests.RequestException:
+                pass
+
+            if not _wait_for_daemon_stop(timeout=30):
+                click.echo("⚠️  Shutdown timed out; forcing killall", err=True)
+                kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
+                _wait_for_daemon_stop(timeout=5)
+
+            _start_detached_daemon(share=True)
+            started = _wait_for_daemon_start_with_logs(timeout=15)
+            if not started:
+                click.echo("❌ Failed to restart daemon in share mode", err=True)
+                _show_daemon_error_details()
+                return None
+            defaults = _get_daemon_defaults(timeout=5)
+
+    manager_url = f"http://127.0.0.1:{DAEMON_PORT}/"
+    return manager_url, defaults
 
 
 @cli.command(name="daemon", hidden=True)
@@ -1039,57 +1114,49 @@ def _warn_share_mode() -> None:
 def manager(share: bool) -> None:
     """Open the session manager web UI (starts daemon if needed)."""
 
-    if share:
-        _warn_share_mode()
-
-    daemon_responsive = _daemon_available()
-    daemon_running = daemon_responsive or is_daemon_running()
-
-    defaults = _get_daemon_defaults() if daemon_responsive else {}
-    daemon_share_mode = bool(defaults.get("share_mode"))
-
-    if not daemon_running:
-        click.echo("Starting daemon in background...", err=False)
-        _start_detached_daemon(share=share)
-        click.echo("Waiting for daemon to start...", err=False)
-        started = _wait_for_daemon_start_with_logs(timeout=10)
-        if not started:
-            click.echo(
-                "❌ Failed to start daemon (timed out waiting for it to be available)",
-                err=True,
-            )
-            _show_daemon_error_details()
-            return
-        click.echo("✓ Daemon started successfully", err=False)
-    elif daemon_responsive:
-        click.echo("✓ Daemon is already running", err=False)
-        if share and not daemon_share_mode:
-            click.echo("Restarting daemon in LAN share mode...", err=False)
-            try:
-                requests.post(_daemon_url("/shutdown"), timeout=35)
-            except requests.RequestException:
-                pass
-
-            if not _wait_for_daemon_stop(timeout=30):
-                click.echo("⚠️  Shutdown timed out; forcing killall", err=True)
-                kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
-                _wait_for_daemon_stop(timeout=5)
-
-            _start_detached_daemon(share=True)
-            started = _wait_for_daemon_start_with_logs(timeout=15)
-            if not started:
-                click.echo("❌ Failed to restart daemon in share mode", err=True)
-                _show_daemon_error_details()
-                return
-            defaults = _get_daemon_defaults(timeout=5)
-
-    manager_url = f"http://127.0.0.1:{DAEMON_PORT}/"
+    launch = _ensure_manager_ready(share)
+    if launch is None:
+        return
+    manager_url, defaults = launch
     if share:
         share_url = defaults.get("manager_url") if defaults else None
         if isinstance(share_url, str) and share_url:
             click.echo(f"📱 Scan/share this LAN URL: {share_url}")
     webbrowser.open_new_tab(manager_url)
     click.echo(f"✨ Opening manager at {manager_url}")
+
+
+@cli.command()
+@click.option("--share", is_flag=True, help="Expose manager and sessions on LAN.")
+def desktop(share: bool) -> None:
+    """Open the session manager web UI in a detached native window."""
+
+    launch = _ensure_manager_ready(share)
+    if launch is None:
+        return
+    manager_url, defaults = launch
+    if share:
+        share_url = defaults.get("manager_url") if defaults else None
+        if isinstance(share_url, str) and share_url:
+            click.echo(f"📱 Scan/share this LAN URL: {share_url}")
+    _launch_desktop_webview(manager_url)
+    click.echo(f"✨ Opening desktop manager at {manager_url}")
+
+
+@cli.command(name="desktop-window", hidden=True)
+@click.option("--url", required=True, type=str)
+def desktop_window(url: str) -> None:
+    """Internal: launch the manager UI in a native window."""
+
+    try:
+        import webview
+    except ImportError as exc:
+        raise click.ClickException(
+            "pywebview is required for the desktop window. Install pywebview and try again."
+        ) from exc
+
+    webview.create_window("SILC Manager", url)
+    webview.start()
 
 
 @cli.command()

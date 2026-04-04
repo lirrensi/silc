@@ -1,11 +1,14 @@
 // FILE: manager_web_ui/src/lib/websocket.ts
 // PURPOSE: Connect session terminals to the daemon websocket while preserving ordered history and repaint recovery.
-// OWNS: Websocket lifecycle for terminal sessions and history/update message handling.
+// OWNS: Websocket lifecycle for terminal sessions and history/output/title message handling.
 // EXPORTS: connectWebSocket - open or replace a session websocket; disconnectWebSocket - close a session websocket intentionally.
-// DOCS: agent_chat/plan_web_terminal_fidelity_2026-04-04.md
+// DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 import { getSessionHttpUrl } from '@/lib/daemonApi'
+import { decodeWsFrame, requestHistoryFrame, sendInputFrame } from '@/lib/websocketFrame'
 import { useTerminalManager } from '@/stores/terminalManager'
+
+export { decodeWsFrame, encodeWsFrame, requestHistoryFrame, sendInputFrame, sendWsFrame } from '@/lib/websocketFrame'
 
 export function connectWebSocket(port: number, options?: { force?: boolean }): WebSocket | null {
   console.log(`[WebSocket] connectWebSocket(${port})`)
@@ -32,6 +35,7 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
   const wsUrl = `${wsBase}/ws`
   console.log(`[WebSocket] Connecting to ${wsUrl}`)
   const ws = new WebSocket(wsUrl)
+  ws.binaryType = 'arraybuffer'
   manager.setWs(port, ws)
   manager.setStatus(port, 'connecting')
 
@@ -43,33 +47,46 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
     console.log(`[WebSocket] Connected to port ${port}`)
     manager.setDisconnectReason(port, null)
     manager.setStatus(port, 'active')
-    ws.send(JSON.stringify({ event: 'load_history' }))
+    requestHistoryFrame(ws)
     manager.updateSessionTitle(port, session.title || '', session.titleUpdatedAt)
     manager.scheduleFit(port, { immediate: true, reason: 'ws-open' })
   }
 
   ws.onmessage = async (event) => {
     try {
-      const msg = JSON.parse(event.data)
+      if (!(event.data instanceof ArrayBuffer)) {
+        throw new Error('Expected binary websocket frame')
+      }
 
-      if (msg.event === 'history' && msg.data) {
+      const { header, payload } = decodeWsFrame(event.data)
+
+      if (header.type === 'history') {
         await manager.flushWrites(port)
         session.terminal.clear()
-        manager.safeWrite(port, msg.data)
+        if (payload.byteLength > 0) {
+          manager.safeWrite(port, payload)
+        }
         await manager.flushWrites(port)
         manager.refreshTerminalSurface(port)
         manager.resolveHistoryRefresh(port)
-      } else if (msg.event === 'title' && typeof msg.title === 'string') {
+      } else if (header.type === 'output') {
+        if (payload.byteLength > 0) {
+          manager.safeWrite(port, payload)
+        }
+      } else if (header.type === 'title' && typeof header.title === 'string') {
         manager.updateSessionTitle(
           port,
-          msg.title,
-          typeof msg.title_updated_at === 'string' ? msg.title_updated_at : null,
+          header.title,
+          typeof header.title_updated_at === 'string' ? header.title_updated_at : null,
         )
-      } else if (msg.event === 'update' && msg.data) {
-        manager.safeWrite(port, msg.data)
+      } else {
+        throw new Error(`Unsupported websocket frame type: ${String(header.type)}`)
       }
-    } catch {
-      manager.safeWrite(port, event.data)
+    } catch (err) {
+      console.error(`[WebSocket] Frame handling failed for port ${port}:`, err)
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close(1002, 'Invalid websocket frame')
+      }
     }
   }
 
@@ -101,7 +118,7 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
   session.onDataDisposable?.dispose()
   session.onDataDisposable = session.terminal.onData((data: string) => {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event: 'type', text: data, nonewline: true }))
+      sendInputFrame(ws, data)
     }
   })
 

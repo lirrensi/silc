@@ -309,77 +309,32 @@ ws://localhost:<port>/ws?token=<token>
 
 Token is required for non-localhost connections.
 
+### Binary Envelope
+
+Every application frame is binary:
+
+```text
+[4-byte big-endian header length][JSON header UTF-8 bytes][raw payload bytes]
+```
+
+The JSON header uses `type`, not `event`.
+
 ### Server Messages
 
-**Output update:**
-```json
-{
-  "event": "update",
-  "data": "terminal output..."
-}
-```
-
-**History (on request):**
-```json
-{
-  "event": "history",
-  "data": "full terminal history..."
-}
-```
+- `{"type":"output"}` + raw PTY bytes
+- `{"type":"history"}` + `session.buffer.get_bytes()`
+- `{"type":"title","title":...,"title_updated_at":...}` + empty payload
 
 ### Client Messages
 
-**Send input:**
-```json
-{
-  "event": "type",
-  "text": "ls -la",
-  "nonewline": false
-}
-```
-
-**Request history:**
-```json
-{
-  "event": "load_history"
-}
-```
+- `{"type":"input","nonewline":true|false}` + UTF-8 input bytes
+- `{"type":"load_history"}` + empty payload
 
 ### Implementation
 
-```python
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    if not _verify_websocket_token(websocket):
-        await websocket.close(code=1008, reason="Invalid API token")
-        return
-
-    await websocket.accept()
-    session.tui_active = True
-
-    async def send_updates():
-        cursor = session.buffer.cursor
-        while True:
-            new_bytes, cursor = session.buffer.get_since(cursor)
-            if new_bytes:
-                await websocket.send_json({
-                    "event": "update",
-                    "data": new_bytes.decode("utf-8", errors="replace")
-                })
-            await asyncio.sleep(0.1)
-
-    sender_task = asyncio.create_task(send_updates())
-    try:
-        while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            # Handle message...
-    except WebSocketDisconnect:
-        pass
-    finally:
-        session.tui_active = False
-        sender_task.cancel()
-```
+- `/ws` accepts only binary application frames.
+- PTY bytes are forwarded without UTF-8 decoding on output/history paths.
+- Malformed or unsupported frames close the socket with a protocol error.
 
 ---
 

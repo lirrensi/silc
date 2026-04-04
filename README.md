@@ -279,6 +279,9 @@ silc list
 # Open Web UI to manage all sessions
 silc manager
 
+# Or open a native desktop window
+silc desktop
+
 # Or use native TUI
 silc tui
 ```
@@ -452,6 +455,7 @@ silc start --shell zsh         # Use specific shell (bash, zsh, pwsh, cmd)
 silc start --cwd /path/to/dir  # Set working directory for session
 
 silc manager                   # Open Web UI in browser (starts daemon if needed)
+silc desktop                   # Open Web UI in native desktop window
 silc list                      # List all active sessions (shows port, name, idle time)
 silc shutdown                  # Graceful shutdown (closes all sessions)
 silc killall                   # Force kill daemon + all sessions
@@ -652,6 +656,7 @@ silc tui  # Launches fast, native terminal UI
 ### Web UI (Browser-based)
 ```bash
 silc manager  # Opens browser to session management UI
+silc desktop  # Opens the same UI in a native desktop window
 ```
 
 ---

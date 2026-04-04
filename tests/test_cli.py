@@ -117,6 +117,7 @@ class TestCLIHelp:
         assert "Resource-Dependent Commands:" in output
         assert "silc <port|name> <command>" in output
         assert "manager" in output
+        assert "desktop" in output
         assert "stream-file-render" in output
 
     def test_resource_help_uses_selector_usage(self):
@@ -131,6 +132,89 @@ class TestCLIHelp:
         assert result.exit_code == 0
         assert "<port|name> [OPTIONS] COMMAND [ARGS]..." in result.output
         assert "These commands act on an existing session" in result.output
+
+
+class TestDesktopLauncher:
+    """Tests for the detached desktop launcher command."""
+
+    def test_manager_command_still_opens_browser(self, monkeypatch):
+        """`silc manager` should keep opening the browser tab."""
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        launched: dict[str, object] = {}
+
+        monkeypatch.setattr(
+            main_mod,
+            "_ensure_manager_ready",
+            lambda share: ("http://127.0.0.1:19999/", {}),
+        )
+        monkeypatch.setattr(
+            main_mod.webbrowser,
+            "open_new_tab",
+            lambda url: launched.update({"url": url}),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["manager"])
+
+        assert result.exit_code == 0
+        assert launched["url"] == "http://127.0.0.1:19999/"
+
+    def test_desktop_command_spawns_webview_launcher(self, monkeypatch):
+        """`silc desktop` should reuse manager flow and launch webview."""
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        launched: dict[str, object] = {}
+
+        monkeypatch.setattr(
+            main_mod,
+            "_ensure_manager_ready",
+            lambda share: ("http://127.0.0.1:19999/", {}),
+        )
+        monkeypatch.setattr(
+            main_mod,
+            "_launch_desktop_webview",
+            lambda url: launched.update({"url": url}),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["desktop"])
+
+        assert result.exit_code == 0
+        assert launched["url"] == "http://127.0.0.1:19999/"
+        assert "desktop manager" in (result.output or "").lower()
+
+    def test_desktop_window_launches_webview(self, monkeypatch):
+        """The hidden desktop helper should open a pywebview window."""
+        from types import SimpleNamespace
+
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        calls: dict[str, object] = {}
+
+        fake_webview = SimpleNamespace(
+            create_window=lambda title, url: calls.update({"title": title, "url": url}),
+            start=lambda: calls.update({"started": True}),
+        )
+        monkeypatch.setitem(sys.modules, "webview", fake_webview)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main_mod.cli, ["desktop-window", "--url", "http://127.0.0.1:19999/"]
+        )
+
+        assert result.exit_code == 0
+        assert calls == {
+            "title": "SILC Manager",
+            "url": "http://127.0.0.1:19999/",
+            "started": True,
+        }
 
 
 # ============================================================================

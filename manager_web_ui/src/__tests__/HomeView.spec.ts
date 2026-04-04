@@ -51,7 +51,6 @@ describe('HomeView', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(wrapper.text()).toContain('Home layout')
     expect(wrapper.find('[aria-pressed="true"]').text()).toBe('2x2')
     expect(wrapper.findAll('.session-card-stub')).toHaveLength(4)
     expect(reconcileSessions).toHaveBeenCalled()

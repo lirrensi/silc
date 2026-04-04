@@ -1,12 +1,13 @@
 // FILE: manager_web_ui/src/__tests__/FrozenTerminalPreview.spec.ts
 // PURPOSE: Verify frozen snapshot rendering, refresh cadence, and disposal for Home previews.
 // OWNS: Visibility lifecycle and snapshot refresh coverage for the preview component.
-// DOCS: agent_chat/plan_home_grid_frozen_previews_2026-04-04.md
+// DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import FrozenTerminalPreview from '../components/FrozenTerminalPreview.vue'
+import { encodeWsFrame } from '../lib/websocketFrame'
 
 const mocks = vi.hoisted(() => {
   const terminalInstances: Array<{ open: ReturnType<typeof vi.fn>; reset: ReturnType<typeof vi.fn>; write: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; options: { theme?: unknown }; element: HTMLElement | null; loadAddon: ReturnType<typeof vi.fn>; unicode: { activeVersion: string } }> = []
@@ -29,7 +30,7 @@ const mocks = vi.hoisted(() => {
       this.element = element
     })
     reset = vi.fn()
-    write = vi.fn((_data: string) => undefined)
+    write = vi.fn((_data: string | Uint8Array) => undefined)
     dispose = vi.fn()
     loadAddon = vi.fn()
 
@@ -73,10 +74,21 @@ const mocks = vi.hoisted(() => {
     onmessage: null | ((event: MessageEvent) => void) = null
     onerror: null | ((event: Event) => void) = null
     onclose: null | ((event: CloseEvent) => void) = null
-    send = vi.fn((payload: string) => {
-      if (payload.includes('load_history')) {
+    send = vi.fn((payload: string | ArrayBuffer | Uint8Array) => {
+      const buffer = payload instanceof ArrayBuffer
+        ? payload
+        : payload instanceof Uint8Array
+          ? payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength)
+          : new TextEncoder().encode(payload).buffer
+      const view = new DataView(buffer)
+      const headerLength = view.getUint32(0, false)
+      const headerBytes = new Uint8Array(buffer, 4, headerLength)
+      const header = JSON.parse(new TextDecoder().decode(headerBytes)) as { type?: string }
+
+      if (header.type === 'load_history') {
         window.setTimeout(() => {
-          this.onmessage?.({ data: JSON.stringify({ event: 'history', data: '\u001b[31mRED\u001b[0m' }) } as MessageEvent)
+          const frame = encodeWsFrame({ type: 'history' }, new TextEncoder().encode('\u001b[31mRED\u001b[0m'))
+          this.onmessage?.({ data: frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength) } as MessageEvent)
         }, 0)
       }
     })

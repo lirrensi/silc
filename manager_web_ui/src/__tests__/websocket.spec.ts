@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { connectWebSocket } from '../lib/websocket'
+import { encodeWsFrame } from '../lib/websocketFrame'
 
 const session = {
   ws: null as WebSocket | null,
@@ -72,11 +73,13 @@ describe('connectWebSocket', () => {
 
     ws?.onmessage?.(
       new MessageEvent('message', {
-        data: JSON.stringify({
-          event: 'title',
-          title: 'PowerShell - npm run dev',
-          title_updated_at: '2026-04-05T00:00:00Z',
-        }),
+        data: encodeWsFrame(
+          {
+            type: 'title',
+            title: 'PowerShell - npm run dev',
+            title_updated_at: '2026-04-05T00:00:00Z',
+          },
+        ).buffer,
       }),
     )
 

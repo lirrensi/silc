@@ -42,6 +42,7 @@ The CLI provides user-friendly commands to interact with SILC:
 |---------|---------|---------|
 | `click` | CLI framework | any |
 | `requests` | HTTP client | any |
+| `pywebview` | Native window launcher | any |
 | `uvicorn` | ASGI server (for daemon mode) | any |
 
 ### Internal Modules
@@ -63,6 +64,7 @@ The CLI provides user-friendly commands to interact with SILC:
 silc
 ├── start [name] [--port] [--global] [--no-detach] [--token]
 ├── manager
+├── desktop
 ├── list
 ├── shutdown
 ├── killall
@@ -190,6 +192,18 @@ def manager():
 ```
 
 Opens the session manager web UI. Auto-starts the daemon if not already running.
+
+### `silc desktop`
+
+```python
+@cli.command()
+def desktop():
+    # 1. Share the same daemon startup flow as silc manager
+    # 2. Start daemon if needed (detached)
+    # 3. Launch a detached child process that opens pywebview
+```
+
+Opens the same session manager UI in a separate native desktop window.
 
 ### `silc list`
 

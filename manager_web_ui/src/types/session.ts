@@ -6,7 +6,7 @@ import type { WebglAddon } from '@xterm/addon-webgl'
 // PURPOSE: Define shared manager session types for terminal lifecycle, renderer state, and daemon session metadata.
 // OWNS: Type contracts for frontend terminal sessions.
 // EXPORTS: Session - terminal session state shape; DaemonSession - daemon-reported session metadata; SessionStatus - lifecycle status union.
-// DOCS: agent_chat/plan_web_terminal_fidelity_2026-04-04.md
+// DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 export type SessionStatus = 'active' | 'connecting' | 'idle' | 'dead' | 'restarting'
 
@@ -25,7 +25,7 @@ export interface Session {
   status: SessionStatus
   lastActivity: number
   // Buffered write queue for safe terminal writes
-  writeQueue: string[]
+  writeQueue: Uint8Array[]
   writePending: boolean
   writeInFlight: boolean
   flushWaiters: Array<() => void>

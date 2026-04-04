@@ -2,9 +2,10 @@
 // PURPOSE: Fetch and cache frozen Home preview snapshots without taking over live session websockets.
 // OWNS: One-shot snapshot retrieval, refresh throttling, and Home grid density helpers.
 // EXPORTS: HOME_GRID_OPTIONS - supported Home grid densities; getHomeGridSlots - maps density to visible card count; getCachedHomePreviewSnapshot - reads the local snapshot cache; loadHomePreviewSnapshot - fetches a frozen session snapshot with throttling.
-// DOCS: agent_chat/plan_home_grid_frozen_previews_2026-04-04.md
+// DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 import { getSessionHttpUrl } from '@/lib/daemonApi'
+import { decodeWsFrame, requestHistoryFrame } from '@/lib/websocketFrame'
 
 export type HomeGridDensity = '2x2' | '3x3' | '4x4'
 
@@ -86,8 +87,10 @@ function requestSnapshot(port: number, timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const wsUrl = `${getSessionHttpUrl(port).replace(/^http/, 'ws')}/ws`
     const ws = new WebSocket(wsUrl)
+    ws.binaryType = 'arraybuffer'
     let settled = false
     let timer: number | null = null
+    const textDecoder = new TextDecoder()
 
     const finish = (resolver: () => void): void => {
       if (settled) {
@@ -112,7 +115,7 @@ function requestSnapshot(port: number, timeoutMs: number): Promise<string> {
 
     ws.onopen = () => {
       try {
-        ws.send(JSON.stringify({ event: 'load_history' }))
+        requestHistoryFrame(ws)
       } catch (err) {
         finish(() => reject(err instanceof Error ? err : new Error(String(err))))
       }
@@ -120,12 +123,16 @@ function requestSnapshot(port: number, timeoutMs: number): Promise<string> {
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data)
-        if (msg.event === 'history' && typeof msg.data === 'string') {
-          finish(() => resolve(msg.data))
+        if (!(event.data instanceof ArrayBuffer)) {
+          throw new Error('Expected binary websocket frame')
         }
-      } catch {
-        finish(() => resolve(String(event.data)))
+
+        const { header, payload } = decodeWsFrame(event.data)
+        if (header.type === 'history') {
+          finish(() => resolve(textDecoder.decode(payload)))
+        }
+      } catch (err) {
+        finish(() => reject(err instanceof Error ? err : new Error(String(err))))
       }
     }
 

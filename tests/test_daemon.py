@@ -91,6 +91,14 @@ async def _wait_for_daemon_api(timeout: float = 15.0) -> bool:
     return False
 
 
+async def wait_for_daemon_start(
+    daemon: SilcDaemon | None = None, timeout: float = 15.0
+) -> bool:
+    """Compatibility helper for tests that wait on the daemon API."""
+    _ = daemon
+    return await _wait_for_daemon_api(timeout=timeout)
+
+
 # Clean up any existing daemon before tests
 @pytest.fixture(scope="module", autouse=True)
 def cleanup_daemon_before_and_after():

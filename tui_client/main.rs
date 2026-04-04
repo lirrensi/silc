@@ -1,3 +1,9 @@
+// FILE: tui_client/main.rs
+// PURPOSE: Run the native SILC TUI client over framed binary websocket transport.
+// OWNS: Native websocket framing, keyboard input encoding, and terminal output rendering.
+// EXPORTS: main - launch the standalone TUI client binary.
+// DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
+
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -5,7 +11,7 @@ use crossterm::{
     terminal::{self, Clear, ClearType},
 };
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::{
     io::{self, Write},
     sync::Arc,
@@ -24,20 +30,6 @@ type DynResult<T> = Result<T, DynError>;
 enum ConnectionState {
     Connected,
     Disconnected,
-}
-
-#[derive(Serialize, Debug)]
-struct WsTypeMessage {
-    event: &'static str,
-    text: String,
-    nonewline: bool,
-}
-
-#[derive(Deserialize, Debug)]
-struct WsUpdateMessage {
-    event: String,
-    #[serde(default)]
-    data: String,
 }
 
 struct TerminalGuard {
@@ -163,6 +155,38 @@ fn clear_local_screen() -> DynResult<()> {
     Ok(())
 }
 
+fn encode_ws_frame(header: &Value, payload: &[u8]) -> DynResult<Vec<u8>> {
+    let header_bytes = serde_json::to_vec(header)?;
+    let header_len: u32 = header_bytes
+        .len()
+        .try_into()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "frame header too large"))?;
+
+    let mut frame = Vec::with_capacity(4 + header_bytes.len() + payload.len());
+    frame.extend_from_slice(&header_len.to_be_bytes());
+    frame.extend_from_slice(&header_bytes);
+    frame.extend_from_slice(payload);
+    Ok(frame)
+}
+
+fn decode_ws_frame(data: &[u8]) -> DynResult<(Value, Vec<u8>)> {
+    if data.len() < 4 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too short").into());
+    }
+
+    let header_len = u32::from_be_bytes(data[0..4].try_into().unwrap()) as usize;
+    if data.len() < 4 + header_len {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame truncated").into());
+    }
+
+    let header: Value = serde_json::from_slice(&data[4..4 + header_len])?;
+    if !header.is_object() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame header must be object").into());
+    }
+
+    Ok((header, data[4 + header_len..].to_vec()))
+}
+
 async fn request_clear(agent: Arc<Agent>, clear_url: String) {
     let _ = task::spawn_blocking(move || agent.post(&clear_url).call()).await;
 }
@@ -177,20 +201,6 @@ async fn request_resize(agent: Arc<Agent>, resize_url: String, rows: u16, cols: 
             .call()
     })
     .await;
-}
-
-async fn fetch_initial_raw(agent: Arc<Agent>, raw_url: String) -> Option<String> {
-    task::spawn_blocking(move || {
-        let response = agent.get(&raw_url).call().ok()?;
-        let body = response.into_string().ok()?;
-        let json: serde_json::Value = serde_json::from_str(&body).ok()?;
-        json.get("output")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-    })
-    .await
-    .ok()
-    .flatten()
 }
 
 #[tokio::main]
@@ -212,10 +222,6 @@ async fn main() -> DynResult<()> {
     let parsed_ws_url = Url::parse(&ws_url)?;
 
     let http_base = ws_to_http_base(&parsed_ws_url);
-    let mut raw_url = http_base.clone();
-    raw_url.set_path("/raw");
-    raw_url.set_query(Some("lines=200"));
-
     let mut clear_url = http_base.clone();
     clear_url.set_path("/clear");
 
@@ -254,18 +260,15 @@ async fn main() -> DynResult<()> {
         }
     };
 
-    // Best-effort: show some existing scrollback so the UI isn't empty.
-    if let Some(initial) = fetch_initial_raw(Arc::clone(&http_agent), raw_url.to_string()).await {
-        if !initial.is_empty() {
-            let mut stdout = io::stdout();
-            write!(stdout, "{}", initial)?;
-            stdout.flush()?;
-        }
-    }
-
     let (status_tx, status_rx) = watch::channel(ConnectionState::Connected);
 
     let (mut ws_write, mut ws_read) = ws_stream.split();
+
+    ws_write
+        .send(Message::Binary(
+            encode_ws_frame(&json!({"type": "load_history"}), &[])?.into(),
+        ))
+        .await?;
 
     let (tx_input, mut rx_input) = mpsc::unbounded_channel::<String>();
     let (tx_output, mut rx_output) = mpsc::unbounded_channel::<Vec<u8>>();
@@ -276,23 +279,23 @@ async fn main() -> DynResult<()> {
         tokio::spawn(async move {
             while let Some(next) = ws_read.next().await {
                 match next {
-                    Ok(Message::Text(text)) => {
-                        let payload = text.as_str();
-                        if let Ok(msg) = serde_json::from_str::<WsUpdateMessage>(payload) {
-                            if msg.event == "update" && !msg.data.is_empty() {
-                                let _ = tx_output.send(msg.data.into_bytes());
-                            }
-                        } else {
-                            let _ = tx_output.send(payload.as_bytes().to_vec());
-                        }
-                    }
                     Ok(Message::Binary(data)) => {
-                        let _ = tx_output.send(data.to_vec());
+                        let Ok((header, payload)) = decode_ws_frame(&data) else {
+                            break;
+                        };
+
+                        match header.get("type").and_then(|value| value.as_str()) {
+                            Some("output") | Some("history") => {
+                                let _ = tx_output.send(payload);
+                            }
+                            Some("title") => {}
+                            _ => break,
+                        }
                     }
                     Ok(Message::Close(_)) => {
                         break;
                     }
-                    Ok(_) => {}
+                    Ok(_) => break,
                     Err(_) => {
                         break;
                     }
@@ -310,18 +313,15 @@ async fn main() -> DynResult<()> {
                 if chunk.is_empty() {
                     continue;
                 }
-                let msg = WsTypeMessage {
-                    event: "type",
-                    text: chunk,
-                    nonewline: true,
-                };
-
-                let json = match serde_json::to_string(&msg) {
-                    Ok(json) => json,
+                let frame = match encode_ws_frame(
+                    &json!({"type": "input", "nonewline": true}),
+                    chunk.as_bytes(),
+                ) {
+                    Ok(frame) => frame,
                     Err(_) => continue,
                 };
 
-                if ws_write.send(Message::Text(json.into())).await.is_err() {
+                if ws_write.send(Message::Binary(frame.into())).await.is_err() {
                     let _ = status_tx.send(ConnectionState::Disconnected);
                     break;
                 }
