@@ -116,7 +116,7 @@ button:disabled {
   justify-content: center;
   gap: 0.35rem;
   min-height: 100%;
-  padding: 0 0.7rem;
+  padding: 0 0.5rem;
   border: 0;
   background: transparent;
   color: var(--color-text-primary);
@@ -125,7 +125,7 @@ button:disabled {
 }
 
 .bar-button-tight {
-  padding: 0 0.55rem;
+  padding: 0 0.4rem;
 }
 
 .bar-button:hover {

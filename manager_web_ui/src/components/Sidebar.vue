@@ -242,7 +242,7 @@ watch(
     :class="ui.isMobileNavOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
     :style="sidebarWidthStyle"
   >
-    <div class="flex min-h-[5rem] flex-col overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+    <div class="flex flex-col overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
       <div v-if="!ui.isSidebarCollapsed" class="flex items-center justify-between gap-3 px-3 py-2">
         <div class="min-w-0 overflow-hidden">
           <p class="truncate text-xs font-medium uppercase tracking-[0.24em] text-[var(--color-text-muted)]">
@@ -252,7 +252,7 @@ watch(
         </div>
       </div>
 
-      <div :class="ui.isSidebarCollapsed ? 'flex flex-col' : 'grid min-h-[2.4rem] grid-cols-5 border-t border-[var(--color-border)]'">
+      <div :class="ui.isSidebarCollapsed ? 'flex flex-col' : 'grid h-9 grid-cols-5 border-t border-[var(--color-border)]'">
         <button
           @click="openNewSessionModal"
           class="bar-button bar-button-accent w-full"

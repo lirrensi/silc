@@ -64,7 +64,7 @@ function statusColor(status: string): string {
             <span class="font-mono text-xs text-[var(--color-text-muted)]">:{{ port }}</span>
           </div>
         </div>
-        <div class="absolute left-0 right-0 top-[2.9rem] z-10 px-3 text-[11px] text-[var(--color-text-secondary)]">
+        <div class="absolute left-0 right-0 top-[2.5rem] z-10 px-3 text-[11px] text-[var(--color-text-secondary)]">
           <div class="truncate text-[11px] font-medium text-[var(--color-text-muted)]">{{ liveTitle() }}</div>
         </div>
 
@@ -86,7 +86,7 @@ function statusColor(status: string): string {
 
 .preview-container {
   position: absolute;
-  top: 72px;
+  top: 64px;
   left: 0;
   right: 0;
   bottom: 0;
