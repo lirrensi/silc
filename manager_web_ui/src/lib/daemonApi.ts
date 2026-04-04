@@ -17,15 +17,19 @@ export function getSessionHttpUrl(port: number): string {
 export interface DaemonSession {
   port: number
   name: string
+  title: string
   session_id: string
   shell: string
   cwd: string | null
+  title_updated_at: string | null
   idle_seconds: number
   alive: boolean
 }
 
 export interface CreateSessionResponse {
   port: number
+  name: string
+  title: string
   session_id: string
   shell: string
 }
@@ -41,6 +45,7 @@ export interface RestartSessionResponse {
   status: string
   port: number
   name: string
+  title: string
   shell: string
 }
 

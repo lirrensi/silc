@@ -217,6 +217,8 @@ class SilcDaemon:
                         shell_info,
                         api_token=token,
                         cwd=cwd,
+                        title=session_name,
+                        on_title_change=self._handle_session_title_change,
                     )
                     await session.start()
 
@@ -226,20 +228,12 @@ class SilcDaemon:
                         session_name,
                         session.session_id,
                         shell_info.type,
+                        cwd=cwd,
+                        title=session.title,
                         is_global=is_global,
                     )
                     # Persist to sessions.json
-                    append_session_to_json(
-                        {
-                            "port": selected_port,
-                            "name": session_name,
-                            "session_id": session.session_id,
-                            "shell": shell_info.type,
-                            "is_global": is_global,
-                            "cwd": cwd,
-                            "created_at": entry.created_at.isoformat() + "Z",
-                        }
-                    )
+                    append_session_to_json(entry.to_json())
 
                     server = self._create_session_server(session, is_global=is_global)
                     self.servers[selected_port] = server
@@ -277,6 +271,7 @@ class SilcDaemon:
                 return {
                     "port": selected_port,
                     "name": session_name,
+                    "title": session.title,
                     "session_id": session.session_id,
                     "shell": shell_info.type,
                     "cwd": cwd,
@@ -303,9 +298,12 @@ class SilcDaemon:
                         {
                             "port": entry.port,
                             "name": entry.name,
+                            "title": entry.title,
                             "session_id": entry.session_id,
                             "shell": entry.shell_type,
                             "cwd": session.cwd,
+                            "title_updated_at": entry.title_updated_at.isoformat()
+                            + "Z",
                             "idle_seconds": status["idle_seconds"],
                             "alive": status["alive"],
                         }
@@ -343,8 +341,10 @@ class SilcDaemon:
             return {
                 "port": entry.port,
                 "name": entry.name,
+                "title": entry.title,
                 "session_id": entry.session_id,
                 "shell": entry.shell_type,
+                "title_updated_at": entry.title_updated_at.isoformat() + "Z",
                 "idle_seconds": (datetime.utcnow() - entry.last_access).total_seconds(),
                 "alive": session is not None and session.pty.pid is not None,
             }
@@ -438,6 +438,8 @@ class SilcDaemon:
                     shell_info,
                     api_token=api_token,
                     cwd=cwd,
+                    title=session.title,
+                    on_title_change=self._handle_session_title_change,
                 )
                 await new_session.start()
 
@@ -450,21 +452,13 @@ class SilcDaemon:
                     name,
                     new_session.session_id,
                     shell_info.type,
+                    cwd=cwd,
+                    title=new_session.title,
                     is_global=is_global,
                 )
 
                 # Update sessions.json
-                append_session_to_json(
-                    {
-                        "port": port,
-                        "name": name,
-                        "session_id": new_session.session_id,
-                        "shell": shell_info.type,
-                        "is_global": is_global,
-                        "cwd": cwd,
-                        "created_at": datetime.utcnow().isoformat() + "Z",
-                    }
-                )
+                append_session_to_json(self.registry.get(port).to_json())
 
                 # Reuse existing socket or create new one
                 if not session_socket:
@@ -493,6 +487,7 @@ class SilcDaemon:
                     "status": "restarted",
                     "port": port,
                     "name": name,
+                    "title": new_session.title,
                     "shell": shell_info.type,
                 }
 
@@ -619,6 +614,16 @@ class SilcDaemon:
             access_log=True,
         )
         return uvicorn.Server(config)
+
+    def _handle_session_title_change(self, session: SilcSession) -> None:
+        """Persist a live title change from a running session."""
+        entry = self.registry.update_title(
+            session.port, session.title, updated_at=session.title_updated_at
+        )
+        if not entry:
+            return
+
+        append_session_to_json(entry.to_json())
 
     def _attach_session_task(self, port: int, task: asyncio.Task[None]) -> None:
         task.add_done_callback(partial(self._handle_session_task_done, port))
@@ -916,12 +921,25 @@ class SilcDaemon:
                     continue
 
                 # Create session
-                session = SilcSession(port, name, shell_info, cwd=cwd)
+                session = SilcSession(
+                    port,
+                    name,
+                    shell_info,
+                    cwd=cwd,
+                    title=entry.get("title", name),
+                    on_title_change=self._handle_session_title_change,
+                )
                 await session.start()
 
                 self.sessions[port] = session
                 registry_entry = self.registry.add(
-                    port, name, session.session_id, shell_info.type, is_global
+                    port,
+                    name,
+                    session.session_id,
+                    shell_info.type,
+                    cwd=cwd,
+                    title=session.title,
+                    is_global=is_global,
                 )
 
                 server = self._create_session_server(session, is_global=is_global)
@@ -949,17 +967,7 @@ class SilcDaemon:
                 write_daemon_log(f"Resurrected: {name} on port {port}")
 
                 # Update sessions.json with actual port
-                append_session_to_json(
-                    {
-                        "port": port,
-                        "name": name,
-                        "session_id": session.session_id,
-                        "shell": shell_info.type,
-                        "is_global": is_global,
-                        "cwd": cwd,
-                        "created_at": registry_entry.created_at.isoformat() + "Z",
-                    }
-                )
+                append_session_to_json(registry_entry.to_json())
 
             except Exception as exc:
                 self._close_session_socket(port)

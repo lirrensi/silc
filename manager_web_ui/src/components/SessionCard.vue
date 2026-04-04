@@ -35,7 +35,7 @@ function statusColor(status: string): string {
         <div class="mt-1 h-2.5 w-2.5" :class="statusColor(session?.status ?? 'idle')"></div>
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
-            <span class="truncate font-medium text-[var(--color-text-primary)]">{{ session?.name ?? 'unnamed' }}</span>
+            <span class="truncate font-medium text-[var(--color-text-primary)]">{{ session?.title || session?.name || 'unnamed' }}</span>
             <span class="border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
               {{ session?.shell ?? '' }}
             </span>
@@ -53,7 +53,7 @@ function statusColor(status: string): string {
       <div class="absolute left-0 right-0 top-0 z-10 flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-3 py-2 backdrop-blur-sm">
         <div class="min-w-0 flex items-center gap-2">
           <div class="h-2 w-2" :class="statusColor(session?.status ?? 'idle')"></div>
-          <span class="truncate text-sm font-medium tracking-[0.02em] text-[var(--color-text-primary)]">{{ session?.name ?? 'unnamed' }}</span>
+           <span class="truncate text-sm font-medium tracking-[0.02em] text-[var(--color-text-primary)]">{{ session?.title || session?.name || 'unnamed' }}</span>
           <span class="font-mono text-xs text-[var(--color-text-muted)]">:{{ port }}</span>
         </div>
         <span class="border border-[var(--color-border)] px-1.5 py-0.5 text-xs uppercase tracking-[0.16em] text-[var(--color-text-muted)]">{{ session?.shell ?? '' }}</span>

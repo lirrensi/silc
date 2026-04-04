@@ -8,7 +8,7 @@ import re
 import sys
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 if TYPE_CHECKING:
     try:
@@ -23,6 +23,7 @@ else:
 
 from ..core.cleaner import clean_output
 from ..core.constants import DEFAULT_SCREEN_COLUMNS, DEFAULT_SCREEN_ROWS
+from ..core.osc import OscTitleParser
 from ..core.pty_manager import PTYBase, create_pty
 from ..core.raw_buffer import RawByteBuffer
 from ..utils.persistence import rotate_session_log, write_session_log
@@ -68,6 +69,8 @@ class SilcSession:
         shell_info: ShellInfo,
         api_token: str | None = None,
         cwd: str | None = None,
+        title: str | None = None,
+        on_title_change: Callable[["SilcSession"], None] | None = None,
     ):
         self.port = port
         self.name = name
@@ -75,6 +78,9 @@ class SilcSession:
         self.session_id = str(uuid.uuid4())[:8]
         self.api_token = api_token
         self.cwd = cwd
+        self.title = name if title is None else title
+        self.title_updated_at = datetime.utcnow()
+        self._on_title_change = on_title_change
         self.pty: PTYBase = create_pty(shell_info.path, os.environ.copy(), cwd=cwd)
 
         self.buffer = RawByteBuffer(maxlen=DEFAULT_BUFFER_SIZE)
@@ -96,6 +102,7 @@ class SilcSession:
         self._closed = False
         self.tui_active = False
         self._helper_injected = False
+        self._osc_title_parser = OscTitleParser()
 
     async def start(self) -> None:
         if self._read_task is not None:
@@ -112,6 +119,8 @@ class SilcSession:
                 data = await self.pty.read(4096)
                 if data:
                     consecutive_empty_reads = 0
+                    for title in self._osc_title_parser.feed(data):
+                        self._apply_title(title)
                     self.buffer.append(data)
                     self.last_output = datetime.utcnow()
                     write_session_log(
@@ -270,6 +279,19 @@ class SilcSession:
         filtered = [line for line in lines if not SILC_SENTINEL_PATTERN.search(line)]
         return "\n".join(filtered)
 
+    def _apply_title(self, title: str) -> None:
+        if title == self.title:
+            return
+
+        self.title = title
+        self.title_updated_at = datetime.utcnow()
+
+        if self._on_title_change:
+            try:
+                self._on_title_change(self)
+            except Exception as exc:
+                write_session_log(self.port, f"Title update callback error: {exc}")
+
     def rotate_logs(self) -> None:
         """Rotate session logs to keep size manageable."""
         rotate_session_log(self.port, max_lines=1000)
@@ -420,6 +442,8 @@ class SilcSession:
             "session_id": self.session_id,
             "port": self.port,
             "name": self.name,
+            "title": self.title,
+            "title_updated_at": self.title_updated_at.isoformat() + "Z",
             "alive": self._read_task is not None and not self._read_task.done(),
             "idle_seconds": (datetime.utcnow() - self.last_output).seconds,
             "waiting_for_input": waiting,

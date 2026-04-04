@@ -33,7 +33,15 @@ def test_write_and_read_sessions_json(tmp_path):
 
     persistence.SESSIONS_FILE = tmp_path / "sessions.json"
 
-    sessions = [{"port": 20000, "name": "test", "shell": "bash"}]
+    sessions = [
+        {
+            "port": 20000,
+            "name": "test",
+            "title": "test",
+            "shell": "bash",
+            "title_updated_at": "2026-01-01T00:00:00Z",
+        }
+    ]
     write_sessions_json(sessions)
 
     result = read_sessions_json()
@@ -61,11 +69,12 @@ def test_append_replaces_duplicate(tmp_path):
     persistence.SESSIONS_FILE = tmp_path / "sessions.json"
 
     append_session_to_json({"port": 20000, "name": "original"})
-    append_session_to_json({"port": 20000, "name": "replaced"})
+    append_session_to_json({"port": 20000, "name": "replaced", "title": "updated"})
 
     result = read_sessions_json()
     assert len(result) == 1
     assert result[0]["name"] == "replaced"
+    assert result[0]["title"] == "updated"
 
 
 def test_remove_session_from_json(tmp_path):

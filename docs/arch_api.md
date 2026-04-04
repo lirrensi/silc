@@ -130,6 +130,8 @@ Returns session status.
 {
   "session_id": "abc12345",
   "port": 20000,
+  "title": "my-project",
+  "title_updated_at": "2025-01-15T10:30:00Z",
   "alive": true,
   "idle_seconds": 5,
   "waiting_for_input": false,

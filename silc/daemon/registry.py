@@ -15,23 +15,34 @@ class SessionEntry:
     name: str
     session_id: str
     shell_type: str
+    cwd: str | None
+    title: str
     created_at: datetime
     is_global: bool = False
     last_access: datetime = field(default_factory=datetime.utcnow)
+    title_updated_at: datetime = field(default_factory=datetime.utcnow)
 
     def update_access(self) -> None:
         """Update last_access timestamp."""
         self.last_access = datetime.utcnow()
+
+    def update_title(self, title: str, updated_at: datetime | None = None) -> None:
+        """Update the persisted window title."""
+        self.title = title
+        self.title_updated_at = updated_at or datetime.utcnow()
 
     def to_json(self) -> dict:
         """Serialize session entry for persistence."""
         return {
             "port": self.port,
             "name": self.name,
+            "title": self.title,
             "session_id": self.session_id,
             "shell": self.shell_type,
+            "cwd": self.cwd,
             "is_global": self.is_global,
             "created_at": self.created_at.isoformat() + "Z",
+            "title_updated_at": self.title_updated_at.isoformat() + "Z",
         }
 
 
@@ -48,6 +59,8 @@ class SessionRegistry:
         name: str,
         session_id: str,
         shell_type: str,
+        cwd: str | None = None,
+        title: str | None = None,
         is_global: bool = False,
     ) -> SessionEntry:
         """Add a new session entry.
@@ -63,11 +76,24 @@ class SessionRegistry:
             name=name,
             session_id=session_id,
             shell_type=shell_type,
+            cwd=cwd,
+            title=name if title is None else title,
             created_at=datetime.utcnow(),
             is_global=is_global,
         )
         self._sessions[port] = entry
         self._name_index[name] = port
+        return entry
+
+    def update_title(
+        self, port: int, title: str, updated_at: datetime | None = None
+    ) -> SessionEntry | None:
+        """Update the stored title for a session."""
+        entry = self._sessions.get(port)
+        if not entry:
+            return None
+
+        entry.update_title(title, updated_at=updated_at)
         return entry
 
     def remove(self, port: int) -> SessionEntry | None:

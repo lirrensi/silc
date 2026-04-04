@@ -12,6 +12,7 @@ The core layer provides:
 - **Session orchestration** — Ties PTY, buffer, and command execution together
 - **Output buffering** — Ring buffer for terminal output
 - **Output cleaning** — ANSI/control sequence removal
+- **OSC title capture** — Extracts window titles from PTY byte streams
 
 ---
 
@@ -54,6 +55,7 @@ The core layer provides:
 | `silc/config.py` | Configuration values |
 | `silc/utils/persistence.py` | Session logging |
 | `silc/utils/shell_detect.py` | Shell detection |
+| `silc/core/osc.py` | OSC title parsing |
 
 ---
 
@@ -79,6 +81,8 @@ class SilcSession:
     shell_info: ShellInfo        # Shell configuration
     api_token: str | None        # API token (optional)
     cwd: str | None              # Working directory (optional)
+    title: str                   # Latest terminal title
+    title_updated_at: datetime   # Last observed title update
     buffer: RawByteBuffer        # Output buffer
     created_at: datetime         # Creation timestamp
     last_access: datetime        # Last access timestamp

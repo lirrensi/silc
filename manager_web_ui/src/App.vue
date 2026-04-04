@@ -11,7 +11,7 @@ const manager = useTerminalManager()
 
 const currentLabel = computed(() => {
   if (route.name === 'session') {
-    return manager.focusedSession?.name || `Shell ${route.params.port ?? ''}`
+    return manager.focusedSession?.title || manager.focusedSession?.name || `Shell ${route.params.port ?? ''}`
   }
 
   return 'All Shells'

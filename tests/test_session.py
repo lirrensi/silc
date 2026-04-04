@@ -105,6 +105,7 @@ async def test_session_full_lifecycle() -> None:
         status = session.get_status()
         assert status["alive"]
         assert status["port"] == 20001
+        assert status["title"] == session.title
         assert not status["run_locked"]
 
         await session.write_input("echo buffer alive\n")

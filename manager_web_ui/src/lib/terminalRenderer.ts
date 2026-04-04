@@ -35,18 +35,31 @@ export async function enableRenderer(session: Session): Promise<void> {
 }
 
 export function disposeRenderer(session: Session): void {
-  session.webglAddon?.dispose()
+  try {
+    session.webglAddon?.dispose()
+  } catch {
+    // Renderer cleanup is best-effort only.
+  }
   session.webglAddon = null
   session.rendererType = 'dom'
 }
 
 export function refreshRendererAfterSwap(session: Session): void {
-  if (session.terminal.rows > 0) {
-    session.terminal.refresh(0, session.terminal.rows - 1)
+  try {
+    if (session.terminal.rows > 0) {
+      session.terminal.refresh(0, session.terminal.rows - 1)
+    }
+  } catch {
+    // Ignore terminal repaint failures during teardown/recovery.
   }
 }
 
 export function forceTerminalRedraw(session: Session): void {
-  session.terminal.clearTextureAtlas?.()
+  try {
+    session.terminal.clearTextureAtlas?.()
+  } catch {
+    // Ignore terminal repaint failures during teardown/recovery.
+  }
+
   refreshRendererAfterSwap(session)
 }

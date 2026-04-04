@@ -14,8 +14,10 @@ export interface Session {
   port: number
   sessionId: string
   name: string
+  title: string
   shell: string
   cwd: string | null
+  titleUpdatedAt: string | null
   terminal: Terminal
   fitAddon: FitAddon
   ws: WebSocket | null
@@ -43,9 +45,11 @@ export interface Session {
 export interface DaemonSession {
   port: number
   name: string
+  title: string
   session_id: string
   shell: string
   cwd: string | null
+  title_updated_at: string | null
   idle_seconds: number
   alive: boolean
 }

@@ -368,6 +368,8 @@ port: number  // From route params
 - Lifecycle buttons: Close Session, Kill, Restart (managed by daemon)
 - Arrow key buttons for navigation
 - Actions: Refresh, Refit, Redraw, Bottom, Paste
+- Top-bar lifecycle actions remain available even if the terminal surface is broken
+- UI cleanup after daemon actions is best-effort and must not block or throw
 - Processing block shows the current operation stage while terminal actions are running
 
 **Actions:**

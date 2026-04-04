@@ -211,7 +211,7 @@ function sessionBadgeLabel(session: Session): string {
 }
 
 function sessionTitle(session: Session): string {
-  return `${session.name || 'unnamed'} :${session.port} · ${session.shell || 'shell'}`
+  return `${session.title || session.name || 'unnamed'} :${session.port} · ${session.shell || 'shell'}`
 }
 
 onMounted(() => {
@@ -350,11 +350,11 @@ watch(
             <div class="mt-1 h-2.5 w-2.5" :class="statusColor(session.status)"></div>
             <div class="min-w-0">
               <div class="flex items-baseline justify-between gap-2">
-                <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text-primary)]">{{ session.name || 'unnamed' }}</span>
+                <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text-primary)]">{{ session.title || session.name || 'unnamed' }}</span>
                 <span class="shrink-0 text-[11px] font-mono text-[var(--color-text-muted)]">:{{ session.port }}</span>
               </div>
               <div class="flex items-baseline justify-between gap-2 text-[11px] text-[var(--color-text-secondary)]">
-                <span class="min-w-0 flex-1 truncate">{{ session.cwd || 'Home directory' }}</span>
+            <span class="min-w-0 flex-1 truncate">{{ session.cwd || 'Home directory' }}</span>
                 <span class="shrink-0 uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{{ session.shell || 'shell' }}</span>
               </div>
             </div>

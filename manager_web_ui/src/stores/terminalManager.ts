@@ -39,7 +39,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   const currentTheme = ref<ResolvedTheme>('dark')
   const lastAppliedRendererType = new Map<number, RendererType>()
   const historyRefreshWaiters = new Map<number, Array<() => void>>()
-  const suppressedSessionIds = new Map<number, string>()
 
   const sessionList = computed(() => {
     return Array.from(sessions.value.values()).sort((a, b) => a.port - b.port)
@@ -60,6 +59,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     shell: string,
     name: string = '',
     cwd: string | null = null,
+    title: string = '',
+    titleUpdatedAt: string | null = null,
   ): Session {
     const terminal = new Terminal({
       cols: 120,
@@ -83,8 +84,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       port,
       sessionId,
       name,
+      title,
       shell,
       cwd,
+      titleUpdatedAt,
       terminal,
       fitAddon,
       ws: null,
@@ -153,8 +156,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     session.sessionId = daemonSession.session_id
     session.name = daemonSession.name
+    session.title = daemonSession.title
     session.shell = daemonSession.shell
     session.cwd = daemonSession.cwd
+    session.titleUpdatedAt = daemonSession.title_updated_at
   }
 
   function clearPendingLayoutWork(session: Session): void {
@@ -280,31 +285,56 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       return
     }
 
-    clearPendingLayoutWork(session)
-    cleanupBrowserEventHandlers(session)
-    disposeRenderer(session)
-    session.pendingOpen = false
-
-    if (session.ws) {
-      session.ws.close()
+    try {
+      clearPendingLayoutWork(session)
+    } catch {
+      // best-effort
     }
 
-    session.onDataDisposable?.dispose()
+    try {
+      cleanupBrowserEventHandlers(session)
+    } catch {
+      // best-effort
+    }
+
+    try {
+      disposeRenderer(session)
+    } catch {
+      // best-effort
+    }
+
+    session.pendingOpen = false
+
+    try {
+      session.ws?.close()
+    } catch {
+      // best-effort
+    }
+
+    try {
+      session.onDataDisposable?.dispose()
+    } catch {
+      // best-effort
+    }
+
     session.writePending = false
     session.writeInFlight = false
-    resolveFlushWaiters(session)
-    session.terminal.dispose()
+
+    try {
+      resolveFlushWaiters(session)
+    } catch {
+      // best-effort
+    }
+
+    try {
+      session.terminal.dispose()
+    } catch {
+      // best-effort
+    }
+
     sessions.value.delete(port)
     lastAppliedRendererType.delete(port)
     historyRefreshWaiters.delete(port)
-  }
-
-  function suppressSession(port: number, sessionId: string): void {
-    suppressedSessionIds.set(port, sessionId)
-  }
-
-  function clearSuppressedSession(port: number): void {
-    suppressedSessionIds.delete(port)
   }
 
   function setFocused(port: number | null): void {
@@ -552,15 +582,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const daemonPorts = new Set(daemonSessions.map(session => session.port))
 
     for (const daemonSession of daemonSessions) {
-      const suppressedSessionId = suppressedSessionIds.get(daemonSession.port)
-      if (suppressedSessionId && suppressedSessionId === daemonSession.session_id) {
-        continue
-      }
-
-      if (suppressedSessionId && suppressedSessionId !== daemonSession.session_id) {
-        suppressedSessionIds.delete(daemonSession.port)
-      }
-
       if (!sessions.value.has(daemonSession.port)) {
         createSession(
           daemonSession.port,
@@ -568,6 +589,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
           daemonSession.shell,
           daemonSession.name,
           daemonSession.cwd,
+          daemonSession.title,
+          daemonSession.title_updated_at,
         )
       } else {
         updateSessionMetadata(daemonSession)
@@ -577,12 +600,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     for (const port of Array.from(sessions.value.keys())) {
       if (!daemonPorts.has(port)) {
         removeSession(port)
-      }
-    }
-
-    for (const port of Array.from(suppressedSessionIds.keys())) {
-      if (!daemonPorts.has(port)) {
-        suppressedSessionIds.delete(port)
       }
     }
   }
@@ -710,8 +727,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     createSession,
     getSession,
     removeSession,
-    suppressSession,
-    clearSuppressedSession,
     setFocused,
     attach,
     detach,

@@ -83,8 +83,11 @@ class SessionEntry:
     name: str                    # Unique session name (e.g., "happy-fox-42")
     session_id: str
     shell_type: str
+    cwd: str | None
+    title: str                   # Latest terminal title
     created_at: datetime
     last_access: datetime
+    title_updated_at: datetime
 ```
 
 ### `sessions.json`
@@ -97,11 +100,13 @@ Persistent session registry stored at `~/.silc/sessions.json`.
     {
       "port": 20000,
       "name": "happy-fox-42",
+      "title": "happy-fox-42",
       "session_id": "abc12345",
       "shell": "bash",
       "cwd": "/home/user/project",
       "is_global": false,
-      "created_at": "2025-01-15T10:30:00Z"
+      "created_at": "2025-01-15T10:30:00Z",
+      "title_updated_at": "2025-01-15T10:30:00Z"
     }
   ]
 }
@@ -207,6 +212,7 @@ Serves the session manager SPA that allows users to view, create, and manage ses
 {
   "port": 20000,
   "name": "my-project",
+  "title": "my-project",
   "session_id": "abc12345",
   "shell": "bash"
 }
@@ -225,8 +231,10 @@ Serves the session manager SPA that allows users to view, create, and manage ses
   {
     "port": 20000,
     "name": "happy-fox-42",
+    "title": "happy-fox-42",
     "session_id": "abc12345",
     "shell": "bash",
+    "title_updated_at": "2025-01-15T10:30:00Z",
     "idle_seconds": 5,
     "alive": true
   }
@@ -242,8 +250,10 @@ Resolve a session name to full session info.
 {
   "port": 20000,
   "name": "happy-fox-42",
+  "title": "happy-fox-42",
   "session_id": "abc12345",
   "shell": "bash",
+  "title_updated_at": "2025-01-15T10:30:00Z",
   "idle_seconds": 5,
   "alive": true
 }

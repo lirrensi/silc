@@ -193,74 +193,58 @@ async function handleRefresh(): Promise<void> {
 
 async function handleClose(): Promise<void> {
   const currentPort = port.value
-  const currentSessionId = session.value?.sessionId ?? ''
 
   try {
-    activeOperation.value = {
-      label: 'Close session',
-      stage: 'Removing session locally',
-      detail: 'The sidebar will update immediately and the browser will return home.',
-      tone: 'neutral',
-    }
-    await nextTick()
-
-    manager.suppressSession(currentPort, currentSessionId)
-    manager.removeSession(currentPort)
-    router.push('/')
-
-    void closeSession(currentPort).catch(async (err) => {
-      manager.clearSuppressedSession(currentPort)
-      try {
-        const daemonSessions = await listSessions()
-        manager.reconcileSessions(daemonSessions)
-      } catch {
-        // ignore follow-up sync errors
-      }
-      console.error('Failed to close session:', err)
-    })
+    await runOperation('Close session', 'neutral', [
+      {
+        stage: 'Requesting daemon close',
+        detail: 'Asking the daemon to stop the session cleanly.',
+        run: async () => {
+          await closeSession(currentPort)
+        },
+      },
+      {
+        stage: 'Updating the UI',
+        detail: 'Removing the session locally and returning home.',
+        run: async () => {
+          manager.removeSession(currentPort)
+          await router.push('/')
+        },
+      },
+    ])
   } catch (err) {
     console.error('Failed to close session:', err)
-  } finally {
-    activeOperation.value = null
   }
 }
 
 async function handleKill(): Promise<void> {
   const currentPort = port.value
-  const currentSessionId = session.value?.sessionId ?? ''
 
   try {
-    activeOperation.value = {
-      label: 'Kill session',
-      stage: 'Removing dead session locally',
-      detail: 'The sidebar will update immediately and the browser will return home.',
-      tone: 'danger',
-    }
-    await nextTick()
-
-    manager.suppressSession(currentPort, currentSessionId)
-    manager.removeSession(currentPort)
-    router.push('/')
-
-    void killSession(currentPort).catch(async (err) => {
-      manager.clearSuppressedSession(currentPort)
-      try {
-        const daemonSessions = await listSessions()
-        manager.reconcileSessions(daemonSessions)
-      } catch {
-        // ignore follow-up sync errors
-      }
-      console.error('Failed to kill session:', err)
-    })
+    await runOperation('Kill session', 'danger', [
+      {
+        stage: 'Requesting daemon kill',
+        detail: 'Sending the hard-stop request to the daemon and PTY layer.',
+        run: async () => {
+          await killSession(currentPort)
+        },
+      },
+      {
+        stage: 'Updating the UI',
+        detail: 'Removing the dead session locally and returning home.',
+        run: async () => {
+          manager.removeSession(currentPort)
+          await router.push('/')
+        },
+      },
+    ])
   } catch (err) {
     console.error('Failed to kill session:', err)
-  } finally {
-    activeOperation.value = null
   }
 }
 
 async function handleRestart(): Promise<void> {
-  if (!session.value || isRestarting.value) {
+  if (isRestarting.value) {
     return
   }
 
@@ -275,7 +259,7 @@ async function handleRestart(): Promise<void> {
           await reconnectSession(result.port, true)
 
           if (result.port !== port.value) {
-            router.push(`/${result.port}`)
+            await router.push(`/${result.port}`)
           }
         },
       },
@@ -500,7 +484,7 @@ async function sendArrowKey(sequence: string, label: string, detail: string): Pr
   <div class="session-view h-full flex flex-col">
     <div class="tab-bar flex min-h-[2.4rem] items-stretch justify-between border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
       <div class="min-w-0 flex flex-1 items-center gap-2 overflow-hidden px-3 py-1.5 md:px-4">
-        <span class="truncate text-sm font-medium text-[var(--color-accent)]">{{ session?.name ?? 'unnamed' }}</span>
+        <span class="truncate text-sm font-medium text-[var(--color-accent)]">{{ session?.title || session?.name || 'unnamed' }}</span>
         <span class="shrink-0 font-mono text-xs text-[var(--color-text-muted)]">:{{ port }}</span>
         <span class="shrink-0 text-xs text-[var(--color-text-muted)]">[{{ session?.shell ?? '' }}]</span>
         <span v-if="session?.cwd" class="truncate text-xs text-[var(--color-text-secondary)]" :title="session.cwd">
