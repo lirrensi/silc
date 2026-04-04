@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import QRCode from 'qrcode'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useTerminalManager } from '@/stores/terminalManager'
+import { useUiStore } from '@/stores/ui'
 import { listSessions, createSession, getDefaults } from '@/lib/daemonApi'
 
 const router = useRouter()
+const route = useRoute()
 const manager = useTerminalManager()
+const ui = useUiStore()
 
 const sessions = computed(() => manager.sessionList)
 
@@ -20,31 +23,51 @@ const maxWidth = 400
 const showNewSessionModal = ref(false)
 const newSessionPath = ref('')
 const defaultSessionPath = ref('')
+const defaultShell = ref('shell')
 const shareMode = ref(false)
 const shareUrl = ref('')
 const shareQrCode = ref('')
+const showShareDetails = ref(false)
+const isCreatingSession = ref(false)
+const createError = ref('')
 
 function statusColor(status: string): string {
   switch (status) {
     case 'active': return 'bg-[#4ade80]'
+    case 'connecting': return 'bg-[#fbbf24]'
     case 'idle': return 'bg-[#6b7280]'
     case 'dead': return 'bg-[#f87171]'
+    case 'restarting': return 'bg-[#0ea5e9]'
     default: return 'bg-[#6b7280]'
   }
 }
 
 function selectSession(port: number): void {
   router.push(`/${port}`)
+  ui.closeMobileNav()
 }
 
 function openNewSessionModal(): void {
   newSessionPath.value = defaultSessionPath.value
+  createError.value = ''
   showNewSessionModal.value = true
+  ui.closeMobileNav()
 }
 
 function closeNewSessionModal(): void {
+  if (isCreatingSession.value) return
   showNewSessionModal.value = false
   newSessionPath.value = ''
+  createError.value = ''
+}
+
+function openHome(): void {
+  router.push('/')
+  ui.closeMobileNav()
+}
+
+function toggleShareDetails(): void {
+  showShareDetails.value = !showShareDetails.value
 }
 
 // Normalize path for cross-platform compatibility
@@ -68,14 +91,22 @@ function normalizePath(path: string): string {
 }
 
 async function handleCreateNewSession(): Promise<void> {
+  if (isCreatingSession.value) return
+
   try {
+    isCreatingSession.value = true
+    createError.value = ''
     const cwd = normalizePath(newSessionPath.value)
     const data = await createSession(cwd ? { cwd } : undefined)
     await fetchSessions()
+    isCreatingSession.value = false
     closeNewSessionModal()
     router.push(`/${data.port}`)
   } catch (err) {
     console.error('Failed to create session:', err)
+    createError.value = err instanceof Error ? err.message : 'Failed to create session'
+  } finally {
+    isCreatingSession.value = false
   }
 }
 
@@ -117,6 +148,7 @@ async function fetchDefaults(): Promise<void> {
   try {
     const defaults = await getDefaults()
     defaultSessionPath.value = normalizePath(defaults.cwd)
+    defaultShell.value = defaults.shell
     shareMode.value = defaults.share_mode
     shareUrl.value = defaults.manager_url
 
@@ -150,113 +182,189 @@ onMounted(() => {
   void fetchSessions()
   void fetchDefaults()
 })
+
+watch(
+  () => route.fullPath,
+  () => {
+    ui.closeMobileNav()
+  },
+)
 </script>
 
 <template>
+  <div
+    v-if="ui.isMobileNavOpen"
+    class="fixed inset-0 z-40 bg-[var(--color-backdrop)] backdrop-blur-sm md:hidden"
+    @click="ui.closeMobileNav"
+  ></div>
+
   <aside
-    class="bg-[#252526] border-r border-[#5e5e62] flex flex-col h-full relative"
-    :style="{ width: `${sidebarWidth}px` }"
+      class="fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)] shadow-[0_12px_32px_var(--color-shadow)] transition-transform duration-300 md:static md:z-auto md:shadow-none"
+    :class="ui.isMobileNavOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
+    :style="{ width: `min(${sidebarWidth}px, var(--shell-list-width))` }"
   >
-    <!-- Header -->
-    <div class="p-3 border-b border-[#5e5e62] flex gap-2">
-      <button
-        @click="openNewSessionModal"
-        class="flex-1 px-3 py-2 bg-[#ff80bf] hover:bg-[#ff99cc] text-black font-medium rounded transition-colors text-sm"
-        title="Create new session"
-      >
-        +
-      </button>
-      <button
-        @click="router.push('/')"
-        class="px-3 py-2 bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors text-sm"
-        title="Home"
-      >
-        🏠
-      </button>
-    </div>
-
-    <!-- Session List -->
-    <div class="flex-1 overflow-y-auto">
-      <div
-        v-for="session in sessions"
-        :key="session.port"
-        @click="selectSession(session.port)"
-        class="flex items-center gap-2 px-3 py-2 hover:bg-[#3d3d3d] cursor-pointer transition-colors"
-        :class="{ 'bg-[#3d3d3d]': manager.focusedPort === session.port }"
-      >
-        <div class="w-2 h-2 rounded-full flex-shrink-0" :class="statusColor(session.status)"></div>
-        <span class="text-sm truncate flex-1">{{ session.name || 'unnamed' }}</span>
-        <span class="text-xs text-[#6b7280] font-mono flex-shrink-0">:{{ session.port }}</span>
+      <div class="flex min-h-[2.4rem] items-stretch overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+        <div class="min-w-0 flex-1 overflow-hidden px-2 py-2">
+            <p class="truncate text-xs font-medium uppercase tracking-[0.24em] text-[var(--color-text-muted)]">
+              Silc Manager
+              <span class="ml-2 normal-case tracking-normal text-[var(--color-text-secondary)]">{{ sessions.length }}</span>
+            </p>
+          </div>
+          <div class="bar-actions shrink-0 border-l border-[var(--color-border)]">
+            <button
+              @click="openNewSessionModal"
+              class="bar-button bar-button-accent icon-button"
+              title="Create new session"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" class="toolbar-icon" aria-hidden="true">
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+            </button>
+            <button @click="openHome" class="bar-button icon-button" title="Home">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" class="toolbar-icon" aria-hidden="true">
+                <path d="M2.5 7.5 8 3l5.5 4.5" />
+                <path d="M4.5 6.8V13h7V6.8" />
+              </svg>
+            </button>
+            <button
+              @click="ui.toggleTheme"
+              class="bar-button icon-button"
+              :title="`Switch to ${ui.resolvedTheme === 'dark' ? 'light' : 'dark'} theme`"
+            >
+              <svg
+                v-if="ui.resolvedTheme === 'dark'"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                class="toolbar-icon"
+                aria-hidden="true"
+              >
+                <circle cx="8" cy="8" r="2.8" />
+                <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" />
+              </svg>
+              <svg
+                v-else
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                class="toolbar-icon"
+                aria-hidden="true"
+              >
+                <path d="M10.8 1.9a5.9 5.9 0 1 0 3.3 10.8A6.4 6.4 0 0 1 10.8 1.9Z" />
+              </svg>
+            </button>
+            <button class="bar-button icon-button md:hidden" @click="ui.closeMobileNav" title="Close">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" class="toolbar-icon" aria-hidden="true">
+                <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
+              </svg>
+            </button>
+          </div>
       </div>
-    </div>
 
-    <div v-if="shareMode && shareUrl" class="border-t border-[#5e5e62] bg-[#facc15]/10 p-3">
-      <p class="text-[11px] font-bold uppercase tracking-[0.24em] text-[#facc15]">LAN Share</p>
-      <p class="mt-2 text-xs leading-5 text-[#f3f4f6]">
-        Anybody on your network can open this manager and poke your shells.
-      </p>
-      <img
-        v-if="shareQrCode"
-        :src="shareQrCode"
-        alt="QR code for manager LAN URL"
-        class="mx-auto mt-3 h-40 w-40 rounded-xl border border-[#facc15]/40 bg-[#facc15] p-2"
-      />
-      <button
-        @click="copyShareUrl"
-        class="mt-3 w-full rounded border border-[#facc15]/40 bg-[#facc15]/15 px-3 py-2 text-left text-xs text-[#fef3c7] transition-colors hover:bg-[#facc15]/25"
-        :title="shareUrl"
-      >
-        {{ shareUrl }}
-      </button>
-    </div>
+      <div class="soft-scrollbar flex-1 overflow-y-auto">
+        <div class="border-b border-[var(--color-border)]">
+          <button
+            v-for="session in sessions"
+            :key="session.port"
+            @click="selectSession(session.port)"
+            class="grid w-full grid-cols-[0.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 border-t border-[var(--color-border)] px-2 py-1.5 text-left transition-colors"
+            :class="manager.focusedPort === session.port
+              ? 'bg-[var(--color-accent-muted)]'
+              : 'bg-transparent hover:bg-[var(--color-bg-hover)]'"
+          >
+            <div class="mt-1 h-2.5 w-2.5" :class="statusColor(session.status)"></div>
+            <div class="min-w-0">
+              <div class="flex items-baseline justify-between gap-2">
+                <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text-primary)]">{{ session.name || 'unnamed' }}</span>
+                <span class="shrink-0 text-[11px] font-mono text-[var(--color-text-muted)]">:{{ session.port }}</span>
+              </div>
+              <div class="flex items-baseline justify-between gap-2 text-[11px] text-[var(--color-text-secondary)]">
+                <span class="min-w-0 flex-1 truncate">{{ session.cwd || 'Home directory' }}</span>
+                <span class="shrink-0 uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{{ session.shell || 'shell' }}</span>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
 
-    <!-- Resize Handle -->
-    <div
-      class="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-[#ff80bf]/30 transition-colors"
-      :class="{ 'bg-[#ff80bf]/50': isResizing }"
-      @mousedown="startResize"
-    ></div>
+      <div v-if="shareMode && shareUrl" class="border-t border-[var(--color-border)] p-2.5">
+        <button
+          class="flex w-full items-center justify-between border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
+          @click="toggleShareDetails"
+        >
+          <span class="text-[11px] font-bold uppercase tracking-[0.24em] text-[var(--color-accent)]">LAN Share</span>
+          <span class="text-xs text-[var(--color-text-secondary)]">{{ showShareDetails ? 'Hide' : 'Show' }}</span>
+        </button>
+        <div v-if="showShareDetails" class="pt-2">
+          <p class="text-xs leading-5 text-[var(--color-text-secondary)]">
+            Anybody on your network can open this manager and poke your shells.
+          </p>
+          <img
+            v-if="shareQrCode"
+            :src="shareQrCode"
+            alt="QR code for manager LAN URL"
+            class="mx-auto mt-2 h-32 w-32 border border-[var(--color-border)] bg-white p-2"
+          />
+          <button
+            @click="copyShareUrl"
+            class="mt-2 w-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2.5 py-2 text-left text-xs text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+            :title="shareUrl"
+          >
+            {{ shareUrl }}
+          </button>
+        </div>
+      </div>
+
+      <div
+        class="absolute right-0 top-0 hidden h-full w-1 cursor-col-resize transition-colors hover:bg-[var(--color-accent-muted)] md:block"
+        :class="{ 'bg-[var(--color-accent-muted)]': isResizing }"
+        @mousedown="startResize"
+      ></div>
+  </aside>
 
     <!-- New Session Modal -->
     <Teleport to="body">
       <div
         v-if="showNewSessionModal"
-        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+        class="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--color-backdrop)] px-4"
         @click.self="closeNewSessionModal"
       >
-        <div class="bg-[#252526] border border-[#5e5e62] rounded-lg p-4 w-96 max-w-[90vw]">
-          <h3 class="text-lg font-medium text-[#ff80bf] mb-4">New Session</h3>
+        <div class="glass-panel w-full max-w-md p-4">
+          <h3 class="mb-4 font-[var(--font-display)] text-2xl text-[var(--color-accent)]">New Session</h3>
           <div class="mb-4">
-            <label class="block text-sm text-[#a0a0a0] mb-2">Working Directory (optional)</label>
+            <label class="mb-2 block text-sm text-[var(--color-text-secondary)]">Working Directory (optional)</label>
             <input
               v-model="newSessionPath"
               type="text"
-              class="w-full px-3 py-2 bg-[#1e1e1e] border border-[#5e5e62] rounded text-white text-sm focus:outline-none focus:border-[#ff80bf]"
+              class="w-full border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-accent)]"
               :placeholder="defaultSessionPath || 'e.g., /home/user/project or C:\\Users\\project'"
+              :disabled="isCreatingSession"
               @keydown.enter="handleCreateNewSession"
               @keydown.esc="closeNewSessionModal"
               autofocus
             />
-            <p class="mt-2 text-xs text-[#6b7280]">
+            <p class="mt-2 text-xs text-[var(--color-text-muted)]">
               Defaults to your home directory on the daemon machine.
             </p>
+            <p v-if="isCreatingSession" class="mt-2 text-xs text-[var(--color-accent)]">
+              Creating `{{ defaultShell }}`{{ newSessionPath.trim() ? ` in ${newSessionPath.trim()}` : '' }}...
+            </p>
+            <p v-else class="mt-2 text-xs text-[var(--color-text-muted)]">
+              Shell: `{{ defaultShell }}`
+            </p>
+            <p v-if="createError" class="mt-2 text-xs text-[var(--color-error)]">{{ createError }}</p>
           </div>
-          <div class="flex gap-2 justify-end">
-            <button
-              @click="closeNewSessionModal"
-              class="px-4 py-2 text-sm bg-[#3e3e42] hover:bg-[#5e5e62] border border-[#5e5e62] rounded transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              @click="handleCreateNewSession"
-              class="px-4 py-2 text-sm bg-[#ff80bf] hover:bg-[#ff99cc] text-black font-medium rounded transition-colors"
-            >
-              Create
-            </button>
+          <div class="flex justify-end">
+            <div class="toolbar-strip">
+              <button @click="closeNewSessionModal" class="bar-button text-sm" :disabled="isCreatingSession">Cancel</button>
+              <button @click="handleCreateNewSession" class="bar-button bar-button-accent text-sm font-medium" :disabled="isCreatingSession">
+                {{ isCreatingSession ? 'Creating...' : 'Create' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </Teleport>
-  </aside>
 </template>

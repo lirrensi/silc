@@ -1,7 +1,7 @@
 import type { Terminal, IDisposable } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
 
-export type SessionStatus = 'active' | 'idle' | 'dead'
+export type SessionStatus = 'active' | 'connecting' | 'idle' | 'dead' | 'restarting'
 
 export interface Session {
   port: number
@@ -18,6 +18,8 @@ export interface Session {
   // Buffered write queue for safe terminal writes
   writeQueue: string[]
   writePending: boolean
+  lastSize: { rows: number; cols: number } | null
+  disconnectReason: string | null
 }
 
 export interface DaemonSession {

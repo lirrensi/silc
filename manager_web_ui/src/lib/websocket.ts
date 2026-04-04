@@ -1,7 +1,7 @@
 import { useTerminalManager } from '@/stores/terminalManager'
 import { getSessionHttpUrl } from '@/lib/daemonApi'
 
-export function connectWebSocket(port: number): WebSocket | null {
+export function connectWebSocket(port: number, options?: { force?: boolean }): WebSocket | null {
   console.log(`[WebSocket] connectWebSocket(${port})`)
   const manager = useTerminalManager()
   const session = manager.getSession(port)
@@ -11,21 +11,32 @@ export function connectWebSocket(port: number): WebSocket | null {
     return null
   }
 
-  // Close existing connection if any
-  if (session.ws) {
+  const existingWs = session.ws
+  if (existingWs && !options?.force && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) {
+    return existingWs
+  }
+
+  if (existingWs) {
     console.log(`[WebSocket] Closing existing connection for port ${port}`)
-    session.ws.close()
+    manager.setWs(port, null)
+    existingWs.close()
   }
 
   const wsBase = getSessionHttpUrl(port).replace(/^http/, 'ws')
   const wsUrl = `${wsBase}/ws`
   console.log(`[WebSocket] Connecting to ${wsUrl}`)
   const ws = new WebSocket(wsUrl)
+  manager.setWs(port, ws)
+  manager.setStatus(port, 'connecting')
 
   ws.onopen = () => {
+    if (manager.getSession(port)?.ws !== ws) {
+      ws.close()
+      return
+    }
     console.log(`[WebSocket] Connected to port ${port}`)
+    manager.setDisconnectReason(port, null)
     manager.setStatus(port, 'active')
-    manager.setWs(port, ws)
 
     // Request terminal history
     ws.send(JSON.stringify({ event: 'load_history' }))
@@ -47,14 +58,29 @@ export function connectWebSocket(port: number): WebSocket | null {
     }
   }
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
+    const currentSession = manager.getSession(port)
+    if (!currentSession || currentSession.ws !== ws) {
+      return
+    }
     console.log(`[WebSocket] Connection closed for port ${port}`)
-    manager.setStatus(port, 'idle')
     manager.setWs(port, null)
+
+    if (currentSession.status === 'restarting') {
+      return
+    }
+
+    manager.setDisconnectReason(port, event.reason || null)
+
+    manager.setStatus(port, currentSession.status === 'connecting' ? 'dead' : 'idle')
   }
 
   ws.onerror = (err) => {
+    if (manager.getSession(port)?.ws !== ws) {
+      return
+    }
     console.error(`[WebSocket] Error for port ${port}:`, err)
+    manager.setDisconnectReason(port, 'WebSocket transport error')
     manager.setStatus(port, 'dead')
   }
 
@@ -79,8 +105,10 @@ export function disconnectWebSocket(port: number): void {
   const session = manager.getSession(port)
 
   if (session?.ws) {
-    session.ws.close()
+    const ws = session.ws
     manager.setWs(port, null)
+    manager.setDisconnectReason(port, null)
     manager.setStatus(port, 'idle')
+    ws.close()
   }
 }

@@ -5,6 +5,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import type { Session, SessionStatus, DaemonSession } from '@/types/session'
 import { resizeSession } from '@/lib/daemonApi'
+import { getTerminalTheme } from '@/lib/themes'
+import type { ResolvedTheme } from '@/lib/themes'
 
 const MAX_COLS = 256
 const MAX_ROWS = 64
@@ -12,6 +14,7 @@ const MAX_ROWS = 64
 export const useTerminalManager = defineStore('terminalManager', () => {
   const sessions = ref<Map<number, Session>>(new Map())
   const focusedPort = ref<number | null>(null)
+  const currentTheme = ref<ResolvedTheme>('dark')
 
   // Computed
   const sessionList = computed(() => {
@@ -35,14 +38,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       scrollback: 5000,
       convertEol: true,
       allowProposedApi: true,
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#ffffff',
-        cursor: '#ff80bf',
-        selectionBackground: '#ff80bf44',
-      },
+      theme: getTerminalTheme(currentTheme.value),
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       fontSize: 15,
+      lineHeight: 1.05,
       cursorBlink: true,
     })
 
@@ -67,6 +66,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       lastActivity: Date.now(),
       writeQueue: [],
       writePending: false,
+      lastSize: null,
+      disconnectReason: null,
     }
 
     // Handle special keys BEFORE xterm processes them
@@ -205,6 +206,18 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       _silcPasteEventHandler?: (e: Event) => void
     }
 
+    const helperTextarea = element.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null
+    if (helperTextarea) {
+      helperTextarea.spellcheck = false
+      helperTextarea.autocapitalize = 'off'
+      helperTextarea.autocomplete = 'off'
+      helperTextarea.setAttribute('autocorrect', 'off')
+      helperTextarea.setAttribute('data-gramm', 'false')
+      helperTextarea.setAttribute('data-gramm_editor', 'false')
+      helperTextarea.setAttribute('data-enable-grammarly', 'false')
+      helperTextarea.inputMode = 'text'
+    }
+
     // Remove existing handlers if any
     if (typedElement._silcPasteHandler) {
       element.removeEventListener('contextmenu', typedElement._silcPasteHandler)
@@ -269,10 +282,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     typedElement._silcKeydownHandler = keydownHandler
   }
 
-  async function fit(port: number): Promise<void> {
+  async function fit(port: number, options?: { propagate?: boolean }): Promise<void> {
     const session = sessions.value.get(port)
     if (!session?.terminal?.element) return
 
+    const shouldPropagate = options?.propagate ?? true
     session.fitAddon.fit()
 
     let cols = session.terminal.cols
@@ -285,12 +299,25 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       session.terminal.resize(cols, rows)
     }
 
+    if (!shouldPropagate) {
+      session.lastSize = { rows, cols }
+      return
+    }
+
+    if (session.lastSize && session.lastSize.rows === rows && session.lastSize.cols === cols) {
+      return
+    }
+
+    session.lastSize = { rows, cols }
+
     try {
       await resizeSession(port, rows, cols)
-      if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-        session.ws.send(JSON.stringify({ event: 'load_history' }))
-      }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (message.includes('HTTP 410')) {
+        setStatus(port, 'dead')
+        return
+      }
       console.error(`[TerminalManager] fit error for port ${port}:`, err)
     }
   }
@@ -305,6 +332,17 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const session = sessions.value.get(port)
     if (session) {
       session.status = status
+      session.terminal.options.disableStdin = status !== 'active'
+      if (status === 'active' || status === 'connecting' || status === 'restarting') {
+        session.disconnectReason = null
+      }
+    }
+  }
+
+  function setDisconnectReason(port: number, reason: string | null): void {
+    const session = sessions.value.get(port)
+    if (session) {
+      session.disconnectReason = reason
     }
   }
 
@@ -336,6 +374,16 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       if (!daemonPorts.has(port)) {
         removeSession(port)
       }
+    }
+  }
+
+  function applyTheme(theme: ResolvedTheme): void {
+    currentTheme.value = theme
+    const terminalTheme = getTerminalTheme(theme)
+
+    for (const session of sessions.value.values()) {
+      session.terminal.options.theme = terminalTheme
+      session.terminal.refresh(0, session.terminal.rows - 1)
     }
   }
 
@@ -390,8 +438,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     detach,
     fit,
     setStatus,
+    setDisconnectReason,
     setWs,
     reconcileSessions,
     safeWrite,
+    applyTheme,
   }
 })

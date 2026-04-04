@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useTerminalManager } from '@/stores/terminalManager'
 import { connectWebSocket } from '@/lib/websocket'
 import { listSessions } from '@/lib/daemonApi'
@@ -11,6 +11,16 @@ const props = defineProps<{
 
 const manager = useTerminalManager()
 const containerRef = ref<HTMLElement | null>(null)
+const viewportClass = computed(() => {
+  return props.interactive
+    ? 'terminal-shell terminal-shell--interactive h-full w-full bg-[var(--color-bg-secondary)] box-border'
+    : 'terminal-shell terminal-shell--preview h-full w-full bg-[var(--color-bg-primary)] box-border'
+})
+const hostClass = computed(() => {
+  return props.interactive
+    ? 'terminal-host terminal-host--interactive min-h-0 flex-1'
+    : 'terminal-host terminal-host--preview min-h-0 h-full w-full'
+})
 let resizeObserver: ResizeObserver | null = null
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -20,7 +30,7 @@ function debouncedFit(port: number): void {
     clearTimeout(debounceTimer)
   }
   debounceTimer = setTimeout(() => {
-    manager.fit(port)
+    manager.fit(port, { propagate: props.interactive === true })
     debounceTimer = null
   }, 100)
 }
@@ -95,18 +105,58 @@ function attachAndConnect(): void {
 </script>
 
 <template>
-  <div
-    ref="containerRef"
-    class="terminal-viewport w-full h-full bg-[#1e1e1e] p-2 box-border"
-  ></div>
+  <div :class="viewportClass">
+    <div ref="containerRef" :class="hostClass"></div>
+    <div v-if="interactive" class="terminal-bottom-gap shrink-0"></div>
+  </div>
 </template>
 
 <style scoped>
-.terminal-viewport :deep(.xterm) {
+.terminal-shell {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-shell--interactive {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 3px 0;
+}
+
+.terminal-shell--preview {
+  padding: 0.5rem;
+}
+
+.terminal-host {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-bottom-gap {
+  height: 10px;
+  background: var(--color-bg-secondary);
+}
+
+.terminal-shell :deep(.xterm) {
   height: 100%;
 }
 
-.terminal-viewport :deep(.xterm-screen) {
+.terminal-shell :deep(.xterm-viewport) {
+  height: 100%;
+}
+
+.terminal-host--interactive :deep(.xterm-screen) {
+  padding: 1px 2px;
+}
+
+.terminal-host--interactive :deep(.xterm),
+.terminal-host--interactive :deep(.xterm-viewport),
+.terminal-host--interactive :deep(.xterm-screen),
+.terminal-host--interactive :deep(.xterm-helpers) {
+  background: var(--color-bg-secondary);
+}
+
+.terminal-shell :deep(.xterm-screen) {
   padding: 4px;
 }
 </style>

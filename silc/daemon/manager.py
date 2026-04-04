@@ -327,6 +327,7 @@ class SilcDaemon:
                 "cwd": str(Path.home()),
                 "share_mode": self._share_mode,
                 "manager_url": self._get_manager_url(),
+                "shell": detect_shell().type,
             }
 
         @app.get("/resolve/{name}")
@@ -391,6 +392,7 @@ class SilcDaemon:
             name = session.name
             shell_info = session.shell_info
             cwd = session.cwd
+            api_token = session.api_token
             is_global = False
 
             # Check if session was global by checking the registry
@@ -434,6 +436,7 @@ class SilcDaemon:
                     port,
                     name,
                     shell_info,
+                    api_token=api_token,
                     cwd=cwd,
                 )
                 await new_session.start()

@@ -34,6 +34,14 @@ export interface DaemonDefaults {
   cwd: string
   share_mode: boolean
   manager_url: string
+  shell: string
+}
+
+export interface RestartSessionResponse {
+  status: string
+  port: number
+  name: string
+  shell: string
 }
 
 export async function listSessions(): Promise<DaemonSession[]> {
@@ -82,11 +90,12 @@ export async function killSession(port: number): Promise<void> {
   }
 }
 
-export async function restartSession(port: number): Promise<void> {
+export async function restartSession(port: number): Promise<RestartSessionResponse> {
   const resp = await fetch(`${getDaemonUrl()}/sessions/${port}/restart`, { method: 'POST' })
   if (!resp.ok) {
     throw new Error(`Failed to restart session: HTTP ${resp.status}`)
   }
+  return resp.json()
 }
 
 export async function resizeSession(port: number, rows: number, cols: number): Promise<void> {

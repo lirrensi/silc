@@ -33,24 +33,14 @@ async function syncSessions(): Promise<void> {
 </script>
 
 <template>
-  <div class="home-view h-full overflow-y-auto px-5 py-6 md:px-8">
-    <div class="mb-6 flex items-end justify-between gap-4 border-b border-[#5e5e62]/70 pb-4">
-      <div>
-        <p class="mb-1 text-xs uppercase tracking-[0.28em] text-[#a0a0a0]">Manager</p>
-        <h1 class="text-3xl font-bold text-[#ff80bf]">Sessions</h1>
-      </div>
-      <div class="rounded-full border border-[#5e5e62] bg-[#252526]/90 px-4 py-2 text-sm text-[#a0a0a0] shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
-        {{ manager.sessionList.length }} live shell{{ manager.sessionList.length === 1 ? '' : 's' }}
-      </div>
-    </div>
-
-    <div v-if="manager.sessionList.length === 0" class="rounded-2xl border border-dashed border-[#5e5e62] bg-[#252526]/70 py-16 text-center text-[#a0a0a0]">
+  <div class="home-view soft-scrollbar h-full overflow-y-auto px-3 py-3 md:px-5 md:py-4">
+    <div v-if="manager.sessionList.length === 0" class="glass-panel border-dashed py-12 text-center text-[var(--color-text-secondary)]">
       No active sessions. Click "+" to create one.
     </div>
 
     <div
       v-else
-      class="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))] 2xl:[grid-template-columns:repeat(auto-fit,minmax(360px,1fr))]"
+      class="grid gap-4 md:gap-5 [grid-template-columns:repeat(auto-fit,minmax(270px,1fr))] xl:[grid-template-columns:repeat(auto-fit,minmax(320px,1fr))] 2xl:[grid-template-columns:repeat(auto-fit,minmax(360px,1fr))]"
     >
       <SessionCard v-for="session in manager.sessionList" :key="session.port" :port="session.port">
         <TerminalViewport :port="session.port" :interactive="false" />

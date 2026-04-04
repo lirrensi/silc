@@ -82,6 +82,8 @@ def create_app(session: SilcSession) -> FastAPI:
 
     # Create streaming service instance
     streaming_service = StreamingService(session)
+    active_websocket: WebSocket | None = None
+    active_websocket_lock = asyncio.Lock()
 
     # Override the streaming service dependency
     def get_streaming_service_override() -> StreamingService:
@@ -225,11 +227,26 @@ def create_app(session: SilcSession) -> FastAPI:
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
+        nonlocal active_websocket
+
         if not _verify_websocket_token(websocket):
             await websocket.close(code=1008, reason="Invalid API token")
             return
         await websocket.accept()
-        session.tui_active = True
+
+        previous_websocket: WebSocket | None = None
+        async with active_websocket_lock:
+            previous_websocket = active_websocket
+            active_websocket = websocket
+            session.tui_active = True
+
+        if previous_websocket is not None and previous_websocket is not websocket:
+            try:
+                await previous_websocket.close(
+                    code=4002, reason="Session claimed by another client"
+                )
+            except RuntimeError:
+                pass
 
         send_lock = asyncio.Lock()
 
@@ -282,7 +299,10 @@ def create_app(session: SilcSession) -> FastAPI:
         except WebSocketDisconnect:
             pass
         finally:
-            session.tui_active = False
+            async with active_websocket_lock:
+                if active_websocket is websocket:
+                    active_websocket = None
+                    session.tui_active = False
             sender_task.cancel()
             try:
                 await sender_task

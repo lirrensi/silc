@@ -190,6 +190,7 @@ class SilcSession:
         sequence = f"\x1b[2J\x1b[H{newline}"
         self.buffer.clear()
         await self.pty.write(sequence.encode("utf-8", errors="replace"))
+        await self._wait_for_prompt(timeout=2.0)
         self.last_access = datetime.utcnow()
         self.last_output = datetime.utcnow()
 
@@ -199,6 +200,7 @@ class SilcSession:
         sequence = f"\x1bc{newline}"
         self.buffer.clear()
         await self.pty.write(sequence.encode("utf-8", errors="replace"))
+        await self._wait_for_prompt(timeout=2.0)
         self.last_access = datetime.utcnow()
         self.last_output = datetime.utcnow()
 

@@ -19,33 +19,50 @@ function handleClick(): void {
 function statusColor(status: string): string {
   switch (status) {
     case 'active': return 'bg-[#4ade80]'
+    case 'connecting': return 'bg-[#fbbf24]'
     case 'idle': return 'bg-[#6b7280]'
     case 'dead': return 'bg-[#f87171]'
+    case 'restarting': return 'bg-[#0ea5e9]'
     default: return 'bg-[#6b7280]'
   }
 }
 </script>
 
 <template>
-  <div
-    @click="handleClick"
-    class="session-card group relative overflow-hidden cursor-pointer rounded-2xl border border-[#5e5e62] bg-[linear-gradient(180deg,rgba(45,45,45,0.96),rgba(30,30,30,0.98))] shadow-[0_18px_45px_rgba(0,0,0,0.28)] transition-all duration-200 hover:-translate-y-1 hover:border-[#ff80bf]/60 hover:shadow-[0_24px_55px_rgba(0,0,0,0.38)] hover:ring-1 hover:ring-[#ff80bf]/35"
-  >
-    <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,128,191,0.12),transparent_36%)]"></div>
-    <!-- Header -->
-    <div class="absolute top-0 left-0 right-0 z-10 flex items-center justify-between gap-3 border-b border-[#5e5e62] bg-[#252526]/88 px-4 py-3 backdrop-blur-sm">
-      <div class="min-w-0 flex items-center gap-2">
-        <div class="w-2 h-2 rounded-full" :class="statusColor(session?.status ?? 'idle')"></div>
-        <span class="truncate text-sm font-medium tracking-[0.02em]">{{ session?.name ?? 'unnamed' }}</span>
-        <span class="font-mono text-xs text-[#a0a0a0]">:{{ port }}</span>
+  <div @click="handleClick" class="cursor-pointer">
+    <div class="glass-panel p-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] md:hidden">
+      <div class="flex items-start gap-2.5">
+        <div class="mt-1 h-2.5 w-2.5" :class="statusColor(session?.status ?? 'idle')"></div>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <span class="truncate font-medium text-[var(--color-text-primary)]">{{ session?.name ?? 'unnamed' }}</span>
+            <span class="border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+              {{ session?.shell ?? '' }}
+            </span>
+          </div>
+          <p class="mt-1 text-xs font-mono text-[var(--color-text-muted)]">:{{ port }}</p>
+          <p class="mt-2 truncate text-sm text-[var(--color-text-secondary)]">{{ session?.cwd || 'Home directory' }}</p>
+        </div>
       </div>
-      <span class="rounded-full border border-[#5e5e62] px-2 py-0.5 text-xs uppercase tracking-[0.16em] text-[#6b7280]">{{ session?.shell ?? '' }}</span>
     </div>
 
-    <!-- Terminal Preview (CSS cover style) with padding -->
-    <div class="preview-container">
-      <div class="terminal-cover">
-        <slot></slot>
+    <div
+      class="session-card group relative hidden overflow-hidden border border-[var(--color-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--color-bg-tertiary)_92%,transparent),color-mix(in_srgb,var(--color-bg-primary)_96%,transparent))] shadow-[0_12px_32px_var(--color-shadow)] transition-all duration-200 hover:-translate-y-1 hover:border-[var(--color-accent)]/50 hover:shadow-[0_18px_40px_var(--color-shadow)] hover:ring-1 hover:ring-[var(--color-accent)]/20 md:block"
+    >
+      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,var(--color-accent-muted),transparent_36%)]"></div>
+      <div class="absolute left-0 right-0 top-0 z-10 flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-3 py-2 backdrop-blur-sm">
+        <div class="min-w-0 flex items-center gap-2">
+          <div class="h-2 w-2" :class="statusColor(session?.status ?? 'idle')"></div>
+          <span class="truncate text-sm font-medium tracking-[0.02em] text-[var(--color-text-primary)]">{{ session?.name ?? 'unnamed' }}</span>
+          <span class="font-mono text-xs text-[var(--color-text-muted)]">:{{ port }}</span>
+        </div>
+        <span class="border border-[var(--color-border)] px-1.5 py-0.5 text-xs uppercase tracking-[0.16em] text-[var(--color-text-muted)]">{{ session?.shell ?? '' }}</span>
+      </div>
+
+      <div class="preview-container">
+        <div class="terminal-cover">
+          <slot></slot>
+        </div>
       </div>
     </div>
   </div>
@@ -77,7 +94,7 @@ function statusColor(status: string): string {
   width: 100%;
   height: 100%;
   transform-origin: center center;
-  border-radius: 14px;
+  border-radius: 0;
   overflow: hidden;
 }
 
