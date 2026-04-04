@@ -1,10 +1,25 @@
 <script setup lang="ts">
+// FILE: manager_web_ui/src/views/SessionView.vue
+// PURPOSE: Render an interactive session view with lifecycle controls and terminal recovery actions.
+// OWNS: Session-specific terminal controls, reconnect flows, and history refresh orchestration.
+// EXPORTS: SessionView - routed interactive session page.
+// DOCS: agent_chat/plan_web_terminal_fidelity_2026-04-04.md
+
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useTerminalManager } from '@/stores/terminalManager'
 import TerminalViewport from '@/components/TerminalViewport.vue'
-import { closeSession, killSession, restartSession, sendSigterm, sendSigkill, sendInterrupt, getSessionHttpUrl, listSessions } from '@/lib/daemonApi'
+import {
+  closeSession,
+  getSessionHttpUrl,
+  killSession,
+  listSessions,
+  restartSession,
+  sendInterrupt,
+  sendSigkill,
+  sendSigterm,
+} from '@/lib/daemonApi'
 import { connectWebSocket } from '@/lib/websocket'
+import { useTerminalManager } from '@/stores/terminalManager'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,31 +56,32 @@ const connectionLabel = computed(() => {
 
 onMounted(() => {
   manager.setFocused(port.value)
-  refreshTerminal()
+  void refreshTerminal()
 })
 
 onUnmounted(() => {
   manager.setFocused(null)
 })
 
-// Refresh terminal when switching to this session
 watch(port, () => {
   manager.setFocused(port.value)
-  refreshTerminal()
+  void refreshTerminal()
 })
 
-function refreshTerminal(): void {
+async function refreshTerminal(): Promise<void> {
   const s = manager.getSession(port.value)
   if (s?.ws && s.ws.readyState === WebSocket.OPEN) {
+    await manager.flushWrites(port.value)
     s.terminal.reset()
     s.ws.send(JSON.stringify({ event: 'load_history' }))
+    manager.refreshTerminalSurface(port.value)
   }
 }
 
 async function handleClear(): Promise<void> {
   try {
     await fetch(`${getSessionHttpUrl(port.value)}/clear`, { method: 'POST' })
-    refreshTerminal()
+    await refreshTerminal()
   } catch (err) {
     console.error('Clear failed:', err)
   }
@@ -150,8 +166,10 @@ async function reconnectSession(targetPort: number, waitForFreshSession: boolean
       throw new Error(`Session :${targetPort} is not available`)
     }
 
+    await manager.flushWrites(targetPort)
     nextSession.terminal.reset()
     connectWebSocket(targetPort, { force: true })
+    manager.refreshTerminalSurface(targetPort)
   } finally {
     reconnecting.value = false
   }
@@ -225,6 +243,14 @@ function scrollToBottom(): void {
     s.terminal.scrollToBottom()
   }
 }
+
+function refitTerminal(): void {
+  manager.refreshTerminalSurface(port.value)
+}
+
+function redrawTerminal(): void {
+  manager.forceRedraw(port.value)
+}
 </script>
 
 <template>
@@ -278,6 +304,8 @@ function scrollToBottom(): void {
         <button @click="handleRestart" class="bar-button bar-button-tight bar-button-info border-r border-[var(--color-border)] text-xs" title="Restart session (same port/name/cwd/shell)" :disabled="isRestarting || reconnecting">{{ isRestarting ? 'Restarting' : 'Restart' }}</button>
         <button @click="handleClear" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :disabled="controlsDisabled">Clear</button>
         <button @click="handlePaste" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="Paste from clipboard" :disabled="controlsDisabled">Paste</button>
+        <button @click="refitTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="Refresh terminal sizing" :disabled="controlsDisabled">Refit</button>
+        <button @click="redrawTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="Force terminal redraw" :disabled="controlsDisabled">Redraw</button>
         <button @click="scrollToBottom" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="Scroll to bottom" :disabled="controlsDisabled">Bottom</button>
         <button @click="sendViaWs('\x1b[A')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :disabled="controlsDisabled">↑</button>
         <button @click="sendViaWs('\x1b[D')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :disabled="controlsDisabled">←</button>

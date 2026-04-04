@@ -1,22 +1,44 @@
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { Terminal } from '@xterm/xterm'
+// FILE: manager_web_ui/src/stores/terminalManager.ts
+// PURPOSE: Manage frontend terminal session lifecycle, visible-first attachment, measured resize, and recovery actions.
+// OWNS: Browser terminal instances, resize propagation, write buffering, and renderer lifecycle.
+// EXPORTS: useTerminalManager - Pinia store for terminal session state and actions.
+// DOCS: agent_chat/plan_web_terminal_fidelity_2026-04-04.md
+
 import { FitAddon } from '@xterm/addon-fit'
+import type { WebglAddon } from '@xterm/addon-webgl'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import type { Session, SessionStatus, DaemonSession } from '@/types/session'
+import { Terminal } from '@xterm/xterm'
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
 import { resizeSession } from '@/lib/daemonApi'
+import {
+  hasGeometryChanged,
+  isElementRenderable,
+  proposeTerminalGeometry,
+  type TerminalGeometry,
+} from '@/lib/terminalGeometry'
+import {
+  disposeRenderer,
+  enableRenderer,
+  forceTerminalRedraw,
+  refreshRendererAfterSwap,
+} from '@/lib/terminalRenderer'
 import { getTerminalTheme } from '@/lib/themes'
 import type { ResolvedTheme } from '@/lib/themes'
+import type { DaemonSession, Session, SessionStatus } from '@/types/session'
 
 const MAX_COLS = 256
 const MAX_ROWS = 64
+const FIT_DEBOUNCE_MS = 24
+
+type RendererType = Session['rendererType']
 
 export const useTerminalManager = defineStore('terminalManager', () => {
   const sessions = ref<Map<number, Session>>(new Map())
   const focusedPort = ref<number | null>(null)
   const currentTheme = ref<ResolvedTheme>('dark')
+  const lastAppliedRendererType = new Map<number, RendererType>()
 
-  // Computed
   const sessionList = computed(() => {
     return Array.from(sessions.value.values()).sort((a, b) => a.port - b.port)
   })
@@ -30,8 +52,13 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     return Array.from(sessions.value.values()).filter(s => s.status === 'active').length
   })
 
-  // Actions
-  function createSession(port: number, sessionId: string, shell: string, name: string = '', cwd: string | null = null): Session {
+  function createSession(
+    port: number,
+    sessionId: string,
+    shell: string,
+    name: string = '',
+    cwd: string | null = null,
+  ): Session {
     const terminal = new Terminal({
       cols: 120,
       rows: 30,
@@ -47,8 +74,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
-
-    // Unicode11 for proper emoji/CJK character width handling
     terminal.loadAddon(new Unicode11Addon())
     terminal.unicode.activeVersion = '11'
 
@@ -66,15 +91,24 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       lastActivity: Date.now(),
       writeQueue: [],
       writePending: false,
+      writeInFlight: false,
+      flushWaiters: [],
       lastSize: null,
+      lastMeasuredSize: null,
+      webglAddon: null as WebglAddon | null,
+      rendererType: 'dom',
+      rendererFailed: false,
+      attachEpoch: 0,
+      fitPropagationEnabled: true,
+      pendingOpen: false,
+      pendingFitTimer: null,
+      pendingAnimationFrame: null,
       disconnectReason: null,
     }
 
-    // Handle special keys BEFORE xterm processes them
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true
 
-      // Ctrl+Enter
       if (event.ctrlKey && event.key === 'Enter') {
         if (session.ws && session.ws.readyState === WebSocket.OPEN) {
           session.ws.send(JSON.stringify({ event: 'type', text: '\x1b[13;5u', nonewline: true }))
@@ -82,7 +116,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         return false
       }
 
-      // Shift+Enter
       if (event.shiftKey && event.key === 'Enter' && !event.ctrlKey) {
         if (session.ws && session.ws.readyState === WebSocket.OPEN) {
           session.ws.send(JSON.stringify({ event: 'type', text: '\x1b[13;2u', nonewline: true }))
@@ -90,8 +123,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         return false
       }
 
-      // Ctrl+V - paste clipboard directly to terminal via WebSocket
-      // Return false to prevent xterm AND browser from doing anything
       if (event.ctrlKey && event.key === 'v' && !event.shiftKey && !event.altKey) {
         navigator.clipboard.readText().then(text => {
           if (session.ws && session.ws.readyState === WebSocket.OPEN) {
@@ -100,7 +131,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         }).catch(() => {
           // Clipboard access denied - ignore silently
         })
-        return false // CRITICAL: stops xterm + browser from handling this
+        return false
       }
 
       return true
@@ -124,41 +155,145 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     session.cwd = daemonSession.cwd
   }
 
+  function clearPendingLayoutWork(session: Session): void {
+    if (session.pendingFitTimer !== null) {
+      clearTimeout(session.pendingFitTimer)
+      session.pendingFitTimer = null
+    }
+
+    if (session.pendingAnimationFrame !== null) {
+      cancelAnimationFrame(session.pendingAnimationFrame)
+      session.pendingAnimationFrame = null
+    }
+  }
+
+  function cleanupBrowserEventHandlers(session: Session): void {
+    const element = session.terminal.element as HTMLElement & {
+      _silcPasteHandler?: (e: Event) => void
+      _silcKeydownHandler?: (e: KeyboardEvent) => void
+      _silcPasteEventHandler?: (e: Event) => void
+    }
+
+    if (!element) {
+      return
+    }
+
+    if (element._silcPasteHandler) {
+      element.removeEventListener('contextmenu', element._silcPasteHandler)
+    }
+    if (element._silcKeydownHandler) {
+      element.removeEventListener('keydown', element._silcKeydownHandler, true)
+    }
+    if (element._silcPasteEventHandler) {
+      element.removeEventListener('paste', element._silcPasteEventHandler, true)
+    }
+  }
+
+  function resolveFlushWaiters(session: Session): void {
+    if (session.writePending || session.writeInFlight || session.writeQueue.length > 0) {
+      return
+    }
+
+    const waiters = session.flushWaiters.splice(0, session.flushWaiters.length)
+    for (const resolve of waiters) {
+      resolve()
+    }
+  }
+
+  async function openWhenRenderable(
+    port: number,
+    container: HTMLElement,
+    options?: { propagate?: boolean },
+  ): Promise<void> {
+    const session = sessions.value.get(port)
+    if (!session) {
+      return
+    }
+
+    session.fitPropagationEnabled = options?.propagate ?? session.fitPropagationEnabled
+
+    session.attachEpoch += 1
+    const epoch = session.attachEpoch
+
+    if (session.terminal.element) {
+      setupBrowserEventHandlers(session)
+      scheduleFit(port, { immediate: true, reason: 'reattach-existing-open' })
+      return
+    }
+
+    session.pendingOpen = true
+    clearPendingLayoutWork(session)
+
+    await new Promise<void>((resolve) => {
+      const retry = () => {
+        const currentSession = sessions.value.get(port)
+        if (!currentSession || currentSession.attachEpoch !== epoch) {
+          resolve()
+          return
+        }
+
+        if (currentSession.terminal.element || isElementRenderable(container)) {
+          clearPendingLayoutWork(currentSession)
+          resolve()
+          return
+        }
+
+        currentSession.pendingAnimationFrame = requestAnimationFrame(() => {
+          currentSession.pendingAnimationFrame = null
+          retry()
+        })
+
+        currentSession.pendingFitTimer = setTimeout(() => {
+          if (currentSession.pendingAnimationFrame !== null) {
+            cancelAnimationFrame(currentSession.pendingAnimationFrame)
+            currentSession.pendingAnimationFrame = null
+          }
+          retry()
+        }, FIT_DEBOUNCE_MS)
+      }
+
+      retry()
+    })
+
+    const currentSession = sessions.value.get(port)
+    if (!currentSession || currentSession.attachEpoch !== epoch) {
+      return
+    }
+
+    currentSession.pendingOpen = false
+
+    if (currentSession.terminal.element || !isElementRenderable(container)) {
+      return
+    }
+
+    currentSession.terminal.open(container)
+    setupBrowserEventHandlers(currentSession)
+    await enableRenderer(currentSession)
+    scheduleFit(port, { immediate: true, reason: 'initial-open' })
+  }
+
   function removeSession(port: number): void {
     const session = sessions.value.get(port)
-    if (session) {
-      // Clean up DOM event handlers
-      const element = session.terminal.element as HTMLElement & {
-        _silcPasteHandler?: (e: Event) => void
-        _silcKeydownHandler?: (e: KeyboardEvent) => void
-        _silcPasteEventHandler?: (e: Event) => void
-      }
-      if (element) {
-        if (element._silcPasteHandler) {
-          element.removeEventListener('contextmenu', element._silcPasteHandler)
-        }
-        if (element._silcKeydownHandler) {
-          element.removeEventListener('keydown', element._silcKeydownHandler, true)
-        }
-        if (element._silcPasteEventHandler) {
-          element.removeEventListener('paste', element._silcPasteEventHandler, true)
-        }
-      }
-
-      // Clean up WebSocket
-      if (session.ws) {
-        session.ws.close()
-      }
-
-      // Clean up terminal data listener
-      if (session.onDataDisposable) {
-        session.onDataDisposable.dispose()
-      }
-
-      // Dispose terminal (also cleans up addons and attachCustomKeyEventHandler)
-      session.terminal.dispose()
-      sessions.value.delete(port)
+    if (!session) {
+      return
     }
+
+    clearPendingLayoutWork(session)
+    cleanupBrowserEventHandlers(session)
+    disposeRenderer(session)
+    session.pendingOpen = false
+
+    if (session.ws) {
+      session.ws.close()
+    }
+
+    session.onDataDisposable?.dispose()
+    session.writePending = false
+    session.writeInFlight = false
+    resolveFlushWaiters(session)
+    session.terminal.dispose()
+    sessions.value.delete(port)
+    lastAppliedRendererType.delete(port)
   }
 
   function setFocused(port: number | null): void {
@@ -171,31 +306,34 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
   }
 
-  function attach(port: number, container: HTMLElement): void {
+  function attach(
+    port: number,
+    container: HTMLElement,
+    options?: { propagate?: boolean },
+  ): void {
     const session = sessions.value.get(port)
-    if (!session) return
+    if (!session) {
+      return
+    }
+
+    session.fitPropagationEnabled = options?.propagate ?? true
 
     const element = session.terminal.element
 
     if (!element) {
-      session.terminal.open(container)
-      setupBrowserEventHandlers(session)
-      fit(port)
+      void openWhenRenderable(port, container, options)
       return
     }
 
-    if (element.parentNode) {
+    if (element.parentElement !== container) {
       element.remove()
+      container.appendChild(element)
     }
-    container.appendChild(element)
+
     setupBrowserEventHandlers(session)
-    fit(port)
+    scheduleFit(port, { immediate: true, reason: 'attach' })
   }
 
-  /**
-   * Set up DOM-level event handlers to prevent browser interference
-   * with our custom clipboard handling (Ctrl+C/V, right-click paste).
-   */
   function setupBrowserEventHandlers(session: Session): void {
     const element = session.terminal.element
     if (!element) return
@@ -218,18 +356,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       helperTextarea.inputMode = 'text'
     }
 
-    // Remove existing handlers if any
-    if (typedElement._silcPasteHandler) {
-      element.removeEventListener('contextmenu', typedElement._silcPasteHandler)
-    }
-    if (typedElement._silcKeydownHandler) {
-      element.removeEventListener('keydown', typedElement._silcKeydownHandler, true)
-    }
-    if (typedElement._silcPasteEventHandler) {
-      element.removeEventListener('paste', typedElement._silcPasteEventHandler, true)
-    }
+    cleanupBrowserEventHandlers(session)
 
-    // Right-click paste
     const pasteHandler = (e: Event) => {
       e.preventDefault()
       navigator.clipboard.readText().then(text => {
@@ -243,7 +371,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     element.addEventListener('contextmenu', pasteHandler)
     typedElement._silcPasteHandler = pasteHandler
 
-    // Prevent browser's native paste dialog
     const pasteEventHandler = (e: Event) => {
       e.preventDefault()
       e.stopPropagation()
@@ -251,11 +378,9 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     element.addEventListener('paste', pasteEventHandler, true)
     typedElement._silcPasteEventHandler = pasteEventHandler
 
-    // Block browser's native Ctrl+C/V handling at DOM level (capture phase)
     const keydownHandler = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return
 
-      // Ctrl+C with selection - block browser copy
       if (e.code === 'KeyC' && session.terminal.hasSelection()) {
         e.preventDefault()
         e.stopPropagation()
@@ -264,7 +389,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         return
       }
 
-      // Ctrl+V - block browser paste dialog (we handle paste ourselves)
       if (e.code === 'KeyV' && !e.shiftKey && !e.altKey) {
         e.preventDefault()
         e.stopPropagation()
@@ -275,56 +399,116 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         }).catch(() => {
           // Clipboard access denied - ignore silently
         })
-        return
       }
     }
-    element.addEventListener('keydown', keydownHandler, true) // capture phase
+    element.addEventListener('keydown', keydownHandler, true)
     typedElement._silcKeydownHandler = keydownHandler
   }
 
-  async function fit(port: number, options?: { propagate?: boolean }): Promise<void> {
+  async function applyMeasuredFit(
+    port: number,
+    options?: { propagate?: boolean; reason?: string },
+  ): Promise<void> {
     const session = sessions.value.get(port)
-    if (!session?.terminal?.element) return
+    const terminalElement = session?.terminal.element
+    const container = terminalElement?.parentElement
 
-    const shouldPropagate = options?.propagate ?? true
-    session.fitAddon.fit()
-
-    let cols = session.terminal.cols
-    let rows = session.terminal.rows
-
-    cols = Math.min(cols, MAX_COLS)
-    rows = Math.min(rows, MAX_ROWS)
-
-    if (session.terminal.cols !== cols || session.terminal.rows !== rows) {
-      session.terminal.resize(cols, rows)
-    }
-
-    if (!shouldPropagate) {
-      session.lastSize = { rows, cols }
+    if (!session || !terminalElement || !container || !isElementRenderable(container)) {
       return
     }
 
-    if (session.lastSize && session.lastSize.rows === rows && session.lastSize.cols === cols) {
+    const geometry = proposeTerminalGeometry(session.terminal, session.fitAddon, container, {
+      maxCols: MAX_COLS,
+      maxRows: MAX_ROWS,
+    })
+    if (!geometry) {
       return
     }
 
-    session.lastSize = { rows, cols }
+    const previousGeometry = getPreviousGeometry(session)
+    const rowsChanged = session.lastSize?.rows !== geometry.rows
+    const colsChanged = session.lastSize?.cols !== geometry.cols
+    const payloadChanged = rowsChanged || colsChanged
+    const measuredChanged = hasGeometryChanged(previousGeometry, geometry)
+    const previousRenderer = lastAppliedRendererType.get(port)
 
-    try {
-      await resizeSession(port, rows, cols)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      if (message.includes('HTTP 410')) {
-        setStatus(port, 'dead')
-        return
+    if (payloadChanged) {
+      session.terminal.resize(geometry.cols, geometry.rows)
+    }
+
+    session.lastSize = { rows: geometry.rows, cols: geometry.cols }
+    session.lastMeasuredSize = {
+      width: geometry.width,
+      height: geometry.height,
+      dpr: geometry.dpr,
+    }
+
+    const shouldPropagate = options?.propagate ?? session.fitPropagationEnabled
+
+    if (shouldPropagate && payloadChanged) {
+      try {
+        await resizeSession(port, geometry.rows, geometry.cols)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (message.includes('HTTP 410')) {
+          setStatus(port, 'dead')
+          return
+        }
+        console.error(`[TerminalManager] applyMeasuredFit error for port ${port} (${options?.reason ?? 'unknown'}):`, err)
       }
-      console.error(`[TerminalManager] fit error for port ${port}:`, err)
     }
+
+    if (previousRenderer !== session.rendererType || measuredChanged) {
+      refreshRendererAfterSwap(session)
+    }
+
+    lastAppliedRendererType.set(port, session.rendererType)
+  }
+
+  function scheduleFit(
+    port: number,
+    options?: { propagate?: boolean; immediate?: boolean; reason?: string },
+  ): void {
+    const session = sessions.value.get(port)
+    if (!session) {
+      return
+    }
+
+    clearPendingLayoutWork(session)
+
+    const runFit = () => {
+      void applyMeasuredFit(port, {
+        propagate: options?.propagate,
+        reason: options?.reason,
+      })
+    }
+
+    if (options?.immediate === true) {
+      session.pendingAnimationFrame = requestAnimationFrame(() => {
+        session.pendingAnimationFrame = null
+        runFit()
+      })
+      return
+    }
+
+    session.pendingFitTimer = setTimeout(() => {
+      session.pendingFitTimer = null
+      session.pendingAnimationFrame = requestAnimationFrame(() => {
+        session.pendingAnimationFrame = null
+        runFit()
+      })
+    }, FIT_DEBOUNCE_MS)
   }
 
   function detach(port: number): void {
     const session = sessions.value.get(port)
-    if (!session?.terminal?.element) return
+    if (!session?.terminal.element) {
+      return
+    }
+
+    clearPendingLayoutWork(session)
+    disposeRenderer(session)
+    session.pendingOpen = false
     session.terminal.element.remove()
   }
 
@@ -383,45 +567,92 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     for (const session of sessions.value.values()) {
       session.terminal.options.theme = terminalTheme
-      session.terminal.refresh(0, session.terminal.rows - 1)
+      refreshRendererAfterSwap(session)
     }
   }
 
-  /**
-   * Safe buffered write to terminal.
-   * Buffers writes and processes them sequentially with callback
-   * to prevent escape sequence splitting across chunks.
-   */
   function safeWrite(port: number, data: string): void {
     const session = sessions.value.get(port)
     if (!session) return
 
     session.writeQueue.push(data)
 
-    if (!session.writePending) {
+    if (!session.writePending && !session.writeInFlight) {
       processWriteQueue(port)
     }
   }
 
   function processWriteQueue(port: number): void {
     const session = sessions.value.get(port)
-    if (!session || session.writeQueue.length === 0) {
-      if (session) session.writePending = false
+    if (!session) {
+      return
+    }
+
+    if (session.writeQueue.length === 0) {
+      session.writePending = false
+      session.writeInFlight = false
+      resolveFlushWaiters(session)
       return
     }
 
     session.writePending = true
+    session.writeInFlight = true
     const combined = session.writeQueue.join('')
     session.writeQueue.length = 0
 
     session.terminal.write(combined, () => {
-      // Check if more data arrived while we were writing
+      session.writeInFlight = false
+
       if (session.writeQueue.length > 0) {
         processWriteQueue(port)
       } else {
         session.writePending = false
+        resolveFlushWaiters(session)
       }
     })
+  }
+
+  async function flushWrites(port: number): Promise<void> {
+    const session = sessions.value.get(port)
+    if (!session) {
+      return
+    }
+
+    if (!session.writePending && !session.writeInFlight && session.writeQueue.length === 0) {
+      return
+    }
+
+    await new Promise<void>((resolve) => {
+      session.flushWaiters.push(resolve)
+      resolveFlushWaiters(session)
+    })
+  }
+
+  function forceRedraw(port: number): void {
+    const session = sessions.value.get(port)
+    if (!session) {
+      return
+    }
+
+    forceTerminalRedraw(session)
+  }
+
+  function refreshTerminalSurface(port: number): void {
+    scheduleFit(port, { immediate: true, reason: 'refresh-terminal-surface' })
+  }
+
+  function getPreviousGeometry(session: Session): TerminalGeometry | null {
+    if (!session.lastSize || !session.lastMeasuredSize) {
+      return null
+    }
+
+    return {
+      cols: session.lastSize.cols,
+      rows: session.lastSize.rows,
+      width: session.lastMeasuredSize.width,
+      height: session.lastMeasuredSize.height,
+      dpr: session.lastMeasuredSize.dpr,
+    }
   }
 
   return {
@@ -436,7 +667,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     setFocused,
     attach,
     detach,
-    fit,
+    applyMeasuredFit,
+    scheduleFit,
+    flushWrites,
+    forceRedraw,
+    refreshTerminalSurface,
     setStatus,
     setDisconnectReason,
     setWs,

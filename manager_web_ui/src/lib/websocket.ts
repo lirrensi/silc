@@ -1,5 +1,11 @@
-import { useTerminalManager } from '@/stores/terminalManager'
+// FILE: manager_web_ui/src/lib/websocket.ts
+// PURPOSE: Connect session terminals to the daemon websocket while preserving ordered history and repaint recovery.
+// OWNS: Websocket lifecycle for terminal sessions and history/update message handling.
+// EXPORTS: connectWebSocket - open or replace a session websocket; disconnectWebSocket - close a session websocket intentionally.
+// DOCS: agent_chat/plan_web_terminal_fidelity_2026-04-04.md
+
 import { getSessionHttpUrl } from '@/lib/daemonApi'
+import { useTerminalManager } from '@/stores/terminalManager'
 
 export function connectWebSocket(port: number, options?: { force?: boolean }): WebSocket | null {
   console.log(`[WebSocket] connectWebSocket(${port})`)
@@ -37,23 +43,24 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
     console.log(`[WebSocket] Connected to port ${port}`)
     manager.setDisconnectReason(port, null)
     manager.setStatus(port, 'active')
-
-    // Request terminal history
     ws.send(JSON.stringify({ event: 'load_history' }))
+    manager.scheduleFit(port, { immediate: true, reason: 'ws-open' })
   }
 
-  ws.onmessage = (event) => {
+  ws.onmessage = async (event) => {
     try {
       const msg = JSON.parse(event.data)
 
       if (msg.event === 'history' && msg.data) {
+        await manager.flushWrites(port)
         session.terminal.clear()
         manager.safeWrite(port, msg.data)
+        await manager.flushWrites(port)
+        manager.refreshTerminalSurface(port)
       } else if (msg.event === 'update' && msg.data) {
         manager.safeWrite(port, msg.data)
       }
     } catch {
-      // Raw text output
       manager.safeWrite(port, event.data)
     }
   }
@@ -71,7 +78,6 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
     }
 
     manager.setDisconnectReason(port, event.reason || null)
-
     manager.setStatus(port, currentSession.status === 'connecting' ? 'dead' : 'idle')
   }
 
@@ -84,13 +90,7 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
     manager.setStatus(port, 'dead')
   }
 
-  // Wire up terminal input to WebSocket
-  // Dispose old handler if exists
-  if (session.onDataDisposable) {
-    session.onDataDisposable.dispose()
-  }
-
-  // Register new handler and store disposable
+  session.onDataDisposable?.dispose()
   session.onDataDisposable = session.terminal.onData((data: string) => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ event: 'type', text: data, nonewline: true }))

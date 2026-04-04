@@ -14,6 +14,9 @@ importers:
       '@xterm/addon-unicode11':
         specifier: ^0.9.0
         version: 0.9.0
+      '@xterm/addon-webgl':
+        specifier: ^0.18.0
+        version: 0.18.0(@xterm/xterm@6.0.0)
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
@@ -1197,6 +1200,11 @@ packages:
 
   '@xterm/addon-unicode11@0.9.0':
     resolution: {integrity: sha512-FxDnYcyuXhNl+XSqGZL/t0U9eiNb/q3EWT5rYkQT/zuig8Gz/VagnQANKHdDWFM2lTMk9ly0EFQxxxtZUoRetw==}
+
+  '@xterm/addon-webgl@0.18.0':
+    resolution: {integrity: sha512-xCnfMBTI+/HKPdRnSOHaJDRqEpq2Ugy8LEj9GiY4J3zJObo3joylIFaMvzBwbYRg8zLtkO0KQaStCeSfoaI2/w==}
+    peerDependencies:
+      '@xterm/xterm': ^5.0.0
 
   '@xterm/xterm@6.0.0':
     resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
@@ -3580,6 +3588,10 @@ snapshots:
   '@xterm/addon-fit@0.11.0': {}
 
   '@xterm/addon-unicode11@0.9.0': {}
+
+  '@xterm/addon-webgl@0.18.0(@xterm/xterm@6.0.0)':
+    dependencies:
+      '@xterm/xterm': 6.0.0
 
   '@xterm/xterm@6.0.0': {}
 
