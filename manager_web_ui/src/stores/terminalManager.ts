@@ -185,7 +185,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
   function cleanupBrowserEventHandlers(session: Session): void {
     const element = session.terminal.element as HTMLElement & {
-      _silcPasteHandler?: (e: Event) => void
+      _silcContextMenuHandler?: (e: MouseEvent) => void
+      _silcMouseDownHandler?: (e: MouseEvent) => void
       _silcKeydownHandler?: (e: KeyboardEvent) => void
       _silcPasteEventHandler?: (e: Event) => void
     }
@@ -194,8 +195,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       return
     }
 
-    if (element._silcPasteHandler) {
-      element.removeEventListener('contextmenu', element._silcPasteHandler)
+    if (element._silcContextMenuHandler) {
+      element.removeEventListener('contextmenu', element._silcContextMenuHandler, true)
+    }
+    if (element._silcMouseDownHandler) {
+      element.removeEventListener('mousedown', element._silcMouseDownHandler, true)
     }
     if (element._silcKeydownHandler) {
       element.removeEventListener('keydown', element._silcKeydownHandler, true)
@@ -389,7 +393,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     if (!element) return
 
     const typedElement = element as HTMLElement & {
-      _silcPasteHandler?: (e: Event) => void
+      _silcContextMenuHandler?: (e: MouseEvent) => void
+      _silcMouseDownHandler?: (e: MouseEvent) => void
       _silcKeydownHandler?: (e: KeyboardEvent) => void
       _silcPasteEventHandler?: (e: Event) => void
     }
@@ -408,8 +413,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     cleanupBrowserEventHandlers(session)
 
-    const pasteHandler = (e: Event) => {
-      e.preventDefault()
+    const pasteClipboardText = () => {
       navigator.clipboard.readText().then(text => {
         if (session.ws && session.ws.readyState === WebSocket.OPEN) {
           sendInputFrame(session.ws, text)
@@ -418,11 +422,31 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         // Clipboard access denied - ignore silently
       })
     }
-    element.addEventListener('contextmenu', pasteHandler)
-    typedElement._silcPasteHandler = pasteHandler
+
+    const contextMenuHandler = (e: MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      e.stopImmediatePropagation()
+      pasteClipboardText()
+    }
+    element.addEventListener('contextmenu', contextMenuHandler, true)
+    typedElement._silcContextMenuHandler = contextMenuHandler
+
+    const mouseDownHandler = (e: MouseEvent) => {
+      if (e.button !== 2) {
+        return
+      }
+
+      e.preventDefault()
+      e.stopPropagation()
+      e.stopImmediatePropagation()
+    }
+    element.addEventListener('mousedown', mouseDownHandler, true)
+    typedElement._silcMouseDownHandler = mouseDownHandler
 
     const pasteEventHandler = (e: Event) => {
       e.preventDefault()
+      e.stopImmediatePropagation()
       e.stopPropagation()
     }
     element.addEventListener('paste', pasteEventHandler, true)
@@ -442,13 +466,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       if (e.code === 'KeyV' && !e.shiftKey && !e.altKey) {
         e.preventDefault()
         e.stopPropagation()
-        navigator.clipboard.readText().then(text => {
-          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-            sendInputFrame(session.ws, text)
-          }
-        }).catch(() => {
-          // Clipboard access denied - ignore silently
-        })
+        pasteClipboardText()
       }
     }
     element.addEventListener('keydown', keydownHandler, true)

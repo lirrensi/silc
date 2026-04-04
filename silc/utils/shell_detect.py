@@ -117,11 +117,9 @@ def get_shell_info_by_type(shell_type: str) -> ShellInfo | None:
     shell_type = shell_type.lower()
 
     if shell_type == "pwsh":
-        path = _resolve_executable("pwsh", "pwsh.exe") or "pwsh.exe"
-        return ShellInfo("pwsh", path, re.compile(r"PS .*>"))
+        return ShellInfo("pwsh", "pwsh.exe", re.compile(r"PS .*>"))
     if shell_type == "powershell":
-        path = _resolve_executable("powershell", "powershell.exe") or "powershell.exe"
-        return ShellInfo("powershell", path, re.compile(r"PS .*>"))
+        return ShellInfo("powershell", "powershell.exe", re.compile(r"PS .*>"))
     if shell_type == "cmd":
         path = (
             _resolve_executable(os.environ.get("COMSPEC", ""), "cmd", "cmd.exe")

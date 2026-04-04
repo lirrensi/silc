@@ -494,8 +494,9 @@ Custom clipboard handling to prevent browser interference:
 - Read from clipboard → send via WebSocket
 - Block browser's native paste
 
-**Right-click:**
-- Paste from clipboard via contextmenu event
+**Paste button / right-click:**
+- Read clipboard text and send it straight to the shell
+- Suppress the browser context menu while pasting
 
 **Custom Key Events:**
 - `Ctrl+Enter` → Send `\x1b[13;5u`

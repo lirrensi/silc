@@ -12,6 +12,7 @@ The CLI provides user-friendly commands to interact with SILC:
 - Session operations (run, out, status, etc.)
 - TUI/Web UI launching
 - Log viewing
+- OS context-menu integration install/remove
 
 ---
 
@@ -53,6 +54,7 @@ The CLI provides user-friendly commands to interact with SILC:
 | `silc/daemon/__init__.py` | Daemon utilities |
 | `silc/tui/app.py` | Textual TUI |
 | `silc/tui/installer.py` | TUI binary installer |
+| `silc/os_integration.py` | Finder / Explorer / file-manager integration |
 | `silc/utils/ports.py` | Port utilities |
 | `silc/stream/cli_commands.py` | Streaming commands |
 
@@ -65,6 +67,9 @@ silc
 ├── start [name] [--port] [--global] [--no-detach] [--token]
 ├── manager
 ├── desktop
+├── os-integration
+│   ├── install
+│   └── uninstall
 ├── list
 ├── shutdown
 ├── killall
@@ -242,6 +247,27 @@ def restart_server():
 ```
 
 Restarts the daemon HTTP server without killing PTY sessions. Useful for recovering from HTTP issues while keeping shells alive.
+
+### `silc os-integration`
+
+```python
+@cli.group(name="os-integration")
+def os_integration_group():
+    pass
+
+@os_integration_group.command()
+def install():
+    # macOS: Finder Quick Action (.workflow)
+    # Windows: per-user Explorer context-menu registry keys
+    # Linux: Nautilus scripts, Thunar custom actions, Dolphin servicemenus
+    pass
+
+@os_integration_group.command()
+def uninstall():
+    pass
+```
+
+Creates a right-click entry that launches `silc start --cwd <selected-path>`.
 
 ---
 

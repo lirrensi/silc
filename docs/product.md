@@ -32,6 +32,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 - **Native TUI** — Terminal UI for interactive sessions
 - **Web UI** — Browser-based terminal interface
 - **Cross-platform** — Windows, Linux, macOS support
+- **OS context menus** — Install Finder / Explorer / file-manager integrations
 
 ### Advanced Features
 
@@ -161,6 +162,8 @@ silc 20000 run "htop"         # Use TUI apps remotely
 | `silc start [--port <n>] [--global] [--no-detach] [--token <t>]` | Start daemon (if not running) and create a new session |
 | `silc manager` | Open session manager web UI (starts daemon if needed) |
 | `silc desktop` | Open the session manager in a native desktop window |
+| `silc os-integration install` | Install OS context-menu integration |
+| `silc os-integration uninstall` | Remove OS context-menu integration |
 | `silc list` | List all active sessions |
 | `silc shutdown` | Gracefully shut down daemon and all sessions |
 | `silc killall` | Force kill daemon and all sessions |

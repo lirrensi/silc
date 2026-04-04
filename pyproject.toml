@@ -30,6 +30,7 @@ dependencies = [
 [project.scripts]
 silc = "silc.__main__:main"
 silc-build-web = "silc.utils.build_web:main"
+silc-test = "silc.utils.pytest_runner:main"
 
 [project.optional-dependencies]
 test = [

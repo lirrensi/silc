@@ -41,6 +41,11 @@ import uvicorn
 from silc.api.server import create_app
 from silc.core.session import SilcSession
 from silc.daemon import DAEMON_PORT, is_daemon_running, kill_daemon
+from silc.os_integration import (
+    OsIntegrationError,
+    install_os_integration,
+    uninstall_os_integration,
+)
 from silc.stream.cli_commands import (
     stream_file_append,
     stream_file_render,
@@ -1141,6 +1146,43 @@ def desktop(share: bool) -> None:
             click.echo(f"📱 Scan/share this LAN URL: {share_url}")
     _launch_desktop_webview(manager_url)
     click.echo(f"✨ Opening desktop manager at {manager_url}")
+
+
+@cli.group(name="os-integration")
+def os_integration_group() -> None:
+    """Install or remove OS context-menu integrations."""
+
+
+@os_integration_group.command()
+def install() -> None:
+    """Install Finder/file-manager integrations for SILC."""
+
+    try:
+        created = install_os_integration()
+    except OsIntegrationError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo("✨ Installed OS integration:")
+    for path in created:
+        click.echo(f"  {path}")
+
+
+@os_integration_group.command()
+def uninstall() -> None:
+    """Remove Finder/file-manager integrations for SILC."""
+
+    try:
+        removed = uninstall_os_integration()
+    except OsIntegrationError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not removed:
+        click.echo("No OS integration files found.")
+        return
+
+    click.echo("🧹 Removed OS integration:")
+    for path in removed:
+        click.echo(f"  {path}")
 
 
 @cli.command(name="desktop-window", hidden=True)

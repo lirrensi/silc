@@ -30,6 +30,8 @@ def run_cli(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProce
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         env=env,
     )
@@ -118,6 +120,7 @@ class TestCLIHelp:
         assert "silc <port|name> <command>" in output
         assert "manager" in output
         assert "desktop" in output
+        assert "os-integration" in output
         assert "stream-file-render" in output
 
     def test_resource_help_uses_selector_usage(self):

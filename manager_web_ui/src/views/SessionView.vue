@@ -24,8 +24,6 @@ const route = useRoute()
 const router = useRouter()
 const manager = useTerminalManager()
 const reconnecting = ref(false)
-const showPasteModal = ref(false)
-const pasteText = ref('')
 const activeOperation = ref<{
   label: string
   stage: string
@@ -379,45 +377,14 @@ async function handleSigkill(): Promise<void> {
 }
 
 async function handlePaste(): Promise<void> {
-  const prefersTouchPaste = window.matchMedia('(pointer: coarse)').matches
-  if (prefersTouchPaste) {
-    showPasteModal.value = true
-    return
-  }
-
   try {
-    await runOperation('Paste input', 'neutral', [
-      {
-        stage: 'Reading clipboard',
-        detail: 'The browser is fetching clipboard text for the shell.',
-        run: async () => {
-          const text = await navigator.clipboard.readText()
-          if (!text) {
-            showPasteModal.value = true
-            return
-          }
-          sendViaWs(text)
-        },
-      },
-    ], 160)
-  } catch {
-    showPasteModal.value = true
+    const text = await navigator.clipboard.readText()
+    if (text) {
+      sendViaWs(text)
+    }
+  } catch (err) {
+    console.error('Paste failed:', err)
   }
-}
-
-function closePasteModal(): void {
-  showPasteModal.value = false
-  pasteText.value = ''
-}
-
-function submitPasteText(): void {
-  if (!pasteText.value) {
-    closePasteModal()
-    return
-  }
-
-  sendViaWs(pasteText.value)
-  closePasteModal()
 }
 
 function scrollToBottom(): void {
@@ -427,17 +394,8 @@ function scrollToBottom(): void {
   }
 }
 
-async function handleBottom(): Promise<void> {
-  await runOperation('Jump to bottom', 'info', [
-    {
-      stage: 'Scrolling to the latest output',
-      detail: 'The viewport is moving to the newest line in the scrollback.',
-      run: async () => {
-        scrollToBottom()
-        await nextTick()
-      },
-    },
-  ], 120)
+function handleBottom(): void {
+  scrollToBottom()
 }
 
 async function refitTerminal(): Promise<void> {
@@ -466,17 +424,8 @@ async function redrawTerminal(): Promise<void> {
   ], 180)
 }
 
-async function sendArrowKey(sequence: string, label: string, detail: string): Promise<void> {
-  await runOperation(label, 'neutral', [
-    {
-      stage: 'Sending key sequence',
-      detail,
-      run: async () => {
-        sendViaWs(sequence)
-        await nextTick()
-      },
-    },
-  ], 120)
+function sendArrowKey(sequence: string): void {
+  sendViaWs(sequence)
 }
 </script>
 
@@ -572,43 +521,15 @@ async function sendArrowKey(sequence: string, label: string, detail: string): Pr
         <button @click="handleSigterm" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGTERM', 'Requests a graceful shutdown from the shell process group.')" :disabled="controlsDisabled">SIGTERM</button>
         <button @click="handleSigkill" class="bar-button bar-button-tight bar-button-danger border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGKILL', 'Forcibly terminates the foreground process immediately.')" :disabled="controlsDisabled">SIGKILL</button>
         <button @click="handleRefresh" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Refresh the buffer', 'Reloads the current screen state from the daemon history.')" :disabled="controlsDisabled">Refresh</button>
-        <button @click="handlePaste" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Paste from clipboard', 'Reads clipboard text and sends it to the shell.')" :disabled="controlsDisabled">Paste</button>
+        <button @click="handlePaste" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Paste from clipboard', 'Reads clipboard text and sends it straight to the shell.')" :disabled="controlsDisabled">Paste</button>
         <button @click="refitTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Refit the viewport', 'Recalculates the terminal dimensions after layout changes.')" :disabled="controlsDisabled">Refit</button>
         <button @click="redrawTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Redraw the terminal', 'Forces a repaint without changing the buffer.')" :disabled="controlsDisabled">Redraw</button>
         <button @click="handleBottom" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Jump to the bottom', 'Scrolls the viewport to the newest output line.')" :disabled="controlsDisabled">Bottom</button>
-        <button @click="sendArrowKey('\x1b[A', 'Send Up Arrow', 'Sends the up-arrow escape sequence to the shell.')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Up Arrow', 'Useful for shell history and command-line navigation.')" :disabled="controlsDisabled">↑</button>
-        <button @click="sendArrowKey('\x1b[D', 'Send Left Arrow', 'Sends the left-arrow escape sequence to the shell.')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Left Arrow', 'Moves the cursor one character to the left.')" :disabled="controlsDisabled">←</button>
-        <button @click="sendArrowKey('\x1b[B', 'Send Down Arrow', 'Sends the down-arrow escape sequence to the shell.')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Down Arrow', 'Moves through command history or lists.')" :disabled="controlsDisabled">↓</button>
-        <button @click="sendArrowKey('\x1b[C', 'Send Right Arrow', 'Sends the right-arrow escape sequence to the shell.')" class="bar-button bar-button-tight text-xs" :title="tip('Send Right Arrow', 'Moves the cursor one character to the right.')" :disabled="controlsDisabled">→</button>
+        <button @click="sendArrowKey('\x1b[A')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Up Arrow', 'Useful for shell history and command-line navigation.')" :disabled="controlsDisabled">↑</button>
+        <button @click="sendArrowKey('\x1b[D')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Left Arrow', 'Moves the cursor one character to the left.')" :disabled="controlsDisabled">←</button>
+        <button @click="sendArrowKey('\x1b[B')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Down Arrow', 'Moves through command history or lists.')" :disabled="controlsDisabled">↓</button>
+        <button @click="sendArrowKey('\x1b[C')" class="bar-button bar-button-tight text-xs" :title="tip('Send Right Arrow', 'Moves the cursor one character to the right.')" :disabled="controlsDisabled">→</button>
       </div>
     </div>
-
-    <Teleport to="body">
-      <div
-        v-if="showPasteModal"
-        class="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--color-backdrop)] px-4"
-        @click.self="closePasteModal"
-      >
-        <div class="glass-panel flex w-full max-w-lg flex-col gap-3 p-4">
-          <p class="text-sm font-medium text-[var(--color-text-primary)]">Paste text into shell</p>
-          <textarea
-            v-model="pasteText"
-            class="min-h-32 w-full border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-accent)]"
-            placeholder="Paste command or text here"
-            autocapitalize="off"
-            autocomplete="off"
-            autocorrect="off"
-            spellcheck="false"
-            @keydown.esc="closePasteModal"
-          ></textarea>
-          <div class="flex justify-end">
-            <div class="toolbar-strip">
-              <button @click="closePasteModal" class="bar-button text-sm">Cancel</button>
-              <button @click="submitPasteText" class="bar-button bar-button-accent text-sm">Send</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
