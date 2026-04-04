@@ -44,6 +44,7 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
     manager.setDisconnectReason(port, null)
     manager.setStatus(port, 'active')
     ws.send(JSON.stringify({ event: 'load_history' }))
+    manager.updateSessionTitle(port, session.title || '', session.titleUpdatedAt)
     manager.scheduleFit(port, { immediate: true, reason: 'ws-open' })
   }
 
@@ -58,6 +59,12 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
         await manager.flushWrites(port)
         manager.refreshTerminalSurface(port)
         manager.resolveHistoryRefresh(port)
+      } else if (msg.event === 'title' && typeof msg.title === 'string') {
+        manager.updateSessionTitle(
+          port,
+          msg.title,
+          typeof msg.title_updated_at === 'string' ? msg.title_updated_at : null,
+        )
       } else if (msg.event === 'update' && msg.data) {
         manager.safeWrite(port, msg.data)
       }

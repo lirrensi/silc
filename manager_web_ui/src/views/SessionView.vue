@@ -484,12 +484,13 @@ async function sendArrowKey(sequence: string, label: string, detail: string): Pr
   <div class="session-view h-full flex flex-col">
     <div class="tab-bar flex min-h-[2.4rem] items-stretch justify-between border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
       <div class="min-w-0 flex flex-1 items-center gap-2 overflow-hidden px-3 py-1.5 md:px-4">
-        <span class="truncate text-sm font-medium text-[var(--color-accent)]">{{ session?.title || session?.name || 'unnamed' }}</span>
+        <span class="truncate text-sm font-medium text-[var(--color-accent)]">{{ session?.name || 'unnamed' }}</span>
         <span class="shrink-0 font-mono text-xs text-[var(--color-text-muted)]">:{{ port }}</span>
         <span class="shrink-0 text-xs text-[var(--color-text-muted)]">[{{ session?.shell ?? '' }}]</span>
         <span v-if="session?.cwd" class="truncate text-xs text-[var(--color-text-secondary)]" :title="session.cwd">
           {{ session.cwd }}
         </span>
+        <span class="truncate text-xs text-[var(--color-text-muted)]">{{ session?.title || '—' }}</span>
       </div>
       <div class="bar-actions shrink-0 border-l border-[var(--color-border)]">
         <button

@@ -16,6 +16,8 @@ def test_registry_update_title_updates_persistence_shape() -> None:
     registry = SessionRegistry()
     registry.add(20000, "test-session", "abc12345", "bash")
 
+    assert registry.get(20000).title == ""
+
     entry = registry.update_title(20000, "new terminal title")
 
     assert entry is not None

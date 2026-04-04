@@ -254,6 +254,30 @@ def create_app(session: SilcSession) -> FastAPI:
             async with send_lock:
                 await websocket.send_json(payload)
 
+        def title_listener(updated_session: SilcSession) -> None:
+            if updated_session is not session:
+                return
+
+            async def _send_title() -> None:
+                if active_websocket is not websocket:
+                    return
+                try:
+                    await safe_send(
+                        {
+                            "event": "title",
+                            "title": updated_session.title,
+                            "title_updated_at": (
+                                updated_session.title_updated_at.isoformat() + "Z"
+                            ),
+                        }
+                    )
+                except Exception:
+                    pass
+
+            asyncio.create_task(_send_title())
+
+        session.add_title_listener(title_listener)
+
         async def send_updates() -> None:
             cursor = session.buffer.cursor
             while True:
@@ -294,11 +318,20 @@ def create_app(session: SilcSession) -> FastAPI:
                                 "data": raw_bytes.decode("utf-8", errors="replace"),
                             }
                         )
+                        await safe_send(
+                            {
+                                "event": "title",
+                                "title": session.title,
+                                "title_updated_at": session.title_updated_at.isoformat()
+                                + "Z",
+                            }
+                        )
                 except json.JSONDecodeError:
                     pass
         except WebSocketDisconnect:
             pass
         finally:
+            session.remove_title_listener(title_listener)
             async with active_websocket_lock:
                 if active_websocket is websocket:
                     active_websocket = None

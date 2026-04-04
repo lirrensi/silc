@@ -162,6 +162,14 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     session.titleUpdatedAt = daemonSession.title_updated_at
   }
 
+  function updateSessionTitle(port: number, title: string, titleUpdatedAt: string | null): void {
+    const session = sessions.value.get(port)
+    if (!session) return
+
+    session.title = title
+    session.titleUpdatedAt = titleUpdatedAt
+  }
+
   function clearPendingLayoutWork(session: Session): void {
     if (session.pendingFitTimer !== null) {
       clearTimeout(session.pendingFitTimer)
@@ -741,6 +749,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     setDisconnectReason,
     setWs,
     reconcileSessions,
+    updateSessionTitle,
     safeWrite,
     applyTheme,
   }

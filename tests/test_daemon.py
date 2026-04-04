@@ -127,10 +127,10 @@ def test_registry_add_remove() -> None:
     entry = registry.add(21000, "test-session", "test123", "bash")
     assert entry.port == 21000
     assert entry.name == "test-session"
-    assert entry.title == "test-session"
+    assert entry.title == ""
     assert entry.session_id == "test123"
     assert entry.shell_type == "bash"
-    assert entry.to_json()["title"] == "test-session"
+    assert entry.to_json()["title"] == ""
 
     # Get session by port
     retrieved = registry.get(21000)
@@ -248,14 +248,14 @@ async def test_daemon_creates_session(running_daemon: SilcDaemon) -> None:
     assert "session_id" in session_data
     assert "shell" in session_data
     assert session_data["name"] == "test-create-session"
-    assert session_data["title"] == "test-create-session"
+    assert session_data["title"] == ""
 
     async with httpx.AsyncClient() as client:
         list_resp = await client.get(
             f"http://127.0.0.1:{DAEMON_PORT}/sessions", timeout=5.0
         )
     assert list_resp.status_code == 200
-    assert any(item["title"] == "test-create-session" for item in list_resp.json())
+    assert any(item["title"] == "" for item in list_resp.json())
 
     # Check session is in registry
     port = session_data["port"]

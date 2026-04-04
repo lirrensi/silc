@@ -78,9 +78,11 @@ class SilcSession:
         self.session_id = str(uuid.uuid4())[:8]
         self.api_token = api_token
         self.cwd = cwd
-        self.title = name if title is None else title
+        self.title = "" if title is None else title
         self.title_updated_at = datetime.utcnow()
-        self._on_title_change = on_title_change
+        self._title_listeners: list[Callable[["SilcSession"], None]] = []
+        if on_title_change:
+            self._title_listeners.append(on_title_change)
         self.pty: PTYBase = create_pty(shell_info.path, os.environ.copy(), cwd=cwd)
 
         self.buffer = RawByteBuffer(maxlen=DEFAULT_BUFFER_SIZE)
@@ -286,11 +288,22 @@ class SilcSession:
         self.title = title
         self.title_updated_at = datetime.utcnow()
 
-        if self._on_title_change:
+        for listener in list(self._title_listeners):
             try:
-                self._on_title_change(self)
+                listener(self)
             except Exception as exc:
                 write_session_log(self.port, f"Title update callback error: {exc}")
+
+    def add_title_listener(self, listener: Callable[["SilcSession"], None]) -> None:
+        """Register a callback for live title updates."""
+        self._title_listeners.append(listener)
+
+    def remove_title_listener(self, listener: Callable[["SilcSession"], None]) -> None:
+        """Unregister a live title update callback."""
+        try:
+            self._title_listeners.remove(listener)
+        except ValueError:
+            pass
 
     def rotate_logs(self) -> None:
         """Rotate session logs to keep size manageable."""

@@ -77,7 +77,7 @@ class SessionRegistry:
             session_id=session_id,
             shell_type=shell_type,
             cwd=cwd,
-            title=name if title is None else title,
+            title="" if title is None else title,
             created_at=datetime.utcnow(),
             is_global=is_global,
         )

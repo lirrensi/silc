@@ -211,7 +211,10 @@ function sessionBadgeLabel(session: Session): string {
 }
 
 function sessionTitle(session: Session): string {
-  return `${session.title || session.name || 'unnamed'} :${session.port} · ${session.shell || 'shell'}`
+  const name = session.name || 'unnamed'
+  const title = session.title || '—'
+  const cwd = session.cwd || 'Home directory'
+  return [name, `:${session.port}`, session.shell || 'shell', cwd, title].filter(Boolean).join(' · ')
 }
 
 onMounted(() => {
@@ -247,9 +250,6 @@ watch(
             <span class="ml-2 normal-case tracking-normal text-[var(--color-text-secondary)]">{{ sessions.length }}</span>
           </p>
         </div>
-        <span class="shrink-0 border border-[var(--color-border)] px-2 py-0.5 text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
-          web version
-        </span>
       </div>
 
       <div :class="ui.isSidebarCollapsed ? 'flex flex-col' : 'grid min-h-[2.4rem] grid-cols-5 border-t border-[var(--color-border)]'">
@@ -349,14 +349,15 @@ watch(
           >
             <div class="mt-1 h-2.5 w-2.5" :class="statusColor(session.status)"></div>
             <div class="min-w-0">
-              <div class="flex items-baseline justify-between gap-2">
-                <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text-primary)]">{{ session.title || session.name || 'unnamed' }}</span>
-                <span class="shrink-0 text-[11px] font-mono text-[var(--color-text-muted)]">:{{ session.port }}</span>
+              <div class="flex items-baseline justify-between gap-2 text-sm font-medium text-[var(--color-text-primary)]">
+                <span class="min-w-0 truncate">{{ session.name || 'unnamed' }}</span>
+                <span class="shrink-0 font-mono text-[11px] font-normal text-[var(--color-text-muted)]">:{{ session.port }}</span>
               </div>
-              <div class="flex items-baseline justify-between gap-2 text-[11px] text-[var(--color-text-secondary)]">
-            <span class="min-w-0 flex-1 truncate">{{ session.cwd || 'Home directory' }}</span>
+              <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-[var(--color-text-secondary)]">
+                <span class="min-w-0 truncate">{{ session.cwd || 'Home directory' }}</span>
                 <span class="shrink-0 uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{{ session.shell || 'shell' }}</span>
               </div>
+              <div class="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">{{ session.title || '—' }}</div>
             </div>
           </button>
         </div>

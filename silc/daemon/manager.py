@@ -110,14 +110,14 @@ class SilcDaemon:
         async def startup_event():
             write_daemon_log("Daemon API is ready to accept requests")
 
-        # Mount static files for manager UI assets under /ui/assets
+        # Mount static files for manager UI assets under /ui/assets.
+        # check_dir=False lets the daemon keep serving once a later build creates the files.
         manager_static_dir = Path(__file__).parent.parent.parent / "static" / "manager"
-        if manager_static_dir.exists():
-            app.mount(
-                "/ui/assets",
-                StaticFiles(directory=str(manager_static_dir / "assets")),
-                name="ui-assets",
-            )
+        app.mount(
+            "/ui/assets",
+            StaticFiles(directory=str(manager_static_dir / "assets"), check_dir=False),
+            name="ui-assets",
+        )
 
         @app.get("/", response_class=HTMLResponse)
         async def root_redirect() -> HTMLResponse:
@@ -217,7 +217,6 @@ class SilcDaemon:
                         shell_info,
                         api_token=token,
                         cwd=cwd,
-                        title=session_name,
                         on_title_change=self._handle_session_title_change,
                     )
                     await session.start()
@@ -229,7 +228,6 @@ class SilcDaemon:
                         session.session_id,
                         shell_info.type,
                         cwd=cwd,
-                        title=session.title,
                         is_global=is_global,
                     )
                     # Persist to sessions.json
@@ -438,7 +436,6 @@ class SilcDaemon:
                     shell_info,
                     api_token=api_token,
                     cwd=cwd,
-                    title=session.title,
                     on_title_change=self._handle_session_title_change,
                 )
                 await new_session.start()
@@ -453,7 +450,6 @@ class SilcDaemon:
                     new_session.session_id,
                     shell_info.type,
                     cwd=cwd,
-                    title=new_session.title,
                     is_global=is_global,
                 )
 
@@ -926,7 +922,7 @@ class SilcDaemon:
                     name,
                     shell_info,
                     cwd=cwd,
-                    title=entry.get("title", name),
+                    title=entry.get("title", ""),
                     on_title_change=self._handle_session_title_change,
                 )
                 await session.start()
@@ -938,7 +934,6 @@ class SilcDaemon:
                     session.session_id,
                     shell_info.type,
                     cwd=cwd,
-                    title=session.title,
                     is_global=is_global,
                 )
 

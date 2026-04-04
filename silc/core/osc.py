@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 OSC_ESCAPE = 0x1B
 OSC_BELL = 0x07
 OSC_ST = ord("\\")
