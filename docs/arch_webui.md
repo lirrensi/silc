@@ -403,7 +403,7 @@ Session list navigation.
 
 **Features:**
 - **Resizable width** — Drag the right edge to resize when expanded (180px–400px)
-- **Create new session** — Modal dialog with optional working directory input
+- **Create new session** — Modal dialog with installed shell picker and optional working directory input
 - **Header action strip** — Equal-width icon buttons for session creation, home, theme, refresh, and collapse
 - **Collapsed rail** — Desktop sidebar collapses to a thin visible icon rail instead of disappearing
 - **Micro sessions** — Collapsed session list becomes compact icon buttons with status indicators
@@ -412,6 +412,7 @@ Session list navigation.
 - **Active session highlighting** — Current session highlighted
 
 **New Session Modal:**
+- Lists installed shell choices in preference order, with the default shell preselected
 - Optional working directory path input
 - Cross-platform path normalization (Windows backslash, Unix forward slash)
 - Handles mixed separators automatically

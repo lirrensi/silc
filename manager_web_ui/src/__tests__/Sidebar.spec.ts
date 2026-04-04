@@ -1,7 +1,7 @@
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import Sidebar from '../components/Sidebar.vue'
 
 vi.mock('@/lib/daemonApi', () => ({
@@ -12,6 +12,10 @@ vi.mock('@/lib/daemonApi', () => ({
     shell: 'bash',
     share_mode: false,
     manager_url: '',
+    shell_options: [
+      { type: 'pwsh', label: 'PowerShell', path: 'C:/Program Files/PowerShell/7/pwsh.exe' },
+      { type: 'bash', label: 'Bash', path: '/usr/bin/bash' },
+    ],
   }),
 }))
 
@@ -58,5 +62,50 @@ describe('Sidebar', () => {
 
     expect(wrapper.find('[title="Expand sidebar"]').exists()).toBe(true)
     expect(wrapper.find('[title="Create new session"]').exists()).toBe(true)
+  })
+
+  it('shows a local mode hint when sharing is off', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(Sidebar, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Local mode')
+    expect(wrapper.text()).toContain('Restart the daemon in shared mode')
+  })
+
+  it('lists shell choices in the new session modal', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(Sidebar, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    await flushPromises()
+    await wrapper.find('[title="Create new session"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('PowerShell')
+    expect(document.body.textContent).toContain('Bash')
+    expect(document.body.textContent).toContain('Default')
   })
 })

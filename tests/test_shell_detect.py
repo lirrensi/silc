@@ -31,6 +31,14 @@ from silc.utils.shell_detect import ShellInfo
             ],
         ),
         (
+            "powershell",
+            [
+                "function __silc_exec($cmd, $token) {",
+                "__SILC_BEGIN_${token}__",
+                "__SILC_END_${token}__",
+            ],
+        ),
+        (
             "cmd",
             ["doskey __silc_exec", "__silc_exec.bat"],
         ),
@@ -70,6 +78,12 @@ def test_get_helper_function_contains_markers(
         ("bash", "whoami", "abcd", "__silc_exec whoami abcd"),
         ("zsh", "ls -l", "1234", "__silc_exec 'ls -l' 1234"),
         ("pwsh", "dir", "deadbeef", "__silc_exec 'dir' 'deadbeef'"),
+        (
+            "powershell",
+            "dir",
+            "deadbeef",
+            "__silc_exec 'dir' 'deadbeef'",
+        ),
         ("cmd", "whoami", "token", '__silc_exec "whoami" token'),
     ],
 )

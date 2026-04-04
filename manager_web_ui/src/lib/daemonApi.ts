@@ -39,6 +39,13 @@ export interface DaemonDefaults {
   share_mode: boolean
   manager_url: string
   shell: string
+  shell_options: DaemonShellOption[]
+}
+
+export interface DaemonShellOption {
+  type: string
+  label: string
+  path: string
 }
 
 export interface RestartSessionResponse {

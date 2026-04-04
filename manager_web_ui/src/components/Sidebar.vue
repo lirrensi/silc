@@ -1,10 +1,13 @@
 <script setup lang="ts">
+defineOptions({ name: 'SidebarPanel' })
+
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import QRCode from 'qrcode'
 import { useRoute, useRouter } from 'vue-router'
+import { listSessions, createSession, getDefaults } from '@/lib/daemonApi'
 import { useTerminalManager } from '@/stores/terminalManager'
 import { useUiStore } from '@/stores/ui'
-import { listSessions, createSession, getDefaults } from '@/lib/daemonApi'
+import type { DaemonShellOption } from '@/lib/daemonApi'
 import type { Session } from '@/types/session'
 
 const router = useRouter()
@@ -34,6 +37,11 @@ const showNewSessionModal = ref(false)
 const newSessionPath = ref('')
 const defaultSessionPath = ref('')
 const defaultShell = ref('shell')
+const shellOptions = ref<DaemonShellOption[]>([])
+const selectedShell = ref('')
+const selectedShellLabel = computed(() => {
+  return shellOptions.value.find(option => option.type === selectedShell.value)?.label ?? defaultShell.value
+})
 const shareMode = ref(false)
 const shareUrl = ref('')
 const shareQrCode = ref('')
@@ -59,6 +67,9 @@ function selectSession(port: number): void {
 
 function openNewSessionModal(): void {
   newSessionPath.value = defaultSessionPath.value
+  selectedShell.value = shellOptions.value.some(option => option.type === defaultShell.value)
+    ? defaultShell.value
+    : shellOptions.value[0]?.type ?? ''
   createError.value = ''
   showNewSessionModal.value = true
   ui.closeMobileNav()
@@ -107,7 +118,13 @@ async function handleCreateNewSession(): Promise<void> {
     isCreatingSession.value = true
     createError.value = ''
     const cwd = normalizePath(newSessionPath.value)
-    const data = await createSession(cwd ? { cwd } : undefined)
+    const shell = shellOptions.value.some(option => option.type === selectedShell.value)
+      ? selectedShell.value
+      : ''
+    const data = await createSession({
+      ...(cwd ? { cwd } : {}),
+      ...(shell ? { shell } : {}),
+    })
     await fetchSessions()
     isCreatingSession.value = false
     closeNewSessionModal()
@@ -163,6 +180,10 @@ async function fetchDefaults(): Promise<void> {
     const defaults = await getDefaults()
     defaultSessionPath.value = normalizePath(defaults.cwd)
     defaultShell.value = defaults.shell
+    shellOptions.value = defaults.shell_options
+    selectedShell.value = defaults.shell_options.some(option => option.type === defaults.shell)
+      ? defaults.shell
+      : defaults.shell_options[0]?.type ?? defaults.shell
     shareMode.value = defaults.share_mode
     shareUrl.value = defaults.manager_url
 
@@ -382,31 +403,42 @@ watch(
         </div>
       </div>
 
-      <div v-if="shareMode && shareUrl && !ui.isSidebarCollapsed" class="border-t border-[var(--color-border)] p-2.5">
-        <button
-          class="flex w-full items-center justify-between border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
-          @click="toggleShareDetails"
-        >
-          <span class="text-[11px] font-bold uppercase tracking-[0.24em] text-[var(--color-accent)]">LAN Share</span>
-          <span class="text-xs text-[var(--color-text-secondary)]">{{ showShareDetails ? 'Hide' : 'Show' }}</span>
-        </button>
-        <div v-if="showShareDetails" class="pt-2">
-          <p class="text-xs leading-5 text-[var(--color-text-secondary)]">
-            Anybody on your network can open this manager and poke your shells.
-          </p>
-          <img
-            v-if="shareQrCode"
-            :src="shareQrCode"
-            alt="QR code for manager LAN URL"
-            class="mx-auto mt-2 h-32 w-32 border border-[var(--color-border)] bg-white p-2"
-          />
+      <div v-if="!ui.isSidebarCollapsed" class="border-t border-[var(--color-border)] p-2.5">
+        <template v-if="shareMode && shareUrl">
           <button
-            @click="copyShareUrl"
-            class="mt-2 w-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2.5 py-2 text-left text-xs text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-            :title="shareUrl"
+            class="flex w-full items-center justify-between border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
+            @click="toggleShareDetails"
           >
-            {{ shareUrl }}
+            <span class="text-[11px] font-bold uppercase tracking-[0.24em] text-[var(--color-accent)]">LAN Share</span>
+            <span class="text-xs text-[var(--color-text-secondary)]">{{ showShareDetails ? 'Hide' : 'Show' }}</span>
           </button>
+          <div v-if="showShareDetails" class="pt-2">
+            <p class="text-xs leading-5 text-[var(--color-text-secondary)]">
+              Anybody on your network can open this manager and poke your shells.
+            </p>
+            <img
+              v-if="shareQrCode"
+              :src="shareQrCode"
+              alt="QR code for manager LAN URL"
+              class="mx-auto mt-2 h-32 w-32 border border-[var(--color-border)] bg-white p-2"
+            />
+            <button
+              @click="copyShareUrl"
+              class="mt-2 w-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2.5 py-2 text-left text-xs text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+              :title="shareUrl"
+            >
+              {{ shareUrl }}
+            </button>
+          </div>
+        </template>
+
+        <div v-else class="space-y-1">
+          <p class="text-[10px] font-semibold uppercase tracking-[0.24em] text-[var(--color-text-muted)]">
+            Local mode
+          </p>
+          <p class="text-[10px] leading-4 text-[var(--color-text-secondary)]">
+            QR sharing is off. Restart the daemon in shared mode to show the QR and allow LAN access.
+          </p>
         </div>
       </div>
 
@@ -425,8 +457,34 @@ watch(
         class="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--color-backdrop)] px-4"
         @click.self="closeNewSessionModal"
       >
-        <div class="glass-panel w-full max-w-md p-4">
+      <div class="glass-panel w-full max-w-md p-4">
           <h3 class="mb-4 font-[var(--font-display)] text-2xl text-[var(--color-accent)]">New Session</h3>
+          <div class="mb-4">
+            <label class="mb-2 block text-sm text-[var(--color-text-secondary)]">Shell</label>
+            <div class="grid gap-2">
+              <button
+                v-for="shell in shellOptions"
+                :key="shell.type"
+                type="button"
+                class="flex items-center justify-between border px-3 py-2 text-left transition-colors"
+                :class="selectedShell === shell.type
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent-muted)]'
+                  : 'border-[var(--color-border)] bg-[var(--color-bg-primary)] hover:bg-[var(--color-bg-hover)]'"
+                @click="selectedShell = shell.type"
+              >
+                <div class="min-w-0">
+                  <div class="text-sm font-medium text-[var(--color-text-primary)]">{{ shell.label }}</div>
+                  <div class="truncate text-[10px] text-[var(--color-text-muted)]">{{ shell.path }}</div>
+                </div>
+                <span v-if="shell.type === defaultShell" class="ml-3 shrink-0 text-[10px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
+                  Default
+                </span>
+              </button>
+            </div>
+            <p v-if="shellOptions.length === 0" class="mt-2 text-xs text-[var(--color-text-muted)]">
+              No shell choices detected.
+            </p>
+          </div>
           <div class="mb-4">
             <label class="mb-2 block text-sm text-[var(--color-text-secondary)]">Working Directory (optional)</label>
             <input
@@ -443,10 +501,10 @@ watch(
               Defaults to your home directory on the daemon machine.
             </p>
             <p v-if="isCreatingSession" class="mt-2 text-xs text-[var(--color-accent)]">
-              Creating `{{ defaultShell }}`{{ newSessionPath.trim() ? ` in ${newSessionPath.trim()}` : '' }}...
+              Creating `{{ selectedShellLabel }}`{{ newSessionPath.trim() ? ` in ${newSessionPath.trim()}` : '' }}...
             </p>
             <p v-else class="mt-2 text-xs text-[var(--color-text-muted)]">
-              Shell: `{{ defaultShell }}`
+              Shell: `{{ selectedShellLabel }}`
             </p>
             <p v-if="createError" class="mt-2 text-xs text-[var(--color-error)]">{{ createError }}</p>
           </div>

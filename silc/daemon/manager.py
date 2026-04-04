@@ -8,6 +8,7 @@ import os
 import signal
 import socket
 import sys
+from dataclasses import asdict
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -35,7 +36,7 @@ from silc.utils.persistence import (
     write_daemon_log,
 )
 from silc.utils.ports import bind_port, find_available_port
-from silc.utils.shell_detect import detect_shell
+from silc.utils.shell_detect import detect_shell, get_available_shell_choices
 
 
 def setup_uvicorn_logging():
@@ -207,7 +208,7 @@ class SilcDaemon:
                         if shell_info is None:
                             raise HTTPException(
                                 status_code=400,
-                                detail=f"Unknown shell type: {shell}. Supported: bash, zsh, sh, pwsh, cmd",
+                                detail=f"Unknown shell type: {shell}. Supported: bash, zsh, sh, pwsh, powershell, cmd",
                             )
                     else:
                         shell_info = detect_shell()
@@ -319,11 +320,15 @@ class SilcDaemon:
         @app.get("/defaults")
         async def get_defaults():
             """Expose daemon-side defaults for manager UI helpers."""
+            shell_choices = get_available_shell_choices()
             return {
                 "cwd": str(Path.home()),
                 "share_mode": self._share_mode,
                 "manager_url": self._get_manager_url(),
-                "shell": detect_shell().type,
+                "shell": (
+                    shell_choices[0].type if shell_choices else detect_shell().type
+                ),
+                "shell_options": [asdict(choice) for choice in shell_choices],
             }
 
         @app.get("/resolve/{name}")

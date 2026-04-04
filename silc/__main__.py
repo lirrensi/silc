@@ -360,7 +360,7 @@ def cli(ctx: click.Context) -> None:
     "--shell",
     type=str,
     default=None,
-    help="Shell to use (bash, zsh, pwsh, cmd).",
+    help="Shell to use (bash, zsh, sh, pwsh, powershell, cmd).",
 )
 @click.option(
     "--cwd",

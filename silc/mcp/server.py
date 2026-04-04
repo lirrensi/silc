@@ -84,7 +84,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "shell": {
                         "type": "string",
-                        "description": "Shell type (bash, zsh, pwsh, cmd)",
+                        "description": "Shell type (bash, zsh, sh, pwsh, powershell, cmd)",
                     },
                     "cwd": {"type": "string", "description": "Working directory"},
                 },

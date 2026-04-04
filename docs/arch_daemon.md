@@ -70,7 +70,7 @@ class SessionCreateRequest(BaseModel):
     name: str | None = None      # Session name (optional, auto-generated if null)
     is_global: bool = False      # Bind to 0.0.0.0
     token: str | None = None     # Custom API token
-    shell: str | None = None     # Shell type (bash, zsh, pwsh, cmd, sh)
+    shell: str | None = None     # Shell type (bash, zsh, sh, pwsh, powershell, cmd)
     cwd: str | None = None       # Working directory for session
 ```
 
@@ -176,6 +176,7 @@ The daemon exposes a management API on port 19999.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/` | Serve session manager web UI |
+| `GET` | `/defaults` | Return UI defaults and installed shell choices |
 | `POST` | `/sessions` | Create a new session |
 | `GET` | `/sessions` | List all active sessions |
 | `GET` | `/resolve/{name}` | Resolve session name to session info |
@@ -192,6 +193,23 @@ The daemon exposes a management API on port 19999.
 **Response:** HTML content from `static/manager/index.html`.
 
 Serves the session manager SPA that allows users to view, create, and manage sessions from a browser.
+
+### `GET /defaults`
+
+**Response:**
+```json
+{
+  "cwd": "/home/user",
+  "share_mode": false,
+  "manager_url": "http://127.0.0.1:19999/",
+  "shell": "pwsh",
+  "shell_options": [
+    { "type": "pwsh", "label": "PowerShell", "path": "pwsh.exe" }
+  ]
+}
+```
+
+`shell` is the preselected default. `shell_options` is ordered by preference and only includes installed, supported shells.
 
 ### `POST /sessions`
 

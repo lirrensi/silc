@@ -228,6 +228,15 @@ async def test_daemon_starts_and_responds(running_daemon: SilcDaemon) -> None:
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
+    async with httpx.AsyncClient() as client:
+        defaults_resp = await client.get(
+            f"http://127.0.0.1:{DAEMON_PORT}/defaults", timeout=5.0
+        )
+    assert defaults_resp.status_code == 200
+    defaults = defaults_resp.json()
+    assert defaults["shell_options"]
+    assert defaults["shell"] in {option["type"] for option in defaults["shell_options"]}
+
 
 @pytest.mark.asyncio
 async def test_daemon_creates_session(running_daemon: SilcDaemon) -> None:
