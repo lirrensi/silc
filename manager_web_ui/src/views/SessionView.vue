@@ -378,10 +378,7 @@ async function handleSigkill(): Promise<void> {
 
 async function handlePaste(): Promise<void> {
   try {
-    const text = await navigator.clipboard.readText()
-    if (text) {
-      sendViaWs(text)
-    }
+    await manager.pasteClipboardText(port.value)
   } catch (err) {
     console.error('Paste failed:', err)
   }

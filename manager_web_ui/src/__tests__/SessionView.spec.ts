@@ -11,6 +11,7 @@ import type { SessionStatus } from '@/types/session'
 import SessionView from '../views/SessionView.vue'
 
 const mockSendInputFrame = vi.hoisted(() => vi.fn())
+const mockPasteClipboardText = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 
 const session = {
   status: 'idle' as SessionStatus,
@@ -43,6 +44,7 @@ vi.mock('@/stores/terminalManager', () => ({
   useTerminalManager: () => ({
     setFocused: vi.fn(),
     getSession: () => session,
+    pasteClipboardText: mockPasteClipboardText,
     flushWrites: vi.fn().mockResolvedValue(undefined),
     waitForHistoryRefresh: vi.fn().mockResolvedValue(undefined),
     resolveHistoryRefresh: vi.fn(),
@@ -57,8 +59,10 @@ vi.mock('@/stores/terminalManager', () => ({
 describe('SessionView', () => {
   beforeEach(() => {
     localStorage.clear()
+    session.status = 'idle'
     session.ws = null
     mockSendInputFrame.mockClear()
+    mockPasteClipboardText.mockClear()
     session.terminal.reset.mockClear()
     session.terminal.scrollToBottom.mockClear()
     Object.defineProperty(window, 'matchMedia', {
@@ -73,12 +77,6 @@ describe('SessionView', () => {
         removeListener: vi.fn(),
         dispatchEvent: vi.fn(),
       })),
-    })
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: {
-        readText: vi.fn(),
-      },
     })
   })
 
@@ -118,6 +116,7 @@ describe('SessionView', () => {
     await router.push('/1234')
     await router.isReady()
 
+    session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
 
     const wrapper = mount(SessionView, {
@@ -145,11 +144,6 @@ describe('SessionView', () => {
   })
 
   it('pastes clipboard text directly without a modal', async () => {
-    const readText = vi.fn().mockResolvedValue('echo hello')
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { readText },
-    })
     session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
     const router = createRouter({
@@ -173,8 +167,7 @@ describe('SessionView', () => {
     const pasteButton = wrapper.findAll('button').find((button) => button.text() === 'Paste')
     await pasteButton?.trigger('click')
 
-    expect(readText).toHaveBeenCalled()
-    expect(mockSendInputFrame).toHaveBeenCalledWith(expect.anything(), 'echo hello')
+    expect(mockPasteClipboardText).toHaveBeenCalledWith(1234)
     expect(wrapper.text()).not.toContain('Paste text into shell')
     expect(wrapper.text()).not.toContain('Processing')
   })
