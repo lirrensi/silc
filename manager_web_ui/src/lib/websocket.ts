@@ -57,6 +57,7 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
         manager.safeWrite(port, msg.data)
         await manager.flushWrites(port)
         manager.refreshTerminalSurface(port)
+        manager.resolveHistoryRefresh(port)
       } else if (msg.event === 'update' && msg.data) {
         manager.safeWrite(port, msg.data)
       }

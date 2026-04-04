@@ -131,7 +131,7 @@ function attachAndConnect(): void {
 .terminal-shell--interactive {
   display: flex;
   flex-direction: column;
-  padding: 2px 3px 0;
+  padding: 2px 4px 8px;
 }
 
 .terminal-shell--preview {

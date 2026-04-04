@@ -2,9 +2,26 @@ import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import App from '../App.vue'
+import Sidebar from '../components/Sidebar.vue'
 
-describe('App', () => {
+vi.mock('@/lib/daemonApi', () => ({
+  listSessions: vi.fn().mockResolvedValue([]),
+  createSession: vi.fn(),
+  getDefaults: vi.fn().mockResolvedValue({
+    cwd: '',
+    shell: 'bash',
+    share_mode: false,
+    manager_url: '',
+  }),
+}))
+
+vi.mock('qrcode', () => ({
+  default: {
+    toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,stub'),
+  },
+}))
+
+describe('Sidebar', () => {
   beforeEach(() => {
     localStorage.clear()
     Object.defineProperty(window, 'matchMedia', {
@@ -22,7 +39,9 @@ describe('App', () => {
     })
   })
 
-  it('mounts with the shell layout', async () => {
+  it('renders a collapsed icon rail', async () => {
+    localStorage.setItem('silc.sidebarCollapsed', 'true')
+
     const router = createRouter({
       history: createWebHashHistory(),
       routes: [{ path: '/', component: { template: '<div />' } }],
@@ -31,15 +50,13 @@ describe('App', () => {
     await router.push('/')
     await router.isReady()
 
-    const wrapper = mount(App, {
+    const wrapper = mount(Sidebar, {
       global: {
         plugins: [createPinia(), router],
-        stubs: {
-          Sidebar: true,
-        },
       },
     })
 
-    expect(wrapper.exists()).toBe(true)
+    expect(wrapper.find('[title="Expand sidebar"]').exists()).toBe(true)
+    expect(wrapper.find('[title="Create new session"]').exists()).toBe(true)
   })
 })

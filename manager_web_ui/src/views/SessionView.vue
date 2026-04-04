@@ -5,12 +5,11 @@
 // EXPORTS: SessionView - routed interactive session page.
 // DOCS: agent_chat/plan_web_terminal_fidelity_2026-04-04.md
 
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TerminalViewport from '@/components/TerminalViewport.vue'
 import {
   closeSession,
-  getSessionHttpUrl,
   killSession,
   listSessions,
   restartSession,
@@ -27,14 +26,88 @@ const manager = useTerminalManager()
 const reconnecting = ref(false)
 const showPasteModal = ref(false)
 const pasteText = ref('')
+const activeOperation = ref<{
+  label: string
+  stage: string
+  detail: string
+  tone: 'info' | 'danger' | 'neutral'
+} | null>(null)
 
 const port = computed(() => parseInt(route.params.port as string, 10))
 const session = computed(() => manager.getSession(port.value))
 const isActive = computed(() => session.value?.status === 'active' && session.value?.ws?.readyState === WebSocket.OPEN)
 const isRestarting = computed(() => session.value?.status === 'restarting')
 const hasConnectionProblem = computed(() => !isActive.value)
-const controlsDisabled = computed(() => !isActive.value)
+const controlsDisabled = computed(() => !isActive.value || activeOperation.value !== null)
 const disconnectReason = computed(() => session.value?.disconnectReason ?? '')
+
+function tip(primary: string, secondary: string): string {
+  return `${primary}\n${secondary}`
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function runOperation(
+  label: string,
+  tone: 'info' | 'danger' | 'neutral',
+  steps: Array<{ stage: string; detail: string; run?: () => Promise<void> | void }>,
+  minVisibleMs: number = 240,
+): Promise<void> {
+  const startedAt = performance.now()
+  activeOperation.value = {
+    label,
+    stage: steps[0]?.stage ?? 'Working',
+    detail: steps[0]?.detail ?? '',
+    tone,
+  }
+
+  await nextTick()
+
+  try {
+    for (const step of steps) {
+      activeOperation.value = {
+        label,
+        stage: step.stage,
+        detail: step.detail,
+        tone,
+      }
+      await nextTick()
+
+      if (step.run) {
+        await step.run()
+      }
+    }
+
+    activeOperation.value = {
+      label,
+      stage: 'Complete',
+      detail: 'The daemon and terminal have finished the requested work.',
+      tone,
+    }
+    await nextTick()
+
+    const elapsed = performance.now() - startedAt
+    if (elapsed < minVisibleMs) {
+      await sleep(minVisibleMs - elapsed)
+    }
+  } catch (err) {
+    activeOperation.value = {
+      label,
+      stage: 'Failed',
+      detail: err instanceof Error ? err.message : String(err),
+      tone: 'danger',
+    }
+    await nextTick()
+    await sleep(1200)
+    throw err
+  } finally {
+    if (activeOperation.value?.label === label) {
+      activeOperation.value = null
+    }
+  }
+}
 const connectionLabel = computed(() => {
   if (disconnectReason.value === 'Session claimed by another client') {
     return 'This shell is now controlled from another client.'
@@ -73,37 +146,116 @@ async function refreshTerminal(): Promise<void> {
   if (s?.ws && s.ws.readyState === WebSocket.OPEN) {
     await manager.flushWrites(port.value)
     s.terminal.reset()
+    const historyLoaded = manager.waitForHistoryRefresh(port.value)
     s.ws.send(JSON.stringify({ event: 'load_history' }))
-    manager.refreshTerminalSurface(port.value)
+    await new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        manager.resolveHistoryRefresh(port.value)
+        reject(new Error('Timed out waiting for refreshed terminal history'))
+      }, 5000)
+
+      historyLoaded.then(
+        () => {
+          window.clearTimeout(timeout)
+          resolve()
+        },
+        (err) => {
+          window.clearTimeout(timeout)
+          reject(err)
+        },
+      )
+    })
   }
 }
 
-async function handleClear(): Promise<void> {
+async function handleRefresh(): Promise<void> {
   try {
-    await fetch(`${getSessionHttpUrl(port.value)}/clear`, { method: 'POST' })
-    await refreshTerminal()
+    await runOperation('Refresh', 'info', [
+      {
+        stage: 'Requesting backend history',
+        detail: 'The daemon buffer is being asked for the current screen state.',
+        run: async () => {
+          await refreshTerminal()
+        },
+      },
+      {
+        stage: 'History restored',
+        detail: 'The browser terminal now matches the daemon buffer again.',
+        run: async () => {
+          await nextTick()
+        },
+      },
+    ])
   } catch (err) {
-    console.error('Clear failed:', err)
+    console.error('Refresh failed:', err)
   }
 }
 
 async function handleClose(): Promise<void> {
+  const currentPort = port.value
+  const currentSessionId = session.value?.sessionId ?? ''
+
   try {
-    await closeSession(port.value)
-    manager.removeSession(port.value)
+    activeOperation.value = {
+      label: 'Close session',
+      stage: 'Removing session locally',
+      detail: 'The sidebar will update immediately and the browser will return home.',
+      tone: 'neutral',
+    }
+    await nextTick()
+
+    manager.suppressSession(currentPort, currentSessionId)
+    manager.removeSession(currentPort)
     router.push('/')
+
+    void closeSession(currentPort).catch(async (err) => {
+      manager.clearSuppressedSession(currentPort)
+      try {
+        const daemonSessions = await listSessions()
+        manager.reconcileSessions(daemonSessions)
+      } catch {
+        // ignore follow-up sync errors
+      }
+      console.error('Failed to close session:', err)
+    })
   } catch (err) {
     console.error('Failed to close session:', err)
+  } finally {
+    activeOperation.value = null
   }
 }
 
 async function handleKill(): Promise<void> {
+  const currentPort = port.value
+  const currentSessionId = session.value?.sessionId ?? ''
+
   try {
-    await killSession(port.value)
-    manager.removeSession(port.value)
+    activeOperation.value = {
+      label: 'Kill session',
+      stage: 'Removing dead session locally',
+      detail: 'The sidebar will update immediately and the browser will return home.',
+      tone: 'danger',
+    }
+    await nextTick()
+
+    manager.suppressSession(currentPort, currentSessionId)
+    manager.removeSession(currentPort)
     router.push('/')
+
+    void killSession(currentPort).catch(async (err) => {
+      manager.clearSuppressedSession(currentPort)
+      try {
+        const daemonSessions = await listSessions()
+        manager.reconcileSessions(daemonSessions)
+      } catch {
+        // ignore follow-up sync errors
+      }
+      console.error('Failed to kill session:', err)
+    })
   } catch (err) {
     console.error('Failed to kill session:', err)
+  } finally {
+    activeOperation.value = null
   }
 }
 
@@ -113,13 +265,28 @@ async function handleRestart(): Promise<void> {
   }
 
   try {
-    manager.setStatus(port.value, 'restarting')
-    const result = await restartSession(port.value)
-    await reconnectSession(result.port, true)
+    await runOperation('Restart session', 'info', [
+      {
+        stage: 'Stopping the current shell',
+        detail: 'The current PTY is being replaced with a fresh shell instance.',
+        run: async () => {
+          manager.setStatus(port.value, 'restarting')
+          const result = await restartSession(port.value)
+          await reconnectSession(result.port, true)
 
-    if (result.port !== port.value) {
-      router.push(`/${result.port}`)
-    }
+          if (result.port !== port.value) {
+            router.push(`/${result.port}`)
+          }
+        },
+      },
+      {
+        stage: 'Reconnecting to the fresh session',
+        detail: 'The browser terminal is waiting for the new websocket to come back.',
+        run: async () => {
+          await nextTick()
+        },
+      },
+    ], 420)
   } catch (err) {
     manager.setStatus(port.value, 'dead')
     console.error('Failed to restart session:', err)
@@ -192,15 +359,39 @@ async function handleReconnect(): Promise<void> {
 }
 
 async function handleInterrupt(): Promise<void> {
-  await sendInterrupt(port.value)
+  await runOperation('Send SIGINT', 'info', [
+    {
+      stage: 'Sending interrupt',
+      detail: 'The foreground process group is being asked to stop cleanly.',
+      run: async () => {
+        await sendInterrupt(port.value)
+      },
+    },
+  ], 160)
 }
 
 async function handleSigterm(): Promise<void> {
-  await sendSigterm(port.value)
+  await runOperation('Send SIGTERM', 'info', [
+    {
+      stage: 'Sending graceful termination',
+      detail: 'The foreground process group is being asked to exit politely.',
+      run: async () => {
+        await sendSigterm(port.value)
+      },
+    },
+  ])
 }
 
 async function handleSigkill(): Promise<void> {
-  await sendSigkill(port.value)
+  await runOperation('Send SIGKILL', 'danger', [
+    {
+      stage: 'Sending force kill',
+      detail: 'The foreground process group is being terminated immediately.',
+      run: async () => {
+        await sendSigkill(port.value)
+      },
+    },
+  ])
 }
 
 async function handlePaste(): Promise<void> {
@@ -211,12 +402,20 @@ async function handlePaste(): Promise<void> {
   }
 
   try {
-    const text = await navigator.clipboard.readText()
-    if (!text) {
-      showPasteModal.value = true
-      return
-    }
-    sendViaWs(text)
+    await runOperation('Paste input', 'neutral', [
+      {
+        stage: 'Reading clipboard',
+        detail: 'The browser is fetching clipboard text for the shell.',
+        run: async () => {
+          const text = await navigator.clipboard.readText()
+          if (!text) {
+            showPasteModal.value = true
+            return
+          }
+          sendViaWs(text)
+        },
+      },
+    ], 160)
   } catch {
     showPasteModal.value = true
   }
@@ -244,12 +443,56 @@ function scrollToBottom(): void {
   }
 }
 
-function refitTerminal(): void {
-  manager.refreshTerminalSurface(port.value)
+async function handleBottom(): Promise<void> {
+  await runOperation('Jump to bottom', 'info', [
+    {
+      stage: 'Scrolling to the latest output',
+      detail: 'The viewport is moving to the newest line in the scrollback.',
+      run: async () => {
+        scrollToBottom()
+        await nextTick()
+      },
+    },
+  ], 120)
 }
 
-function redrawTerminal(): void {
-  manager.forceRedraw(port.value)
+async function refitTerminal(): Promise<void> {
+  await runOperation('Refit terminal', 'info', [
+    {
+      stage: 'Measuring the viewport',
+      detail: 'The terminal container is being remeasured and resized.',
+      run: async () => {
+        manager.refreshTerminalSurface(port.value)
+        await nextTick()
+      },
+    },
+  ], 180)
+}
+
+async function redrawTerminal(): Promise<void> {
+  await runOperation('Redraw terminal', 'info', [
+    {
+      stage: 'Repainting the renderer',
+      detail: 'The xterm display is being repainted without changing the buffer.',
+      run: async () => {
+        manager.forceRedraw(port.value)
+        await nextTick()
+      },
+    },
+  ], 180)
+}
+
+async function sendArrowKey(sequence: string, label: string, detail: string): Promise<void> {
+  await runOperation(label, 'neutral', [
+    {
+      stage: 'Sending key sequence',
+      detail,
+      run: async () => {
+        sendViaWs(sequence)
+        await nextTick()
+      },
+    },
+  ], 120)
 }
 </script>
 
@@ -265,10 +508,42 @@ function redrawTerminal(): void {
         </span>
       </div>
       <div class="bar-actions shrink-0 border-l border-[var(--color-border)]">
-        <button @click="router.push('/')" class="bar-button bar-button-tight text-xs" title="Home">Overview</button>
-        <button @click="refreshTerminal" class="bar-button bar-button-tight text-xs" title="Refresh" :disabled="controlsDisabled">Refresh</button>
-        <button @click="handleClose" class="bar-button bar-button-tight text-xs">Close Tab</button>
-        <button @click="handleKill" class="bar-button bar-button-tight bar-button-danger text-xs">Kill</button>
+        <button
+          @click="handleRestart"
+          class="bar-button bar-button-tight bar-button-info text-xs"
+          :title="tip('Restart the session', 'Recreates the shell and reconnects the browser to it.')"
+        >
+          Restart
+        </button>
+        <button
+          @click="handleClose"
+          class="bar-button bar-button-tight text-xs"
+          :title="tip('Close this session gracefully', 'Asks the daemon to shut the session down and return home.')"
+        >
+          Close Session
+        </button>
+        <button
+          @click="handleKill"
+          class="bar-button bar-button-tight bar-button-danger text-xs"
+          :title="tip('Force-kill this session', 'Use when graceful close is not enough or the shell is wedged.')"
+        >
+          Kill
+        </button>
+      </div>
+    </div>
+
+    <div v-if="activeOperation" class="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 md:px-4">
+      <div class="glass-panel flex items-center justify-between gap-3 px-3 py-2">
+        <div class="min-w-0">
+          <p class="text-[10px] uppercase tracking-[0.3em] text-[var(--color-text-muted)]">Processing</p>
+          <p class="truncate text-sm font-medium text-[var(--color-text-primary)]">{{ activeOperation.label }}</p>
+          <p class="text-xs text-[var(--color-text-secondary)]">{{ activeOperation.stage }}</p>
+          <p class="text-xs text-[var(--color-text-muted)]">{{ activeOperation.detail }}</p>
+        </div>
+        <div
+          class="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full"
+          :class="activeOperation.tone === 'danger' ? 'bg-red-400' : 'bg-[var(--color-accent)]'"
+        ></div>
       </div>
     </div>
 
@@ -285,10 +560,20 @@ function redrawTerminal(): void {
           <p v-if="disconnectReason" class="text-xs text-[var(--color-text-secondary)]">{{ disconnectReason }}</p>
           <p class="text-xs text-[var(--color-text-secondary)]">Port `:{{ port }}` is not interactive until the websocket comes back.</p>
           <div class="mx-auto toolbar-strip">
-            <button @click="handleReconnect" class="bar-button text-sm" :disabled="reconnecting || isRestarting">
+            <button
+              @click="handleReconnect"
+              class="bar-button text-sm"
+              :title="tip('Reconnect to the session', 'Reopens the websocket when the shell is still alive.')"
+              :disabled="reconnecting || isRestarting"
+            >
               {{ reconnecting ? 'Reconnecting...' : 'Reconnect' }}
             </button>
-            <button @click="handleRestart" class="bar-button bar-button-info text-sm" :disabled="reconnecting || isRestarting">
+            <button
+              @click="handleRestart"
+              class="bar-button bar-button-info text-sm"
+              :title="tip('Restart the session', 'Recreates the shell and reconnects the browser to it.')"
+              :disabled="reconnecting || isRestarting"
+            >
               {{ isRestarting ? 'Restarting...' : 'Restart' }}
             </button>
           </div>
@@ -298,19 +583,18 @@ function redrawTerminal(): void {
 
     <div class="control-bar soft-scrollbar shrink-0 overflow-x-auto border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
       <div class="flex min-h-[2.1rem] min-w-max items-stretch">
-        <button @click="handleInterrupt" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="SIGINT (Ctrl+C) - Interrupt current process" :disabled="controlsDisabled">SIGINT</button>
-        <button @click="handleSigterm" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="SIGTERM - Graceful termination" :disabled="controlsDisabled">SIGTERM</button>
-        <button @click="handleSigkill" class="bar-button bar-button-tight bar-button-danger border-r border-[var(--color-border)] text-xs" title="SIGKILL - Force kill (nuclear option)" :disabled="controlsDisabled">SIGKILL</button>
-        <button @click="handleRestart" class="bar-button bar-button-tight bar-button-info border-r border-[var(--color-border)] text-xs" title="Restart session (same port/name/cwd/shell)" :disabled="isRestarting || reconnecting">{{ isRestarting ? 'Restarting' : 'Restart' }}</button>
-        <button @click="handleClear" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :disabled="controlsDisabled">Clear</button>
-        <button @click="handlePaste" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="Paste from clipboard" :disabled="controlsDisabled">Paste</button>
-        <button @click="refitTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="Refresh terminal sizing" :disabled="controlsDisabled">Refit</button>
-        <button @click="redrawTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="Force terminal redraw" :disabled="controlsDisabled">Redraw</button>
-        <button @click="scrollToBottom" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" title="Scroll to bottom" :disabled="controlsDisabled">Bottom</button>
-        <button @click="sendViaWs('\x1b[A')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :disabled="controlsDisabled">↑</button>
-        <button @click="sendViaWs('\x1b[D')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :disabled="controlsDisabled">←</button>
-        <button @click="sendViaWs('\x1b[B')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :disabled="controlsDisabled">↓</button>
-        <button @click="sendViaWs('\x1b[C')" class="bar-button bar-button-tight text-xs" :disabled="controlsDisabled">→</button>
+        <button @click="handleInterrupt" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGINT', 'Equivalent to Ctrl+C for the foreground process.')" :disabled="controlsDisabled">SIGINT</button>
+        <button @click="handleSigterm" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGTERM', 'Requests a graceful shutdown from the shell process group.')" :disabled="controlsDisabled">SIGTERM</button>
+        <button @click="handleSigkill" class="bar-button bar-button-tight bar-button-danger border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGKILL', 'Forcibly terminates the foreground process immediately.')" :disabled="controlsDisabled">SIGKILL</button>
+        <button @click="handleRefresh" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Refresh the buffer', 'Reloads the current screen state from the daemon history.')" :disabled="controlsDisabled">Refresh</button>
+        <button @click="handlePaste" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Paste from clipboard', 'Reads clipboard text and sends it to the shell.')" :disabled="controlsDisabled">Paste</button>
+        <button @click="refitTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Refit the viewport', 'Recalculates the terminal dimensions after layout changes.')" :disabled="controlsDisabled">Refit</button>
+        <button @click="redrawTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Redraw the terminal', 'Forces a repaint without changing the buffer.')" :disabled="controlsDisabled">Redraw</button>
+        <button @click="handleBottom" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Jump to the bottom', 'Scrolls the viewport to the newest output line.')" :disabled="controlsDisabled">Bottom</button>
+        <button @click="sendArrowKey('\x1b[A', 'Send Up Arrow', 'Sends the up-arrow escape sequence to the shell.')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Up Arrow', 'Useful for shell history and command-line navigation.')" :disabled="controlsDisabled">↑</button>
+        <button @click="sendArrowKey('\x1b[D', 'Send Left Arrow', 'Sends the left-arrow escape sequence to the shell.')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Left Arrow', 'Moves the cursor one character to the left.')" :disabled="controlsDisabled">←</button>
+        <button @click="sendArrowKey('\x1b[B', 'Send Down Arrow', 'Sends the down-arrow escape sequence to the shell.')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Down Arrow', 'Moves through command history or lists.')" :disabled="controlsDisabled">↓</button>
+        <button @click="sendArrowKey('\x1b[C', 'Send Right Arrow', 'Sends the right-arrow escape sequence to the shell.')" class="bar-button bar-button-tight text-xs" :title="tip('Send Right Arrow', 'Moves the cursor one character to the right.')" :disabled="controlsDisabled">→</button>
       </div>
     </div>
 

@@ -365,9 +365,10 @@ port: number  // From route params
 **Features:**
 - Interactive terminal with keyboard input
 - Signal buttons: SIGINT, SIGTERM, SIGKILL (sent to foreground process)
-- Lifecycle buttons: Close, Kill, Restart (managed by daemon)
+- Lifecycle buttons: Close Session, Kill, Restart (managed by daemon)
 - Arrow key buttons for navigation
-- Actions: Refresh, Home
+- Actions: Refresh, Refit, Redraw, Bottom, Paste
+- Processing block shows the current operation stage while terminal actions are running
 
 **Actions:**
 ```typescript
@@ -377,14 +378,16 @@ handleSigterm(): void        // Send SIGTERM (graceful termination)
 handleSigkill(): void        // Send SIGKILL (force termination)
 
 // Lifecycle actions (managed by daemon, always work)
-handleClose(): void          // Gracefully close session, return home
-handleKill(): void           // Force kill session, return home
+handleClose(): void          // Gracefully close session, return to the session list
+ handleKill(): void           // Force kill session, return to the session list
 handleRestart(): void        // Restart session (same port/name/cwd/shell)
 
 // Other actions
-handleClear(): void          // Clear terminal
+handleRefresh(): void        // Restore terminal from backend history
 handlePaste(): void          // Paste from clipboard
-scrollToBottom(): void       // Scroll terminal to bottom
+refitTerminal(): void        // Recalculate terminal geometry
+redrawTerminal(): void       // Repaint the current terminal surface
+handleBottom(): void         // Scroll terminal to bottom
 sendViaWs(text): void        // Send text via WebSocket
 ```
 
@@ -397,8 +400,11 @@ sendViaWs(text): void        // Send text via WebSocket
 Session list navigation.
 
 **Features:**
-- **Resizable width** — Drag the right edge to resize (180px–400px)
+- **Resizable width** — Drag the right edge to resize when expanded (180px–400px)
 - **Create new session** — Modal dialog with optional working directory input
+- **Header action strip** — Equal-width icon buttons for session creation, home, theme, refresh, and collapse
+- **Collapsed rail** — Desktop sidebar collapses to a thin visible icon rail instead of disappearing
+- **Micro sessions** — Collapsed session list becomes compact icon buttons with status indicators
 - **Home button** — Navigate to home view
 - **Session list** — Name, status indicator, and port number
 - **Active session highlighting** — Current session highlighted
