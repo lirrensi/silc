@@ -223,8 +223,13 @@ async fn request_clear(agent: Arc<Agent>, clear_url: String) {
     let _ = task::spawn_blocking(move || agent.post(&clear_url).call()).await;
 }
 
-async fn request_resize(agent: Arc<Agent>, resize_url: String, rows: u16, cols: u16) {
-    let _ = task::spawn_blocking(move || {
+async fn request_resize(
+    agent: Arc<Agent>,
+    resize_url: String,
+    rows: u16,
+    cols: u16,
+) -> DynResult<()> {
+    task::spawn_blocking(move || {
         let rows_s = rows.to_string();
         let cols_s = cols.to_string();
         agent.post(&resize_url)
@@ -232,7 +237,9 @@ async fn request_resize(agent: Arc<Agent>, resize_url: String, rows: u16, cols: 
             .query("cols", &cols_s)
             .call()
     })
-    .await;
+    .await??;
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -262,26 +269,18 @@ async fn main() -> DynResult<()> {
 
     let http_agent = Arc::new(Agent::new());
 
-    // Avoid clearing on startup so users can scroll the local terminal history.
-
-    {
-        let mut stdout = io::stdout();
-        writeln!(
-            stdout,
-            "SILC TUI client (native)\r\n  WS: {ws_url}\r\n  Ctrl+Q quit · Ctrl+L clear\r\n"
-        )?;
-        stdout.flush()?;
-    }
-
     // Best-effort: sync PTY size to current terminal.
     if let Ok((cols, rows)) = terminal::size() {
-        tokio::spawn(request_resize(
+        request_resize(
             Arc::clone(&http_agent),
             resize_url.to_string(),
             rows,
             cols,
-        ));
+        )
+        .await?;
     }
+
+    clear_local_screen()?;
 
     let (ws_stream, _) = match connect_async(&ws_url).await {
         Ok(ok) => ok,
@@ -466,12 +465,17 @@ async fn main() -> DynResult<()> {
                         }
                     }
                     Some(Event::Resize(cols, rows)) => {
-                        tokio::spawn(request_resize(
-                            Arc::clone(&http_agent),
-                            resize_url.to_string(),
-                            rows,
-                            cols,
-                        ));
+                        let http_agent = Arc::clone(&http_agent);
+                        let resize_url = resize_url.clone();
+                        tokio::spawn(async move {
+                            let _ = request_resize(
+                                http_agent,
+                                resize_url.to_string(),
+                                rows,
+                                cols,
+                            )
+                            .await;
+                        });
                     }
                     Some(_) => {}
                     None => break,
