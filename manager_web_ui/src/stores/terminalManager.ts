@@ -1,7 +1,7 @@
 // FILE: manager_web_ui/src/stores/terminalManager.ts
 // PURPOSE: Manage frontend terminal session lifecycle, visible-first attachment, measured resize, and recovery actions.
 // OWNS: Browser terminal instances, resize propagation, write buffering, and renderer lifecycle.
-// EXPORTS: useTerminalManager - Pinia store for terminal session state and actions.
+// EXPORTS: useTerminalManager - Pinia store for terminal session state and actions including session ordering.
 // DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 import { FitAddon } from '@xterm/addon-fit'
@@ -42,7 +42,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   const historyRefreshWaiters = new Map<number, Array<() => void>>()
 
   const sessionList = computed(() => {
-    return Array.from(sessions.value.values()).sort((a, b) => a.port - b.port)
+    return Array.from(sessions.value.values())
   })
 
   const focusedSession = computed(() => {
@@ -177,6 +177,24 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     session.shell = daemonSession.shell
     session.cwd = daemonSession.cwd
     session.titleUpdatedAt = daemonSession.title_updated_at
+  }
+
+  function upsertDaemonSession(daemonSession: DaemonSession): Session {
+    const existingSession = sessions.value.get(daemonSession.port)
+    if (!existingSession) {
+      return createSession(
+        daemonSession.port,
+        daemonSession.session_id,
+        daemonSession.shell,
+        daemonSession.name,
+        daemonSession.cwd,
+        daemonSession.title,
+        daemonSession.title_updated_at,
+      )
+    }
+
+    updateSessionMetadata(daemonSession)
+    return existingSession
   }
 
   function updateSessionTitle(port: number, title: string, titleUpdatedAt: string | null): void {
@@ -649,21 +667,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
   function reconcileSessions(daemonSessions: DaemonSession[]): void {
     const daemonPorts = new Set(daemonSessions.map(session => session.port))
+    const orderedSessions = new Map<number, Session>()
 
     for (const daemonSession of daemonSessions) {
-      if (!sessions.value.has(daemonSession.port)) {
-        createSession(
-          daemonSession.port,
-          daemonSession.session_id,
-          daemonSession.shell,
-          daemonSession.name,
-          daemonSession.cwd,
-          daemonSession.title,
-          daemonSession.title_updated_at,
-        )
-      } else {
-        updateSessionMetadata(daemonSession)
-      }
+      const session = upsertDaemonSession(daemonSession)
+      orderedSessions.set(daemonSession.port, session)
     }
 
     for (const port of Array.from(sessions.value.keys())) {
@@ -671,6 +679,25 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         removeSession(port)
       }
     }
+
+    sessions.value = orderedSessions
+  }
+
+  function applySessionOrder(ports: number[]): void {
+    const orderedSessions = new Map<number, Session>()
+
+    for (const port of ports) {
+      const session = sessions.value.get(port)
+      if (session) {
+        orderedSessions.set(port, session)
+      }
+    }
+
+    if (orderedSessions.size !== sessions.value.size) {
+      return
+    }
+
+    sessions.value = orderedSessions
   }
 
   function applyTheme(theme: ResolvedTheme): void {
@@ -821,8 +848,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     setDisconnectReason,
     setWs,
     reconcileSessions,
+    upsertDaemonSession,
     updateSessionTitle,
     updateSessionCwd,
+    applySessionOrder,
     safeWrite,
     applyTheme,
   }

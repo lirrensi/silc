@@ -1,3 +1,9 @@
+// FILE: manager_web_ui/src/lib/daemonApi.ts
+// PURPOSE: Call daemon HTTP endpoints and define the stable daemon session payload shape used by the manager UI.
+// OWNS: Daemon base URL helpers, HTTP API calls, and daemon response interfaces.
+// EXPORTS: getDaemonUrl, listSessions, createSession, closeSession, killSession, restartSession, renameSession, reorderSessions, getDefaults.
+// DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md
+
 function getPageProtocol(): string {
   return window.location.protocol === 'https:' ? 'https:' : 'http:'
 }
@@ -24,6 +30,7 @@ export interface DaemonSession {
   title_updated_at: string | null
   idle_seconds: number
   alive: boolean
+  runtime_state: string | null
 }
 
 export interface CreateSessionResponse {
@@ -54,6 +61,23 @@ export interface RestartSessionResponse {
   name: string
   title: string
   shell: string
+}
+
+export interface RenameSessionResponse {
+  port: number
+  name: string
+  title: string
+  session_id: string
+  shell: string
+  cwd: string | null
+  title_updated_at: string | null
+  idle_seconds: number
+  alive: boolean
+  runtime_state: string | null
+}
+
+export interface ReorderSessionResponse {
+  sessions: DaemonSession[]
 }
 
 export async function listSessions(): Promise<DaemonSession[]> {
@@ -106,6 +130,30 @@ export async function restartSession(port: number): Promise<RestartSessionRespon
   const resp = await fetch(`${getDaemonUrl()}/sessions/${port}/restart`, { method: 'POST' })
   if (!resp.ok) {
     throw new Error(`Failed to restart session: HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+export async function renameSession(port: number, name: string): Promise<RenameSessionResponse> {
+  const resp = await fetch(`${getDaemonUrl()}/sessions/${port}/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!resp.ok) {
+    throw new Error(`Failed to rename session: HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+export async function reorderSessions(ports: number[]): Promise<ReorderSessionResponse> {
+  const resp = await fetch(`${getDaemonUrl()}/sessions/reorder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ports }),
+  })
+  if (!resp.ok) {
+    throw new Error(`Failed to reorder sessions: HTTP ${resp.status}`)
   }
   return resp.json()
 }

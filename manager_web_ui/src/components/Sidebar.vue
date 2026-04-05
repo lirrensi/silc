@@ -1,10 +1,19 @@
+<!-- FILE: manager_web_ui/src/components/Sidebar.vue -->
+<!-- PURPOSE: Render the manager sidebar, session creation controls, and session rename/reorder actions. -->
+<!-- OWNS: Sidebar layout, session creation modal, live session list controls, and share/defaults UI. -->
+<!-- EXPORTS: SidebarPanel - manager sidebar component. -->
+<!-- DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md, agent_chat/plan_manager_qol_2026-04-05.md -->
+
 <script setup lang="ts">
+
 defineOptions({ name: 'SidebarPanel' })
 
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { DragDropProvider } from '@dnd-kit/vue'
 import QRCode from 'qrcode'
 import { useRoute, useRouter } from 'vue-router'
-import { listSessions, createSession, getDefaults } from '@/lib/daemonApi'
+import SidebarSessionRow from '@/components/SidebarSessionRow.vue'
+import { createSession, getDefaults, listSessions, renameSession, reorderSessions } from '@/lib/daemonApi'
 import { useTerminalManager } from '@/stores/terminalManager'
 import { useUiStore } from '@/stores/ui'
 import type { DaemonShellOption } from '@/lib/daemonApi'
@@ -49,20 +58,64 @@ const showShareDetails = ref(false)
 const isCreatingSession = ref(false)
 const createError = ref('')
 
-function statusColor(status: string): string {
-  switch (status) {
-    case 'active': return 'bg-[#4ade80]'
-    case 'connecting': return 'bg-[#fbbf24]'
-    case 'idle': return 'bg-[#6b7280]'
-    case 'dead': return 'bg-[#f87171]'
-    case 'restarting': return 'bg-[#0ea5e9]'
-    default: return 'bg-[#6b7280]'
-  }
-}
-
 function selectSession(port: number): void {
   router.push(`/${port}`)
   ui.closeMobileNav()
+}
+
+async function handleRenameSession(session: Session): Promise<void> {
+  const currentName = session.name.trim()
+  const nextName = window.prompt('Rename session', currentName)
+  if (nextName === null) return
+
+  const normalizedName = nextName.trim().toLowerCase()
+  if (!normalizedName || normalizedName === currentName) {
+    return
+  }
+
+  if (manager.sessionList.some(other => other.port !== session.port && other.name === normalizedName)) {
+    window.alert(`Session name '${normalizedName}' is already in use.`)
+    return
+  }
+
+  try {
+    const updatedSession = await renameSession(session.port, normalizedName)
+    manager.upsertDaemonSession(updatedSession)
+  } catch (err) {
+    window.alert(err instanceof Error ? err.message : 'Failed to rename session')
+  }
+}
+
+async function handleDragEnd(event: { canceled: boolean; operation?: { source?: { id?: number | string }; target?: { id?: number | string } | null } }): Promise<void> {
+  if (event.canceled) {
+    return
+  }
+
+  const sourcePort = Number(event.operation?.source?.id)
+  const targetPort = Number(event.operation?.target?.id)
+  if (!Number.isFinite(sourcePort) || !Number.isFinite(targetPort) || sourcePort === targetPort) {
+    return
+  }
+
+  const currentPorts = manager.sessionList.map(session => session.port)
+  const fromIndex = currentPorts.indexOf(sourcePort)
+  const toIndex = currentPorts.indexOf(targetPort)
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+    return
+  }
+
+  const nextPorts = [...currentPorts]
+  const [movedPort] = nextPorts.splice(fromIndex, 1)
+  nextPorts.splice(toIndex, 0, movedPort)
+  manager.applySessionOrder(nextPorts)
+
+  try {
+    const result = await reorderSessions(nextPorts)
+    manager.reconcileSessions(result.sessions)
+  } catch (err) {
+    console.error('Failed to reorder sessions:', err)
+    await refreshSessions()
+  }
 }
 
 function openNewSessionModal(): void {
@@ -125,7 +178,6 @@ async function handleCreateNewSession(): Promise<void> {
       ...(cwd ? { cwd } : {}),
       ...(shell ? { shell } : {}),
     })
-    await fetchSessions()
     isCreatingSession.value = false
     closeNewSessionModal()
     router.push(`/${data.port}`)
@@ -222,24 +274,7 @@ function handlePanelToggle(): void {
   ui.closeMobileNav()
 }
 
-function sessionBadgeLabel(session: Session): string {
-  const name = session.name.trim()
-  if (name) {
-    return name.slice(0, 1).toUpperCase()
-  }
-
-  return String(session.port).slice(-1)
-}
-
-function sessionTitle(session: Session): string {
-  const name = session.name || 'unnamed'
-  const title = session.title || '—'
-  const cwd = session.cwd || 'Home directory'
-  return [name, `:${session.port}`, session.shell || 'shell', cwd, title].filter(Boolean).join(' · ')
-}
-
 onMounted(() => {
-  void fetchSessions()
   void fetchDefaults()
 })
 
@@ -358,49 +393,30 @@ watch(
     </div>
 
       <div class="soft-scrollbar flex-1 overflow-y-auto" :class="ui.isSidebarCollapsed ? 'p-1' : ''">
-        <div v-if="!ui.isSidebarCollapsed" class="border-b border-[var(--color-border)]">
-          <button
-            v-for="session in sessions"
-            :key="session.port"
-            @click="selectSession(session.port)"
-            class="grid w-full grid-cols-[0.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 border-t border-[var(--color-border)] px-2 py-1.5 text-left transition-colors"
-            :class="manager.focusedPort === session.port
-              ? 'bg-[var(--color-accent-muted)]'
-              : 'bg-transparent hover:bg-[var(--color-bg-hover)]'"
-          >
-            <div class="mt-1 h-2.5 w-2.5" :class="statusColor(session.status)"></div>
-            <div class="min-w-0">
-              <div class="flex items-baseline justify-between gap-2 text-sm font-medium text-[var(--color-text-primary)]">
-                <span class="min-w-0 truncate">{{ session.name || 'unnamed' }}</span>
-                <span class="shrink-0 font-mono text-[11px] font-normal text-[var(--color-text-muted)]">:{{ session.port }}</span>
-              </div>
-              <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-[var(--color-text-secondary)]">
-                <span class="min-w-0 truncate">{{ session.cwd || 'Home directory' }}</span>
-                <span class="shrink-0 uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{{ session.shell || 'shell' }}</span>
-              </div>
-              <div class="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">{{ session.title || '—' }}</div>
-            </div>
-          </button>
-        </div>
+        <DragDropProvider @dragEnd="handleDragEnd">
+          <div v-if="!ui.isSidebarCollapsed" class="border-b border-[var(--color-border)]">
+            <SidebarSessionRow
+              v-for="session in sessions"
+              :key="session.port"
+              :session="session"
+              :selected="manager.focusedPort === session.port"
+              @select="selectSession(session.port)"
+              @rename="handleRenameSession(session)"
+            />
+          </div>
 
-        <div v-else class="flex flex-col gap-1">
-          <button
-            v-for="session in sessions"
-            :key="session.port"
-            @click="selectSession(session.port)"
-            class="mx-auto flex h-9 w-9 items-center justify-center border border-[var(--color-border)] text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-primary)] transition-colors"
-            :class="manager.focusedPort === session.port
-              ? 'bg-[var(--color-accent-muted)]'
-              : 'bg-[var(--color-bg-primary)] hover:bg-[var(--color-bg-hover)]'"
-            :title="sessionTitle(session)"
-            :aria-label="sessionTitle(session)"
-          >
-            <span class="relative flex h-4 w-4 items-center justify-center">
-              <span class="h-2.5 w-2.5 rounded-full" :class="statusColor(session.status)"></span>
-              <span class="absolute -bottom-2 text-[9px] leading-none text-[var(--color-text-muted)]">{{ sessionBadgeLabel(session) }}</span>
-            </span>
-          </button>
-        </div>
+          <div v-else class="flex flex-col gap-1">
+            <SidebarSessionRow
+              v-for="session in sessions"
+              :key="session.port"
+              :session="session"
+              compact
+              :selected="manager.focusedPort === session.port"
+              @select="selectSession(session.port)"
+              @rename="handleRenameSession(session)"
+            />
+          </div>
+        </DragDropProvider>
       </div>
 
       <div v-if="!ui.isSidebarCollapsed" class="border-t border-[var(--color-border)] p-2.5">

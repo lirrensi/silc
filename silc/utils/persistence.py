@@ -197,15 +197,14 @@ def write_sessions_json(sessions: list[dict]) -> None:
 
 
 def append_session_to_json(session: dict) -> None:
-    """Append a session entry to sessions.json."""
+    """Append or replace a session entry in sessions.json without reordering others."""
     sessions = read_sessions_json()
-    # Remove any existing entry with same port or name
-    sessions = [
-        s
-        for s in sessions
-        if s.get("port") != session.get("port") and s.get("name") != session.get("name")
-    ]
-    sessions.append(session)
+    for index, existing in enumerate(sessions):
+        if existing.get("port") == session.get("port"):
+            sessions[index] = session
+            break
+    else:
+        sessions.append(session)
     write_sessions_json(sessions)
 
 

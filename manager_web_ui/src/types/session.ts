@@ -52,4 +52,5 @@ export interface DaemonSession {
   title_updated_at: string | null
   idle_seconds: number
   alive: boolean
+  runtime_state: string | null
 }

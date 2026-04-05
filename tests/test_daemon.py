@@ -1,3 +1,8 @@
+# FILE: tests/test_daemon.py
+# PURPOSE: Verify daemon lifecycle, registry behavior, session persistence, and websocket event emission.
+# OWNS: Daemon API coverage, session registry checks, and session event integration tests.
+# DOCS: docs/arch_daemon.md, agent_chat/plan_manager_qol_2026-04-05.md
+
 """Tests for SILC daemon functionality.
 
 This module tests the daemon lifecycle, session management, and registry operations.
@@ -8,19 +13,73 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import socket
+import struct
 import subprocess
 import sys
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import AsyncGenerator
 
 import httpx
 import pytest
 import pytest_asyncio
+from fastapi.testclient import TestClient
 
 from silc.daemon.manager import DAEMON_PORT, SilcDaemon
 from silc.daemon.pidfile import read_pidfile, remove_pidfile, write_pidfile
 from silc.daemon.registry import SessionRegistry
+from silc.daemon.runtime import SessionState
+
+
+def _decode_ws_frame(frame: bytes) -> tuple[dict, bytes]:
+    header_length = struct.unpack(">I", frame[:4])[0]
+    header = json.loads(frame[4 : 4 + header_length].decode("utf-8"))
+    payload = frame[4 + header_length :]
+    return header, payload
+
+
+async def _post_daemon_json(
+    daemon: SilcDaemon, path: str, payload: dict
+) -> httpx.Response:
+    transport = httpx.ASGITransport(app=daemon._create_daemon_api())
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.post(path, json=payload)
+
+
+class _EventTestSession:
+    def __init__(self, port: int, name: str, session_id: str) -> None:
+        self.port = port
+        self.name = name
+        self.session_id = session_id
+        self.title = ""
+        self.cwd = None
+        self.title_updated_at = datetime.utcnow()
+        self.api_token = None
+        self.closed = False
+        self.killed = False
+
+    def get_status(self) -> dict:
+        return {"alive": True, "idle_seconds": 0, "cwd": self.cwd}
+
+    async def start(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        self.closed = True
+
+    async def force_kill(self) -> None:
+        self.killed = True
+
+
+class _DummyServer:
+    def __init__(self) -> None:
+        self.should_exit = False
+
+    async def serve(self, sockets=None) -> None:
+        while not self.should_exit:
+            await asyncio.sleep(0.01)
 
 
 def _shutdown_daemon() -> None:
@@ -179,6 +238,216 @@ def test_registry_timeout_cleanup() -> None:
     assert registry.get(21000) is None
 
 
+def test_daemon_events_websocket_sends_initial_snapshot() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    daemon.registry.add(20000, "alpha", "sess-1", "bash", cwd="/tmp")
+
+    client = TestClient(daemon._create_daemon_api())
+    with client.websocket_connect("/events") as websocket:
+        frame = websocket.receive_bytes()
+
+    header, payload = _decode_ws_frame(frame)
+    assert payload == b""
+    assert header["type"] == "session/snapshot"
+    assert header["sessions"][0]["port"] == 20000
+
+
+@pytest.mark.asyncio
+async def test_create_session_publishes_created_and_updated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    published: list[str] = []
+
+    async def record_publish(header: dict[str, object]) -> None:
+        published.append(str(header["type"]))
+
+    async def fake_construct(*args, **kwargs):
+        return _EventTestSession(20011, "events-create", "sess-create")
+
+    monkeypatch.setattr(daemon, "_find_available_session_port", lambda: 20011)
+    monkeypatch.setattr(
+        daemon, "_validate_session_launch", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(daemon, "_construct_session", fake_construct)
+    monkeypatch.setattr(
+        daemon, "_reserve_session_socket", lambda *args, **kwargs: object()
+    )
+    monkeypatch.setattr(daemon, "_attach_session_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        daemon, "_create_session_server", lambda *args, **kwargs: _DummyServer()
+    )
+    monkeypatch.setattr(daemon.events, "publish", record_publish)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=daemon._create_daemon_api()),
+        base_url="http://test",
+    ) as client:
+        resp = await client.post(
+            "/sessions", json={"name": "events-create", "shell": "bash"}
+        )
+
+    assert resp.status_code == 200
+    assert "session/created" in published
+    assert "session/updated" in published
+
+
+@pytest.mark.asyncio
+async def test_rename_session_updates_name_and_publishes_events(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from silc.utils import persistence
+
+    monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+
+    daemon = SilcDaemon(enable_hard_exit=False)
+    published: list[str] = []
+    entry = daemon.registry.add(20015, "rename-me", "sess-rename", "bash")
+    runtime = SimpleNamespace(
+        session=_EventTestSession(entry.port, entry.name, entry.session_id),
+        state=SessionState.RUNNING,
+    )
+    daemon.runtime_by_port[entry.port] = runtime
+    daemon.sessions[entry.port] = runtime.session
+
+    async def record_publish(header: dict[str, object]) -> None:
+        published.append(str(header["type"]))
+
+    monkeypatch.setattr(daemon.events, "publish", record_publish)
+
+    resp = await _post_daemon_json(
+        daemon, "/sessions/20015/rename", {"name": "renamed"}
+    )
+
+    assert resp.status_code == 200
+    assert daemon.registry.get(20015).name == "renamed"
+    assert daemon.sessions[20015].name == "renamed"
+    assert published == ["session/renamed", "session/updated"]
+    assert persistence.read_sessions_json()[0]["name"] == "renamed"
+
+
+@pytest.mark.asyncio
+async def test_rename_session_rejects_duplicate_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from silc.utils import persistence
+
+    monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+
+    daemon = SilcDaemon(enable_hard_exit=False)
+    daemon.registry.add(20016, "first", "sess-first", "bash")
+    daemon.registry.add(20017, "second", "sess-second", "bash")
+
+    resp = await _post_daemon_json(daemon, "/sessions/20016/rename", {"name": "second"})
+
+    assert resp.status_code == 400
+    assert "already in use" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_reorder_sessions_persists_order_and_broadcasts_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from silc.utils import persistence
+
+    monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+
+    daemon = SilcDaemon(enable_hard_exit=False)
+    published: list[str] = []
+    daemon.registry.add(20018, "alpha", "sess-a", "bash")
+    daemon.registry.add(20019, "beta", "sess-b", "bash")
+    daemon.registry.add(20020, "gamma", "sess-c", "bash")
+    daemon._persist_desired_sessions()
+
+    async def record_publish(header: dict[str, object]) -> None:
+        published.append(str(header["type"]))
+
+    monkeypatch.setattr(daemon.events, "publish", record_publish)
+
+    resp = await _post_daemon_json(
+        daemon,
+        "/sessions/reorder",
+        {"ports": [20020, 20018, 20019]},
+    )
+
+    assert resp.status_code == 200
+    assert [item["port"] for item in resp.json()["sessions"]] == [20020, 20018, 20019]
+    assert [item["port"] for item in persistence.read_sessions_json()] == [
+        20020,
+        20018,
+        20019,
+    ]
+    assert published == ["session/reordered", "session/snapshot"]
+
+
+@pytest.mark.asyncio
+async def test_title_change_publishes_title_changed_and_updated() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    published: list[str] = []
+    entry = daemon.registry.add(20012, "events-title", "sess-title", "bash")
+    session = _EventTestSession(entry.port, entry.name, entry.session_id)
+    session.title = "New title"
+    runtime = SimpleNamespace(session=session, state=SessionState.RUNNING)
+    daemon.runtime_by_port[entry.port] = runtime
+
+    async def record_publish(header: dict[str, object]) -> None:
+        published.append(str(header["type"]))
+
+    daemon.events.publish = record_publish  # type: ignore[method-assign]
+    daemon._handle_session_title_change(session)
+    await asyncio.sleep(0)
+
+    assert published == ["session/title_changed", "session/updated"]
+
+
+@pytest.mark.asyncio
+async def test_cwd_change_publishes_cwd_changed_and_updated() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    published: list[str] = []
+    entry = daemon.registry.add(20013, "events-cwd", "sess-cwd", "bash")
+    session = _EventTestSession(entry.port, entry.name, entry.session_id)
+    session.cwd = "/tmp/project"
+    runtime = SimpleNamespace(session=session, state=SessionState.RUNNING, cwd=None)
+    daemon.runtime_by_port[entry.port] = runtime
+
+    async def record_publish(header: dict[str, object]) -> None:
+        published.append(str(header["type"]))
+
+    daemon.events.publish = record_publish  # type: ignore[method-assign]
+    daemon._handle_session_cwd_change(session)
+    await asyncio.sleep(0)
+
+    assert published == ["session/cwd_changed", "session/updated"]
+
+
+@pytest.mark.asyncio
+async def test_remove_session_publishes_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    published: list[str] = []
+    entry = daemon.registry.add(20014, "events-remove", "sess-remove", "bash")
+    runtime = SimpleNamespace(
+        generation=1,
+        session=_EventTestSession(entry.port, entry.name, entry.session_id),
+        state=SessionState.RUNNING,
+    )
+    daemon.runtime_by_port[entry.port] = runtime
+
+    async def fake_cleanup(*args, **kwargs) -> None:
+        return None
+
+    async def record_publish(header: dict[str, object]) -> None:
+        published.append(str(header["type"]))
+
+    monkeypatch.setattr(daemon, "_cleanup_runtime_generation", fake_cleanup)
+    monkeypatch.setattr(daemon.events, "publish", record_publish)
+
+    await daemon._remove_record_and_stop_reconciliation(entry.port)
+
+    assert published == ["session/removed"]
+
+
 # ============================================================================
 # Integration tests (daemon needed)
 # ============================================================================
@@ -265,14 +534,14 @@ async def test_daemon_creates_session(running_daemon: SilcDaemon) -> None:
     assert "session_id" in session_data
     assert "shell" in session_data
     assert session_data["name"] == "test-create-session"
-    assert session_data["title"] == ""
+    assert session_data["title"] == "Bash"
 
     async with httpx.AsyncClient() as client:
         list_resp = await client.get(
             f"http://127.0.0.1:{DAEMON_PORT}/sessions", timeout=5.0
         )
     assert list_resp.status_code == 200
-    assert any(item["title"] == "" for item in list_resp.json())
+    assert any(item["title"] == "Bash" for item in list_resp.json())
 
     # Check session is in registry
     port = session_data["port"]

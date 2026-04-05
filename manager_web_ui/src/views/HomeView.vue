@@ -4,9 +4,8 @@
 <!-- DOCS: agent_chat/plan_home_grid_frozen_previews_2026-04-04.md -->
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useTerminalManager } from '@/stores/terminalManager'
-import { listSessions } from '@/lib/daemonApi'
 import { HOME_GRID_OPTIONS, getHomeGridSlots } from '@/lib/homePreview'
 import { useUiStore } from '@/stores/ui'
 import SessionCard from '@/components/SessionCard.vue'
@@ -31,19 +30,6 @@ const gridColumns = computed(() => {
 const gridStyle = computed(() => ({
   gridTemplateColumns: `repeat(${gridColumns.value}, minmax(0, 1fr))`,
 }))
-
-onMounted(async () => {
-  await syncSessions()
-})
-
-async function syncSessions(): Promise<void> {
-  try {
-    const daemonSessions = await listSessions()
-    manager.reconcileSessions(daemonSessions)
-  } catch (err) {
-    console.error('[HomeView] Failed to sync sessions:', err)
-  }
-}
 </script>
 
 <template>

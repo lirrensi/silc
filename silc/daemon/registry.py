@@ -115,6 +115,25 @@ class SessionRegistry:
         entry.update_cwd(cwd)
         return entry
 
+    def rename(self, port: int, name: str) -> SessionEntry | None:
+        """Rename a session without changing its port or order."""
+
+        entry = self._sessions.get(port)
+        if not entry:
+            return None
+
+        if entry.name == name:
+            return entry
+
+        existing_port = self._name_index.get(name)
+        if existing_port is not None and existing_port != port:
+            raise ValueError(f"Session name '{name}' is already in use")
+
+        self._name_index.pop(entry.name, None)
+        entry.name = name
+        self._name_index[name] = port
+        return entry
+
     def remove(self, port: int) -> SessionEntry | None:
         """Remove a session entry."""
         entry = self._sessions.pop(port, None)
@@ -141,8 +160,22 @@ class SessionRegistry:
         return name in self._name_index
 
     def list_all(self) -> list[SessionEntry]:
-        """List all sessions sorted by port."""
-        return sorted(self._sessions.values(), key=lambda s: s.port)
+        """List all sessions in registry order."""
+        return list(self._sessions.values())
+
+    def reorder(self, ports: list[int]) -> None:
+        """Reorder sessions to match the provided port list."""
+
+        if len(ports) != len(self._sessions):
+            raise ValueError("Reorder list must include every active session")
+
+        current_ports = set(self._sessions)
+        if set(ports) != current_ports:
+            raise ValueError(
+                "Reorder list must include each active session exactly once"
+            )
+
+        self._sessions = {port: self._sessions[port] for port in ports}
 
     def cleanup_timeout(self, timeout_seconds: int = 1800) -> list[int]:
         """Remove sessions idle longer than timeout. Returns list of ports cleaned."""

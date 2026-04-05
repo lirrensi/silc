@@ -24,13 +24,20 @@ from pathlib import Path
 from typing import Dict
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from silc.api.server import create_app
 from silc.core.session import SilcSession
+from silc.daemon.events import (
+    DaemonEventBroadcaster,
+    build_manager_event_header,
+    encode_ws_frame,
+    serialize_session_snapshot,
+    serialize_session_snapshots,
+)
 from silc.daemon.pidfile import remove_pidfile, write_pidfile
 from silc.daemon.registry import SessionRegistry
 from silc.daemon.runtime import (
@@ -46,12 +53,11 @@ from silc.utils.names import generate_name, is_valid_name
 from silc.utils.persistence import (
     DAEMON_LOG,
     LOGS_DIR,
-    append_session_to_json,
     cleanup_session_log,
     get_session_log_path,
-    remove_session_from_json,
     rotate_daemon_log,
     write_daemon_log,
+    write_sessions_json,
 )
 from silc.utils.ports import bind_port
 from silc.utils.shell_detect import ShellInfo, detect_shell, get_available_shell_choices
@@ -165,6 +171,25 @@ class SessionCreateRequest(BaseModel):
     cwd: str | None = None
 
 
+class SessionRenameRequest(BaseModel):
+    name: str
+
+
+class SessionReorderRequest(BaseModel):
+    ports: list[int]
+
+
+def _shell_display_name(shell_info: ShellInfo) -> str:
+    return {
+        "pwsh": "PowerShell",
+        "powershell": "Windows PowerShell",
+        "cmd": "Command Prompt",
+        "bash": "Bash",
+        "zsh": "Zsh",
+        "sh": "Shell",
+    }.get(shell_info.type, shell_info.type)
+
+
 class SilcDaemon:
     """Main daemon managing multiple SILC sessions."""
 
@@ -193,6 +218,7 @@ class SilcDaemon:
         self._shutdown_event = asyncio.Event()
         self._restart_event = asyncio.Event()
         self._reconcile_event = asyncio.Event()
+        self.events = DaemonEventBroadcaster()
         self._daemon_api_app = self._create_daemon_api()
         self._session_tasks: Dict[int, asyncio.Task] = {}
         self._cleanup_tasks: Dict[int, asyncio.Task[None]] = {}
@@ -352,17 +378,19 @@ class SilcDaemon:
                     assert selected_port is not None
                     assert session_name is not None
                     desired_session_id = uuid.uuid4().hex[:8]
+                    initial_title = _shell_display_name(shell_info)
                     entry = self.registry.add(
                         selected_port,
                         session_name,
                         desired_session_id,
                         shell_info.type,
                         cwd=cwd,
+                        title=initial_title,
                         is_global=is_global,
                     )
-                    append_session_to_json(entry.to_json())
+                    self._persist_desired_sessions()
                     runtime = self._get_or_create_runtime(
-                        entry, api_token=token, title=""
+                        entry, api_token=token, title=initial_title
                     )
 
                     try:
@@ -398,6 +426,7 @@ class SilcDaemon:
                 write_daemon_log(
                     f"Session created: port={selected_port}, name={session_name}, id={runtime.session.session_id}"
                 )
+                await self._publish_session_event("session/created", entry)
 
                 return {
                     "port": selected_port,
@@ -420,33 +449,87 @@ class SilcDaemon:
             """List all sessions."""
             operation = "list_sessions"
             try:
-                sessions = []
-                for entry in self.registry.list_all():
-                    runtime = self.runtime_by_port.get(entry.port)
-                    session = runtime.session if runtime else None
-                    status = session.get_status() if session else None
-                    cwd = (
-                        status["cwd"]
-                        if status and status.get("cwd") is not None
-                        else entry.cwd
-                    )
-                    sessions.append(
-                        {
-                            "port": entry.port,
-                            "name": entry.name,
-                            "title": entry.title,
-                            "session_id": entry.session_id,
-                            "shell": entry.shell_type,
-                            "cwd": cwd,
-                            "title_updated_at": entry.title_updated_at.isoformat()
-                            + "Z",
-                            "idle_seconds": status["idle_seconds"] if status else None,
-                            "alive": bool(status and status["alive"]),
-                            "runtime_state": runtime.state.value if runtime else None,
-                        }
+                return self._list_session_snapshots()
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{port}/rename")
+        async def rename_session(port: int, request: SessionRenameRequest):
+            """Rename a session in place."""
+            operation = "rename_session"
+            try:
+                entry = self._get_desired_entry_for_port(port)
+                if not entry:
+                    raise HTTPException(status_code=404, detail="Session not found")
+
+                session_name = request.name.lower().strip()
+                if not is_valid_name(session_name):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=_build_validation_error_payload(
+                            operation,
+                            "Invalid name format. Must match [a-z][a-z0-9-]*[a-z0-9]",
+                        ),
                     )
 
-                return sessions
+                existing = self.registry.get_by_name(session_name)
+                if existing is not None and existing.port != port:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=_build_validation_error_payload(
+                            operation,
+                            f"Session name '{session_name}' is already in use",
+                        ),
+                    )
+
+                updated_entry = self.registry.rename(port, session_name)
+                if updated_entry is None:
+                    raise HTTPException(status_code=404, detail="Session not found")
+
+                runtime = self.runtime_by_port.get(port)
+                if runtime is not None:
+                    runtime.name = session_name
+                    if runtime.session is not None:
+                        runtime.session.name = session_name
+
+                self._persist_desired_sessions()
+                await self._publish_session_event("session/renamed", updated_entry)
+
+                return self._serialize_session_entry(updated_entry)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/reorder")
+        async def reorder_sessions(request: SessionReorderRequest):
+            """Reorder active sessions and persist the new order."""
+            operation = "reorder_sessions"
+            try:
+                self.registry.reorder(request.ports)
+                self._persist_desired_sessions()
+                await self.events.publish(
+                    build_manager_event_header(
+                        "session/reordered",
+                        sessions=self._list_session_snapshots(),
+                        ports=request.ports,
+                    )
+                )
+                await self._publish_session_snapshot()
+                return {"sessions": self._list_session_snapshots()}
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=_build_validation_error_payload(operation, str(exc)),
+                ) from exc
             except HTTPException:
                 raise
             except Exception as exc:
@@ -489,26 +572,7 @@ class SilcDaemon:
                         status_code=404, detail=f"Session '{name}' not found"
                     )
 
-                runtime = self.runtime_by_port.get(entry.port)
-                session = runtime.session if runtime else None
-                status = session.get_status() if session else None
-                cwd = (
-                    status["cwd"]
-                    if status and status.get("cwd") is not None
-                    else entry.cwd
-                )
-                return {
-                    "port": entry.port,
-                    "name": entry.name,
-                    "title": entry.title,
-                    "session_id": entry.session_id,
-                    "shell": entry.shell_type,
-                    "cwd": cwd,
-                    "title_updated_at": entry.title_updated_at.isoformat() + "Z",
-                    "idle_seconds": status["idle_seconds"] if status else None,
-                    "alive": bool(status and status["alive"]),
-                    "runtime_state": runtime.state.value if runtime else None,
-                }
+                return self._serialize_session_entry(entry)
             except HTTPException:
                 raise
             except Exception as exc:
@@ -596,6 +660,7 @@ class SilcDaemon:
                 )
 
                 write_daemon_log(f"Session restarted: port={port}, name={entry.name}")
+                await self._publish_session_event("session/restarted", entry)
 
                 return {
                     "status": "restarted",
@@ -652,6 +717,26 @@ class SilcDaemon:
                 asyncio.create_task(self._hard_exit_after(delay=30.0, exit_code=0))
 
             return {"status": "shutdown"}
+
+        @app.websocket("/events")
+        async def daemon_events(websocket: WebSocket) -> None:
+            await websocket.accept()
+            await self.events.register(websocket)
+            try:
+                await websocket.send_bytes(
+                    encode_ws_frame(
+                        build_manager_event_header(
+                            "session/snapshot",
+                            sessions=self._list_session_snapshots(),
+                        )
+                    )
+                )
+                while True:
+                    await websocket.receive()
+            except (WebSocketDisconnect, RuntimeError):
+                pass
+            finally:
+                await self.events.unregister(websocket)
 
         @app.post("/killall")
         async def killall():
@@ -735,6 +820,36 @@ class SilcDaemon:
 
     def _get_desired_entry_for_name(self, name: str):
         return self.registry.get_by_name(name)
+
+    def _serialize_session_entry(self, entry) -> dict[str, object]:
+        return serialize_session_snapshot(entry, self.runtime_by_port.get(entry.port))
+
+    def _list_session_snapshots(self) -> list[dict[str, object]]:
+        return serialize_session_snapshots(
+            self.registry.list_all(), self.runtime_by_port
+        )
+
+    def _persist_desired_sessions(self) -> None:
+        write_sessions_json([entry.to_json() for entry in self.registry.list_all()])
+
+    async def _publish_session_snapshot(self) -> None:
+        await self.events.publish(
+            build_manager_event_header(
+                "session/snapshot", sessions=self._list_session_snapshots()
+            )
+        )
+
+    async def _publish_session_event(self, event_type: str, entry) -> None:
+        snapshot = self._serialize_session_entry(entry)
+        await self.events.publish(build_manager_event_header(event_type, snapshot))
+        await self.events.publish(
+            build_manager_event_header("session/updated", snapshot)
+        )
+
+    async def _publish_removed_session_event(self, snapshot: dict[str, object]) -> None:
+        await self.events.publish(
+            build_manager_event_header("session/removed", snapshot)
+        )
 
     def _get_or_create_runtime(
         self,
@@ -833,12 +948,18 @@ class SilcDaemon:
         runtime.socket = None
 
         if remove_record:
+            snapshot = None
+            entry = self.registry.get(port)
+            if entry is not None:
+                snapshot = serialize_session_snapshot(entry, runtime)
             self.registry.remove(port)
-            remove_session_from_json(port)
+            self._persist_desired_sessions()
             cleanup_session_log(port)
             runtime.state = SessionState.STOPPED
             self.runtime_by_port.pop(port, None)
             write_daemon_log(f"Session closed: port={port}")
+            if snapshot is not None:
+                await self._publish_removed_session_event(snapshot)
         else:
             if runtime.state != SessionState.STOPPING:
                 runtime.state = SessionState.DEGRADED
@@ -848,8 +969,10 @@ class SilcDaemon:
         if not entry:
             raise HTTPException(status_code=404, detail="Session not found")
 
+        snapshot = self._serialize_session_entry(entry)
+
         self.registry.remove(port)
-        remove_session_from_json(port)
+        self._persist_desired_sessions()
         self._reconcile_event.set()
 
         runtime = self.runtime_by_port.get(port)
@@ -860,6 +983,7 @@ class SilcDaemon:
             )
             self.runtime_by_port.pop(port, None)
         cleanup_session_log(port)
+        await self._publish_removed_session_event(snapshot)
 
     async def _load_persisted_desired_records(self) -> dict:
         from silc.utils.persistence import read_sessions_json
@@ -953,6 +1077,7 @@ class SilcDaemon:
             self._session_tasks[entry.port] = task
             self._attach_session_task(entry.port, runtime.generation, task)
             self._schedule_reconcile()
+            await self._publish_session_event("session/started", entry)
             return runtime
         except Exception as exc:
             await self._discard_partial_session_state(
@@ -1090,7 +1215,8 @@ class SilcDaemon:
         if not entry:
             return
 
-        append_session_to_json(entry.to_json())
+        self._persist_desired_sessions()
+        asyncio.create_task(self._publish_session_event("session/title_changed", entry))
 
     def _handle_session_cwd_change(self, session: SilcSession) -> None:
         """Persist a live cwd change from a running session."""
@@ -1101,7 +1227,8 @@ class SilcDaemon:
         if not entry:
             return
 
-        append_session_to_json(entry.to_json())
+        self._persist_desired_sessions()
+        asyncio.create_task(self._publish_session_event("session/cwd_changed", entry))
 
     def _attach_session_task(
         self, port: int, generation: int, task: asyncio.Task[None]
@@ -1213,7 +1340,7 @@ class SilcDaemon:
             except Exception as cleanup_exc:
                 _log_daemon_exception(f"{operation}_rollback_registry", cleanup_exc)
             try:
-                remove_session_from_json(port)
+                self._persist_desired_sessions()
             except Exception as cleanup_exc:
                 _log_daemon_exception(f"{operation}_rollback_persistence", cleanup_exc)
 
@@ -1427,10 +1554,12 @@ class SilcDaemon:
                 return
 
         if entry:
+            snapshot = serialize_session_snapshot(entry, runtime)
             self.registry.remove(port)
-            remove_session_from_json(port)
+            self._persist_desired_sessions()
             cleanup_session_log(port)
             write_daemon_log(f"Session closed: port={port}")
+            await self._publish_removed_session_event(snapshot)
 
     async def _resurrect_sessions(self) -> dict:
         """Load desired records from sessions.json and reconcile them."""

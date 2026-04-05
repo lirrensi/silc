@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+// FILE: manager_web_ui/src/App.vue
+// PURPOSE: Mount the manager shell layout and start app-wide daemon event synchronization.
+// OWNS: Root layout wiring, theme propagation, and daemon-events lifecycle.
+// EXPORTS: App - root manager application component.
+// DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md
+
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Sidebar from '@/components/Sidebar.vue'
+import { startDaemonEvents, stopDaemonEvents } from '@/lib/daemonEvents'
 import { useUiStore } from '@/stores/ui'
 import { useTerminalManager } from '@/stores/terminalManager'
 
@@ -31,6 +38,14 @@ watch(
   },
   { immediate: true },
 )
+
+onMounted(() => {
+  startDaemonEvents()
+})
+
+onUnmounted(() => {
+  stopDaemonEvents()
+})
 </script>
 
 <template>

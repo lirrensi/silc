@@ -25,6 +25,7 @@ dependencies = [
     "toml>=0.10.2",
     "aiofiles>=25.1.0",
     "mcp>=1.0.0",
+    "pyee>=13.0.0",
 ]
 
 [project.scripts]

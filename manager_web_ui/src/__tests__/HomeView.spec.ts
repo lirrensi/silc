@@ -8,12 +8,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import HomeView from '../views/HomeView.vue'
 
-const reconcileSessions = vi.fn()
-
-vi.mock('@/lib/daemonApi', () => ({
-  listSessions: vi.fn().mockResolvedValue([]),
-}))
-
 vi.mock('@/stores/terminalManager', () => ({
   useTerminalManager: () => ({
     sessionList: [
@@ -23,14 +17,12 @@ vi.mock('@/stores/terminalManager', () => ({
       { port: 1104 },
       { port: 1105 },
     ],
-    reconcileSessions,
   }),
 }))
 
 describe('HomeView', () => {
   beforeEach(() => {
     localStorage.clear()
-    reconcileSessions.mockClear()
   })
 
   it('shows the Home-only grid selector and slices the visible cards', async () => {
@@ -48,11 +40,7 @@ describe('HomeView', () => {
       },
     })
 
-    await Promise.resolve()
-    await Promise.resolve()
-
     expect(wrapper.find('[aria-pressed="true"]').text()).toBe('2x2')
     expect(wrapper.findAll('.session-card-stub')).toHaveLength(4)
-    expect(reconcileSessions).toHaveBeenCalled()
   })
 })
