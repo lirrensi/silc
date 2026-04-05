@@ -21,6 +21,7 @@ from silc.utils.shell_detect import ShellInfo
             [
                 "bootstrap.ps1",
                 "-NoExit",
+                "SilcOriginalPrompt",
                 "function global:prompt {",
                 "function global:__silc_exec($cmd, $token) {",
                 "633;cwd=",
@@ -31,6 +32,7 @@ from silc.utils.shell_detect import ShellInfo
             [
                 "bootstrap.ps1",
                 "-NoExit",
+                "SilcOriginalPrompt",
                 "function global:prompt {",
                 "function global:__silc_exec($cmd, $token) {",
                 "633;cwd=",
@@ -52,10 +54,14 @@ def test_build_launch_spec_points_at_bootstrap_scripts(
         assert "--noprofile" not in argv_text
     if shell_type == "zsh":
         assert "-l" in argv_text
-    if shell_type in {"pwsh", "powershell"}:
-        assert "-NoProfile" not in argv_text
     for snippet in expected_snippets:
         assert snippet in argv_text or snippet in _bootstrap_text(info)
+
+    if shell_type in {"pwsh", "powershell"}:
+        bootstrap = _bootstrap_text(info)
+        assert "Set-StrictMode" not in bootstrap
+        assert "Get-Item function:prompt" in bootstrap
+        assert "__silc_render_prompt" in bootstrap
 
     if shell_type == "zsh":
         assert "ZDOTDIR" in spec.env
