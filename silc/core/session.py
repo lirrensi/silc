@@ -528,6 +528,7 @@ class SilcSession:
             "cwd": self.cwd,
             "title_updated_at": self.title_updated_at.isoformat() + "Z",
             "alive": self._read_task is not None and not self._read_task.done(),
+            "tui_active": self.tui_active,
             "idle_seconds": (datetime.utcnow() - self.last_output).seconds,
             "waiting_for_input": self._status_waiting_for_input,
             "last_line": self._status_last_line,

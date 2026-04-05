@@ -232,6 +232,17 @@ def _fetch_session_token(port: int, timeout: float = 2.0) -> str | None:
         return None
 
 
+def _fetch_session_status(port: int, timeout: float = 2.0) -> dict[str, object] | None:
+    """Try to fetch the current session status (local only)."""
+    try:
+        resp = requests.get(f"http://127.0.0.1:{port}/status", timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload if isinstance(payload, dict) else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
 def _get_session_entry(port: int) -> dict | None:
     """Return daemon session info for a specific port."""
     try:
@@ -1336,6 +1347,19 @@ def _find_native_tui_binary() -> Path | None:
 
 
 def _launch_native_tui_client(port: int) -> None:
+    status = _fetch_session_status(port)
+    if status and status.get("tui_active"):
+        click.echo("⚠️  Another client is already connected to this session.", err=True)
+        if not sys.stdin.isatty():
+            click.echo(
+                "❌ Refusing to take over without an interactive terminal.",
+                err=True,
+            )
+            return
+        if not click.confirm("Take over this session?", default=False):
+            click.echo("Aborted.", err=True)
+            return
+
     executable = _find_native_tui_binary()
     if executable is None or not executable.exists():
         click.echo(

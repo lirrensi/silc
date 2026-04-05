@@ -8,6 +8,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import packageJson from '../../package.json'
 import Sidebar from '../components/Sidebar.vue'
 import SidebarSessionRow from '../components/SidebarSessionRow.vue'
 
@@ -201,6 +202,7 @@ describe('Sidebar', () => {
 
     expect(wrapper.text()).toContain('Local mode')
     expect(wrapper.text()).toContain('Restart the daemon in shared mode')
+    expect(wrapper.text()).toContain(`Built v${packageJson.version}`)
   })
 
   it('lists shell choices in the new session modal', async () => {

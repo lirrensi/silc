@@ -146,6 +146,7 @@ The CLI fetches the session token from `/token` when one is needed for stream ca
 
 - `silc tui` resolves a cached or downloaded native binary.
 - The binary path is platform-specific and may be installed from GitHub releases.
+- Before launch, the CLI checks session `/status` and confirms takeover if another interactive client is already active.
 - The launcher passes the session websocket URL directly to the binary.
 
 ## Hidden/Internal Commands

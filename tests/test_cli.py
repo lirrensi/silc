@@ -973,6 +973,67 @@ class TestCLIStartOptions:
         assert result.exit_code == 0
         assert captured["kwargs"]["launch_native_tui"] is True
 
+    def test_native_tui_prompts_before_takeover(self, monkeypatch):
+        """Native TUI launch should ask before taking over an active session."""
+        from silc import __main__ as main_mod
+
+        called = {"run": False}
+
+        monkeypatch.setattr(
+            main_mod,
+            "_fetch_session_status",
+            lambda port, timeout=2.0: {"tui_active": True},
+        )
+        monkeypatch.setattr(
+            main_mod.sys, "stdin", type("_Stdin", (), {"isatty": lambda self: True})()
+        )
+
+        def _fail_if_reached():
+            raise AssertionError("binary lookup should not happen after declining")
+
+        monkeypatch.setattr(main_mod, "_find_native_tui_binary", _fail_if_reached)
+        monkeypatch.setattr(main_mod.click, "confirm", lambda *args, **kwargs: False)
+        monkeypatch.setattr(
+            main_mod.subprocess,
+            "run",
+            lambda *args, **kwargs: called.__setitem__("run", True),
+        )
+
+        main_mod._launch_native_tui_client(12345)
+
+        assert called["run"] is False
+
+    def test_native_tui_launches_after_takeover_confirmation(
+        self, monkeypatch, tmp_path
+    ):
+        """Confirmed takeover should continue to binary launch."""
+        from silc import __main__ as main_mod
+
+        fake_binary = tmp_path / "silc-tui"
+        fake_binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+        calls: dict[str, object] = {}
+
+        monkeypatch.setattr(
+            main_mod,
+            "_fetch_session_status",
+            lambda port, timeout=2.0: {"tui_active": True},
+        )
+        monkeypatch.setattr(
+            main_mod.sys, "stdin", type("_Stdin", (), {"isatty": lambda self: True})()
+        )
+        monkeypatch.setattr(main_mod, "_find_native_tui_binary", lambda: fake_binary)
+        monkeypatch.setattr(main_mod.click, "confirm", lambda *args, **kwargs: True)
+        monkeypatch.setattr(
+            main_mod.subprocess,
+            "run",
+            lambda args, **kwargs: calls.setdefault("run_args", list(args)),
+        )
+
+        main_mod._launch_native_tui_client(12345)
+
+        assert calls["run_args"][0] == str(fake_binary)
+
     def test_start_invalid_name_rejected(self):
         """Invalid session name should be rejected."""
         # This is a unit test - no daemon needed, just argument validation

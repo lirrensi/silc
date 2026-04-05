@@ -12,6 +12,7 @@ import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { DragDropProvider } from '@dnd-kit/vue'
 import QRCode from 'qrcode'
 import { useRoute, useRouter } from 'vue-router'
+import packageJson from '../../package.json'
 import SidebarSessionRow from '@/components/SidebarSessionRow.vue'
 import { createSession, getDefaults, listSessions, renameSession, reorderSessions } from '@/lib/daemonApi'
 import { useTerminalManager } from '@/stores/terminalManager'
@@ -53,6 +54,7 @@ const shareQrCode = ref('')
 const showShareDetails = ref(false)
 const isCreatingSession = ref(false)
 const createError = ref('')
+const builtVersion = `v${packageJson.version}`
 
 function selectSession(port: number): void {
   router.push(`/${port}`)
@@ -449,6 +451,12 @@ watch(
           </p>
           <p class="text-[10px] leading-4 text-[var(--color-text-secondary)]">
             QR sharing is off. Restart the daemon in shared mode to show the QR and allow LAN access.
+          </p>
+        </div>
+
+        <div class="mt-2 border-t border-[var(--color-border)] pt-2">
+          <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">
+            Built {{ builtVersion }}
           </p>
         </div>
       </div>

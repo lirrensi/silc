@@ -49,6 +49,7 @@ The installer selects an asset by platform + architecture keywords, extracts or 
 `silc tui`:
 
 - resolves the binary
+- checks session status and asks before taking over an active interactive client
 - prints the websocket URL
 - launches the binary with `ws://127.0.0.1:<port>/ws`
 
@@ -64,6 +65,8 @@ The native TUI uses the same binary envelope as the session websocket:
 
 Server messages include `output`, `history`, `title`, and `cwd`.
 Client messages include `input` and `load_history`.
+
+The Rust client ignores websocket ping/pong frames, reports close code/reason on disconnect, and strips terminal device-attribute query noise from rendered output.
 
 ## Legacy Textual TUI
 

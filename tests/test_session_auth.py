@@ -50,9 +50,10 @@ DAEMON_PORT = CUSTOM_DAEMON_PORT
 class _CorsSession:
     session_id = "cors-test"
     api_token = None
+    tui_active = False
 
     def get_status(self) -> dict:
-        return {"alive": True}
+        return {"alive": True, "tui_active": self.tui_active}
 
     def resize(self, rows: int, cols: int) -> None:
         self.rows = rows
@@ -74,7 +75,7 @@ class _WsSession:
         self._output_listeners = []
 
     def get_status(self) -> dict:
-        return {"alive": True}
+        return {"alive": True, "tui_active": self.tui_active}
 
     def add_title_listener(self, listener):
         self._title_listeners.append(listener)
@@ -205,3 +206,17 @@ def test_session_snapshot_endpoint_returns_raw_bytes() -> None:
 
     assert resp.status_code == 200
     assert resp.content == b"\x1b[31mRED\x1b[0m"
+
+
+def test_session_status_exposes_tui_active_flag() -> None:
+    session = _WsSession()
+    client = TestClient(create_app(session))
+
+    resp = client.get("/status")
+    assert resp.status_code == 200
+    assert resp.json()["tui_active"] is False
+
+    session.tui_active = True
+    resp = client.get("/status")
+    assert resp.status_code == 200
+    assert resp.json()["tui_active"] is True

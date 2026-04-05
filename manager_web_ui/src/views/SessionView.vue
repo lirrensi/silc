@@ -379,6 +379,11 @@ async function reconnectSession(targetPort: number, waitForFreshSession: boolean
 
     await manager.flushWrites(targetPort)
     nextSession.terminal.reset()
+    await manager.applyMeasuredFit(targetPort, {
+      propagate: true,
+      force: true,
+      reason: 'reconnect-preconnect',
+    })
     connectWebSocket(targetPort, { force: true })
     manager.refreshTerminalSurface(targetPort)
   } finally {

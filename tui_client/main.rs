@@ -14,7 +14,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::{
     io::{self, Write},
-    sync::Arc,
+    sync::{Arc, Mutex},
     thread,
 };
 use tokio::sync::{mpsc, watch};
@@ -187,6 +187,38 @@ fn decode_ws_frame(data: &[u8]) -> DynResult<(Value, Vec<u8>)> {
     Ok((header, data[4 + header_len..].to_vec()))
 }
 
+fn strip_terminal_query_noise(data: &[u8]) -> Vec<u8> {
+    let mut filtered = Vec::with_capacity(data.len());
+    let mut i = 0;
+
+    while i < data.len() {
+        if i + 3 < data.len() && data[i] == 0x1b && data[i + 1] == b'[' && data[i + 2] == b'?' {
+            let mut j = i + 3;
+            while j < data.len() && (data[j].is_ascii_digit() || data[j] == b';') {
+                j += 1;
+            }
+
+            if j < data.len() && data[j] == b'c' {
+                i = j + 1;
+                continue;
+            }
+        }
+
+        filtered.push(data[i]);
+        i += 1;
+    }
+
+    filtered
+}
+
+fn set_disconnect_reason(slot: &Arc<Mutex<Option<String>>>, reason: String) {
+    if let Ok(mut guard) = slot.lock() {
+        if guard.is_none() {
+            *guard = Some(reason);
+        }
+    }
+}
+
 async fn request_clear(agent: Arc<Agent>, clear_url: String) {
     let _ = task::spawn_blocking(move || agent.post(&clear_url).call()).await;
 }
@@ -261,6 +293,7 @@ async fn main() -> DynResult<()> {
     };
 
     let (status_tx, mut status_rx) = watch::channel(ConnectionState::Connected);
+    let disconnect_reason = Arc::new(Mutex::new(None::<String>));
 
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
@@ -285,6 +318,7 @@ async fn main() -> DynResult<()> {
     // WebSocket reader: terminal output
     let reader_handle = {
         let status_tx = status_tx.clone();
+        let disconnect_reason = Arc::clone(&disconnect_reason);
         tokio::spawn(async move {
             while let Some(next) = ws_read.next().await {
                 match next {
@@ -295,21 +329,56 @@ async fn main() -> DynResult<()> {
 
                         match header.get("type").and_then(|value| value.as_str()) {
                             Some("output") | Some("history") => {
+                                let payload = strip_terminal_query_noise(&payload);
+                                if payload.is_empty() {
+                                    continue;
+                                }
                                 let _ = tx_output.send(payload);
                             }
                             Some("title") => {}
                             _ => break,
                         }
                     }
-                    Ok(Message::Close(_)) => {
+                    Ok(Message::Close(frame)) => {
+                        let reason = match frame {
+                            Some(frame) => {
+                                let code = format!("{:?}", frame.code);
+                                let reason = frame.reason.to_string();
+                                if reason.is_empty() {
+                                    format!("Disconnected: websocket closed (code {code})")
+                                } else {
+                                    format!(
+                                        "Disconnected: websocket closed (code {code}): {reason}"
+                                    )
+                                }
+                            }
+                            None => "Disconnected: websocket closed".to_string(),
+                        };
+                        set_disconnect_reason(&disconnect_reason, reason);
                         break;
                     }
-                    Ok(_) => break,
-                    Err(_) => {
+                    Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
+                    Ok(Message::Text(text)) => {
+                        set_disconnect_reason(
+                            &disconnect_reason,
+                            format!("Disconnected: unexpected text websocket frame: {text}"),
+                        );
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        set_disconnect_reason(
+                            &disconnect_reason,
+                            format!("Disconnected: websocket read error: {err}"),
+                        );
                         break;
                     }
                 }
             }
+            set_disconnect_reason(
+                &disconnect_reason,
+                "Disconnected: connection closed".to_string(),
+            );
             let _ = status_tx.send(ConnectionState::Disconnected);
         })
     };
@@ -317,6 +386,7 @@ async fn main() -> DynResult<()> {
     // WebSocket writer: keyboard input
     let writer_handle = {
         let status_tx = status_tx.clone();
+        let disconnect_reason = Arc::clone(&disconnect_reason);
         tokio::spawn(async move {
             while let Some(chunk) = rx_input.recv().await {
                 if chunk.is_empty() {
@@ -331,6 +401,10 @@ async fn main() -> DynResult<()> {
                 };
 
                 if ws_write.send(Message::Binary(frame.into())).await.is_err() {
+                    set_disconnect_reason(
+                        &disconnect_reason,
+                        "Disconnected: websocket write error".to_string(),
+                    );
                     let _ = status_tx.send(ConnectionState::Disconnected);
                     break;
                 }
@@ -417,7 +491,12 @@ async fn main() -> DynResult<()> {
     guard.restore();
 
     if *status_rx.borrow() == ConnectionState::Disconnected {
-        eprintln!("Disconnected");
+        let reason = disconnect_reason
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+            .unwrap_or_else(|| "Disconnected: connection closed".to_string());
+        eprintln!("{reason}");
     }
 
     Ok(())

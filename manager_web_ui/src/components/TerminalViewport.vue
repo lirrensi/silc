@@ -109,6 +109,12 @@ async function attachAndConnect(): Promise<void> {
     propagate: props.interactive === true,
   })
 
+  await manager.applyMeasuredFit(props.port, {
+    propagate: props.interactive === true,
+    force: true,
+    reason: 'takeover-preconnect',
+  })
+
   const ws = connectWebSocket(props.port, { force: true })
   if (ws && ws.readyState === WebSocket.OPEN) {
     requestHistoryFrame(ws)

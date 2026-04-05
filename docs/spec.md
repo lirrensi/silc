@@ -123,7 +123,7 @@ Includes: `session_id`, `port`, `name`, `title`, `cwd`, `title_updated_at`, `ali
 - `silc desktop` opens the manager UI in a native webview.
 - `silc list`, `shutdown`, `killall`, `restart-server`, `resurrect`, and `restart` operate on the daemon.
 - Session-targeted commands accept either a port or a resolved name.
-- `silc tui` launches the native TUI binary.
+- `silc tui` launches the native TUI binary and asks before taking over an active interactive client.
 - `silc open` is deprecated and launches the legacy Textual TUI.
 
 ## Stream-to-File

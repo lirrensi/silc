@@ -399,7 +399,7 @@ def _check_alive():
 | Localhost bypass | Localhost connections don't require token |
 | Token required for remote | Non-localhost connections require valid token |
 | Session alive check | All endpoints check session is alive before operating |
-| WebSocket cleanup | WebSocket disconnect MUST reset `tui_active` |
+| WebSocket cleanup | WebSocket disconnect MUST reset `tui_active`; `/status` exposes the active interactive flag for takeover prompts |
 
 ---
 
