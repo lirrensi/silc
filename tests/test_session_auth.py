@@ -9,7 +9,9 @@ import time
 
 import pytest
 import requests
+from fastapi.testclient import TestClient
 
+from silc.api.server import create_app
 import silc.daemon.manager as manager_module
 import tests.test_daemon as test_daemon_module
 from silc.daemon import kill_daemon
@@ -40,6 +42,18 @@ CUSTOM_DAEMON_PORT = _pick_free_daemon_port()
 manager_module.DAEMON_PORT = CUSTOM_DAEMON_PORT
 test_daemon_module.DAEMON_PORT = CUSTOM_DAEMON_PORT
 DAEMON_PORT = CUSTOM_DAEMON_PORT
+
+
+class _CorsSession:
+    session_id = "cors-test"
+    api_token = None
+
+    def get_status(self) -> dict:
+        return {"alive": True}
+
+    def resize(self, rows: int, cols: int) -> None:
+        self.rows = rows
+        self.cols = cols
 
 
 @pytest.mark.asyncio
@@ -99,3 +113,16 @@ async def test_session_requires_token_for_remote_requests() -> None:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         _shutdown_daemon()
+
+
+def test_session_api_allows_browser_resize_cors() -> None:
+    session = _CorsSession()
+    client = TestClient(create_app(session))
+
+    resp = client.post(
+        "/resize?rows=51&cols=146",
+        headers={"Origin": "http://127.0.0.1:19999"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") is not None

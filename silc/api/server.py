@@ -23,6 +23,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from ..core.cleaner import clean_output
@@ -85,6 +86,13 @@ def create_app(session: SilcSession) -> FastAPI:
 
     app = FastAPI(
         title=f"SILC Session {session.session_id}",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     # Create streaming service instance

@@ -289,6 +289,10 @@ Reset terminal state.
 
 Resize terminal dimensions.
 
+The session app sends permissive CORS headers so the browser manager UI can
+call this endpoint directly from `http://127.0.0.1:19999` or other local
+origins without CORS failures.
+
 **Query Parameters:**
 - `rows` (int, required)
 - `cols` (int, required)

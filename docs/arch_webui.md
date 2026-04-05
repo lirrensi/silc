@@ -398,7 +398,7 @@ sendViaWs(text): void        // Send text via WebSocket
 Session list navigation.
 
 **Features:**
-- **Resizable width** — Drag the right edge to resize when expanded (180px–400px)
+- **Resizable width** — Drag the right edge to resize when expanded (180px–400px), persisted in localStorage with a 320px default
 - **Create new session** — Modal dialog with installed shell picker and optional working directory input
 - **Header action strip** — Equal-width icon buttons for session creation, home, theme, refresh, and collapse
 - **Collapsed rail** — Desktop sidebar collapses to a thin visible icon rail instead of disappearing

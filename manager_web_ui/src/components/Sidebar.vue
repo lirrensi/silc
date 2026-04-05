@@ -31,15 +31,11 @@ const sidebarWidthStyle = computed(() => {
   }
 
   return {
-    width: ui.isSidebarCollapsed ? '3.75rem' : `min(${sidebarWidth.value}px, var(--shell-list-width))`,
+    width: ui.isSidebarCollapsed ? '3.75rem' : `${ui.sidebarWidth}px`,
   }
 })
 
-// Sidebar width state (resizable)
-const sidebarWidth = ref(220)
 const isResizing = ref(false)
-const minWidth = 180
-const maxWidth = 400
 
 // New session modal state
 const showNewSessionModal = ref(false)
@@ -199,8 +195,7 @@ function startResize(e: MouseEvent): void {
 
 function handleResize(e: MouseEvent): void {
   if (!isResizing.value) return
-  const newWidth = e.clientX
-  sidebarWidth.value = Math.min(maxWidth, Math.max(minWidth, newWidth))
+  ui.setSidebarWidth(e.clientX)
 }
 
 function stopResize(): void {
@@ -462,6 +457,7 @@ watch(
         v-if="!ui.isSidebarCollapsed"
         class="absolute right-0 top-0 hidden h-full w-1 cursor-col-resize transition-colors hover:bg-[var(--color-accent-muted)] md:block"
         :class="{ 'bg-[var(--color-accent-muted)]': isResizing }"
+        data-testid="sidebar-resize-handle"
         @mousedown="startResize"
       ></div>
   </aside>

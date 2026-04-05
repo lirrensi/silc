@@ -11,12 +11,17 @@ import type { ResolvedTheme, ThemePreference } from '@/lib/themes'
 import type { HomeGridDensity } from '@/lib/homePreview'
 
 const SIDEBAR_STORAGE_KEY = 'silc.sidebarCollapsed'
+const SIDEBAR_WIDTH_STORAGE_KEY = 'silc.sidebarWidth'
 const HOME_GRID_STORAGE_KEY = 'silc.homeGridDensity'
+const DEFAULT_SIDEBAR_WIDTH = 320
+const MIN_SIDEBAR_WIDTH = 180
+const MAX_SIDEBAR_WIDTH = 400
 
 export const useUiStore = defineStore('ui', () => {
   const themePreference = ref<ThemePreference>('system')
   const isMobileNavOpen = ref(false)
   const isSidebarCollapsed = ref(false)
+  const sidebarWidth = ref(DEFAULT_SIDEBAR_WIDTH)
   const isThemeReady = ref(false)
   const homeGridDensity = ref<HomeGridDensity>('3x3')
   let mediaQuery: MediaQueryList | null = null
@@ -38,6 +43,10 @@ export const useUiStore = defineStore('ui', () => {
     localStorage.setItem(SIDEBAR_STORAGE_KEY, String(isSidebarCollapsed.value))
   }
 
+  function persistSidebarWidth(): void {
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth.value))
+  }
+
   function persistHomeGridDensity(): void {
     localStorage.setItem(HOME_GRID_STORAGE_KEY, homeGridDensity.value)
   }
@@ -45,6 +54,12 @@ export const useUiStore = defineStore('ui', () => {
   function setSidebarCollapsed(collapsed: boolean): void {
     isSidebarCollapsed.value = collapsed
     persistSidebar()
+  }
+
+  function setSidebarWidth(width: number): void {
+    const nextWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)))
+    sidebarWidth.value = nextWidth
+    persistSidebarWidth()
   }
 
   function setTheme(preference: ThemePreference): void {
@@ -110,6 +125,17 @@ export const useUiStore = defineStore('ui', () => {
     isSidebarCollapsed.value = savedSidebar === 'true'
   }
 
+  const savedSidebarWidth = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)
+  if (savedSidebarWidth !== null) {
+    const parsedSidebarWidth = Number(savedSidebarWidth)
+    if (Number.isFinite(parsedSidebarWidth)) {
+      sidebarWidth.value = Math.min(
+        MAX_SIDEBAR_WIDTH,
+        Math.max(MIN_SIDEBAR_WIDTH, Math.round(parsedSidebarWidth)),
+      )
+    }
+  }
+
   const savedHomeGridDensity = localStorage.getItem(HOME_GRID_STORAGE_KEY)
   if (savedHomeGridDensity === '2x2' || savedHomeGridDensity === '3x3' || savedHomeGridDensity === '4x4') {
     homeGridDensity.value = savedHomeGridDensity
@@ -120,6 +146,7 @@ export const useUiStore = defineStore('ui', () => {
     resolvedTheme,
     isMobileNavOpen,
     isSidebarCollapsed,
+    sidebarWidth,
     isThemeReady,
     homeGridDensity,
     setTheme,
@@ -129,6 +156,7 @@ export const useUiStore = defineStore('ui', () => {
     openSidebar,
     closeSidebar,
     toggleSidebar,
+    setSidebarWidth,
     setHomeGridDensity,
     initTheme,
   }

@@ -618,7 +618,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
           setStatus(port, 'dead')
           return
         }
-        console.error(`[TerminalManager] applyMeasuredFit error for port ${port} (${options?.reason ?? 'unknown'}):`, err)
+        console.error(
+          `[TerminalManager] applyMeasuredFit error for port ${port} (${options?.reason ?? 'unknown'}):`,
+          err,
+        )
       }
     }
 

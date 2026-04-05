@@ -137,6 +137,51 @@ describe('Sidebar', () => {
     expect(wrapper.find('[title="Create new session"]').exists()).toBe(true)
   })
 
+  it('restores the sidebar width from localStorage', async () => {
+    localStorage.setItem('silc.sidebarWidth', '300')
+
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(Sidebar, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    expect(wrapper.find('aside').attributes('style')).toContain('width: 300px')
+  })
+
+  it('persists a resized sidebar width', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(Sidebar, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    await flushPromises()
+
+    const handle = wrapper.get('[data-testid="sidebar-resize-handle"]')
+    await handle.trigger('mousedown', { clientX: 312 })
+    document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 318 }))
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+
+    expect(localStorage.getItem('silc.sidebarWidth')).toBe('318')
+  })
+
   it('shows a local mode hint when sharing is off', async () => {
     const router = createRouter({
       history: createWebHashHistory(),
