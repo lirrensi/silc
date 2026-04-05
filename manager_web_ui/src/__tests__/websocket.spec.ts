@@ -12,6 +12,8 @@ const session = {
   title: '',
   cwd: null as string | null,
   titleUpdatedAt: null as string | null,
+  isRestoring: false,
+  onDataDisposable: null as null | { dispose: ReturnType<typeof vi.fn> },
   terminal: {
     onData: vi.fn().mockReturnValue({ dispose: vi.fn() }),
     clear: vi.fn(),
@@ -32,6 +34,9 @@ const manager = {
   safeWrite: vi.fn(),
   refreshTerminalSurface: vi.fn(),
   resolveHistoryRefresh: vi.fn(),
+  cancelHistoryRefresh: vi.fn(() => {
+    session.isRestoring = false
+  }),
   updateSessionTitle: vi.fn((_, title, updatedAt) => {
     session.title = title
     session.titleUpdatedAt = updatedAt
@@ -75,6 +80,8 @@ describe('connectWebSocket', () => {
     session.title = ''
     session.cwd = null
     session.titleUpdatedAt = null
+    session.isRestoring = false
+    session.onDataDisposable = null
     session.terminal.clear.mockClear()
     session.terminal.reset.mockClear()
     session.terminal.write.mockClear()
@@ -140,5 +147,64 @@ describe('connectWebSocket', () => {
     expect(session.terminal.reset).toHaveBeenCalled()
     expect(session.terminal.clear).not.toHaveBeenCalled()
     expect(manager.safeWrite).toHaveBeenCalledWith(20000, expect.any(Uint8Array))
+  })
+
+  it('rebinds input on an already-open websocket for a fresh terminal instance', () => {
+    const dispose = vi.fn()
+    session.onDataDisposable = { dispose }
+
+    const ws = connectWebSocket(20000)
+    if (ws) {
+      Object.defineProperty(ws, 'readyState', { value: MockWebSocket.OPEN })
+      session.ws = ws
+    }
+
+    session.terminal.onData.mockClear()
+
+    const reopened = connectWebSocket(20000)
+
+    expect(reopened).toBe(ws)
+    expect(dispose).toHaveBeenCalled()
+    expect(session.terminal.onData).toHaveBeenCalled()
+  })
+
+  it('swallows terminal DA probes before they reach the backend', () => {
+    const ws = connectWebSocket(20000) as MockWebSocket | null
+    expect(ws).toBeTruthy()
+
+    ws?.onopen?.(new Event('open'))
+
+    const onData = session.terminal.onData.mock.calls[0]?.[0] as ((data: string) => void) | undefined
+    expect(onData).toBeTruthy()
+
+    const socket = ws as MockWebSocket
+    const sendsBeforeProbe = socket.send.mock.calls.length
+    onData?.('\x1b[?1;2c')
+    expect(socket.send.mock.calls.length).toBe(sendsBeforeProbe)
+
+    onData?.('a')
+    expect(ws?.send).toHaveBeenCalled()
+  })
+
+  it('cancels a stuck restore when the websocket closes early', () => {
+    const ws = connectWebSocket(20000)
+    expect(ws).toBeTruthy()
+
+    session.isRestoring = true
+    ws?.onclose?.({ reason: 'closed' } as CloseEvent)
+
+    expect(manager.cancelHistoryRefresh).toHaveBeenCalledWith(20000)
+    expect(session.isRestoring).toBe(false)
+  })
+
+  it('cancels a stuck restore when the websocket errors during replay', () => {
+    const ws = connectWebSocket(20000)
+    expect(ws).toBeTruthy()
+
+    session.isRestoring = true
+    ws?.onerror?.(new Event('error'))
+
+    expect(manager.cancelHistoryRefresh).toHaveBeenCalledWith(20000)
+    expect(session.isRestoring).toBe(false)
   })
 })

@@ -34,6 +34,8 @@ export interface Session {
   webglAddon: WebglAddon | null
   rendererType: 'dom' | 'webgl'
   rendererFailed: boolean
+  terminalDisposed: boolean
+  isRestoring: boolean
   attachEpoch: number
   fitPropagationEnabled: boolean
   pendingOpen: boolean

@@ -10,6 +10,32 @@ import { useTerminalManager } from '@/stores/terminalManager'
 
 export { decodeWsFrame, encodeWsFrame, requestHistoryFrame, sendInputFrame, sendWsFrame } from '@/lib/websocketFrame'
 
+const SUPPRESSED_TERMINAL_INPUTS = new Set(['\x1b[c', '\x1b[0c', '\x1b[?1;2c'])
+
+function bindTerminalInput(port: number, ws: WebSocket): void {
+  const manager = useTerminalManager()
+  const session = manager.getSession(port)
+
+  if (!session) {
+    return
+  }
+
+  if (session.terminalDisposed) {
+    return
+  }
+
+  session.onDataDisposable?.dispose()
+  session.onDataDisposable = session.terminal.onData((data: string) => {
+    if (SUPPRESSED_TERMINAL_INPUTS.has(data)) {
+      return
+    }
+
+    if (ws.readyState === WebSocket.OPEN) {
+      sendInputFrame(ws, data)
+    }
+  })
+}
+
 export function connectWebSocket(port: number, options?: { force?: boolean }): WebSocket | null {
   console.log(`[WebSocket] connectWebSocket(${port})`)
   const manager = useTerminalManager()
@@ -22,6 +48,7 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
 
   const existingWs = session.ws
   if (existingWs && !options?.force && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) {
+    bindTerminalInput(port, existingWs)
     return existingWs
   }
 
@@ -61,6 +88,10 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
       const { header, payload } = decodeWsFrame(event.data)
 
       if (header.type === 'history') {
+        if (manager.getSession(port)?.terminalDisposed) {
+          return
+        }
+
         await manager.flushWrites(port)
         session.terminal.reset()
         if (payload.byteLength > 0) {
@@ -70,6 +101,10 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
         manager.refreshTerminalSurface(port)
         manager.resolveHistoryRefresh(port)
       } else if (header.type === 'output') {
+        if (manager.getSession(port)?.terminalDisposed) {
+          return
+        }
+
         if (payload.byteLength > 0) {
           manager.safeWrite(port, payload)
         }
@@ -100,6 +135,10 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
     console.log(`[WebSocket] Connection closed for port ${port}`)
     manager.setWs(port, null)
 
+    if (currentSession.isRestoring) {
+      manager.cancelHistoryRefresh(port)
+    }
+
     if (currentSession.status === 'restarting') {
       return
     }
@@ -113,16 +152,14 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
       return
     }
     console.error(`[WebSocket] Error for port ${port}:`, err)
+    if (manager.getSession(port)?.isRestoring) {
+      manager.cancelHistoryRefresh(port)
+    }
     manager.setDisconnectReason(port, 'WebSocket transport error')
     manager.setStatus(port, 'dead')
   }
 
-  session.onDataDisposable?.dispose()
-  session.onDataDisposable = session.terminal.onData((data: string) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      sendInputFrame(ws, data)
-    }
-  })
+  bindTerminalInput(port, ws)
 
   return ws
 }

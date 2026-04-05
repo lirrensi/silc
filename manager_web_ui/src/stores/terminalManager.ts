@@ -41,6 +41,72 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   const lastAppliedRendererType = new Map<number, RendererType>()
   const historyRefreshWaiters = new Map<number, Array<() => void>>()
 
+  function createManagedTerminal(theme: ResolvedTheme): {
+    terminal: Terminal
+    fitAddon: FitAddon
+  } {
+    const terminal = new Terminal({
+      cols: 120,
+      rows: 30,
+      scrollback: 5000,
+      convertEol: true,
+      allowProposedApi: true,
+      theme: getTerminalTheme(theme),
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontSize: 15,
+      lineHeight: 1.05,
+      cursorBlink: true,
+    })
+
+    const fitAddon = new FitAddon()
+    terminal.loadAddon(fitAddon)
+    terminal.loadAddon(new Unicode11Addon())
+    terminal.unicode.activeVersion = '11'
+
+    return { terminal, fitAddon }
+  }
+
+  function attachSessionKeyHandlers(session: Session): void {
+    session.terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type !== 'keydown') return true
+
+      if (event.ctrlKey && event.key === 'Enter') {
+        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+          sendInputFrame(session.ws, '\x1b[13;5u')
+        }
+        return false
+      }
+
+      if (event.shiftKey && event.key === 'Enter' && !event.ctrlKey) {
+        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+          sendInputFrame(session.ws, '\x1b[13;2u')
+        }
+        return false
+      }
+
+      if (event.ctrlKey && event.key === 'c' && session.terminal.hasSelection()) {
+        navigator.clipboard.writeText(session.terminal.getSelection())
+        session.terminal.clearSelection()
+        return false
+      }
+
+      if (event.ctrlKey && event.key === 'v' && !event.shiftKey && !event.altKey) {
+        void pasteClipboardText(session.port)
+        return false
+      }
+
+      return true
+    })
+  }
+
+  function initializeSessionTerminal(session: Session): void {
+    const { terminal, fitAddon } = createManagedTerminal(currentTheme.value)
+    session.terminal = terminal
+    session.fitAddon = fitAddon
+    session.terminalDisposed = false
+    attachSessionKeyHandlers(session)
+  }
+
   const sessionList = computed(() => {
     return Array.from(sessions.value.values())
   })
@@ -79,24 +145,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     title: string = '',
     titleUpdatedAt: string | null = null,
   ): Session {
-    const terminal = new Terminal({
-      cols: 120,
-      rows: 30,
-      scrollback: 5000,
-      convertEol: true,
-      allowProposedApi: true,
-      theme: getTerminalTheme(currentTheme.value),
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 15,
-      lineHeight: 1.05,
-      cursorBlink: true,
-    })
-
-    const fitAddon = new FitAddon()
-    terminal.loadAddon(fitAddon)
-    terminal.loadAddon(new Unicode11Addon())
-    terminal.unicode.activeVersion = '11'
-
     const session: Session = {
       port,
       sessionId,
@@ -105,8 +153,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       shell,
       cwd,
       titleUpdatedAt,
-      terminal,
-      fitAddon,
+      terminal: null as unknown as Terminal,
+      fitAddon: null as unknown as FitAddon,
       ws: null,
       onDataDisposable: null,
       status: 'idle',
@@ -120,6 +168,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       webglAddon: null as WebglAddon | null,
       rendererType: 'dom',
       rendererFailed: false,
+      terminalDisposed: false,
+      isRestoring: false,
       attachEpoch: 0,
       fitPropagationEnabled: true,
       pendingOpen: false,
@@ -128,36 +178,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       disconnectReason: null,
     }
 
-    terminal.attachCustomKeyEventHandler((event) => {
-      if (event.type !== 'keydown') return true
-
-      if (event.ctrlKey && event.key === 'Enter') {
-        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-          sendInputFrame(session.ws, '\x1b[13;5u')
-        }
-        return false
-      }
-
-      if (event.shiftKey && event.key === 'Enter' && !event.ctrlKey) {
-        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-          sendInputFrame(session.ws, '\x1b[13;2u')
-        }
-        return false
-      }
-
-      if (event.ctrlKey && event.key === 'c' && session.terminal.hasSelection()) {
-        navigator.clipboard.writeText(session.terminal.getSelection())
-        session.terminal.clearSelection()
-        return false
-      }
-
-      if (event.ctrlKey && event.key === 'v' && !event.shiftKey && !event.altKey) {
-        void pasteClipboardText(port)
-        return false
-      }
-
-      return true
-    })
+    initializeSessionTerminal(session)
 
     sessions.value.set(port, session)
     return session
@@ -263,6 +284,54 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     element._silcDocumentMouseDownHandler = undefined
   }
 
+  function disposeSessionTerminal(session: Session): void {
+    try {
+      clearPendingLayoutWork(session)
+    } catch {
+      // best-effort
+    }
+
+    try {
+      cleanupBrowserEventHandlers(session)
+    } catch {
+      // best-effort
+    }
+
+    try {
+      disposeRenderer(session)
+    } catch {
+      // best-effort
+    }
+
+    session.pendingOpen = false
+    session.isRestoring = false
+
+    try {
+      session.onDataDisposable?.dispose()
+    } catch {
+      // best-effort
+    }
+    session.onDataDisposable = null
+
+    session.writeQueue = []
+    session.writePending = false
+    session.writeInFlight = false
+
+    try {
+      resolveFlushWaiters(session)
+    } catch {
+      // best-effort
+    }
+
+    try {
+      session.terminal.dispose()
+    } catch {
+      // best-effort
+    }
+
+    session.terminalDisposed = true
+  }
+
   function resolveFlushWaiters(session: Session): void {
     if (session.writePending || session.writeInFlight || session.writeQueue.length > 0) {
       return
@@ -342,6 +411,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     currentSession.terminal.open(container)
     setupBrowserEventHandlers(currentSession)
+
     await enableRenderer(currentSession)
     scheduleFit(port, { immediate: true, reason: 'initial-open' })
   }
@@ -352,49 +422,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       return
     }
 
-    try {
-      clearPendingLayoutWork(session)
-    } catch {
-      // best-effort
-    }
-
-    try {
-      cleanupBrowserEventHandlers(session)
-    } catch {
-      // best-effort
-    }
-
-    try {
-      disposeRenderer(session)
-    } catch {
-      // best-effort
-    }
-
-    session.pendingOpen = false
+    disposeSessionTerminal(session)
 
     try {
       session.ws?.close()
-    } catch {
-      // best-effort
-    }
-
-    try {
-      session.onDataDisposable?.dispose()
-    } catch {
-      // best-effort
-    }
-
-    session.writePending = false
-    session.writeInFlight = false
-
-    try {
-      resolveFlushWaiters(session)
-    } catch {
-      // best-effort
-    }
-
-    try {
-      session.terminal.dispose()
     } catch {
       // best-effort
     }
@@ -425,6 +456,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
 
     session.fitPropagationEnabled = options?.propagate ?? true
+
+    if (session.terminalDisposed) {
+      initializeSessionTerminal(session)
+      session.isRestoring = true
+    }
 
     const element = session.terminal.element
 
@@ -630,14 +666,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
   function detach(port: number): void {
     const session = sessions.value.get(port)
-    if (!session?.terminal.element) {
+    if (!session || session.terminalDisposed) {
       return
     }
 
-    clearPendingLayoutWork(session)
-    disposeRenderer(session)
-    session.pendingOpen = false
-    session.terminal.element.remove()
+    disposeSessionTerminal(session)
   }
 
   function setStatus(port: number, status: SessionStatus): void {
@@ -705,6 +738,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const terminalTheme = getTerminalTheme(theme)
 
     for (const session of sessions.value.values()) {
+      if (session.terminalDisposed) {
+        continue
+      }
+
       session.terminal.options.theme = terminalTheme
       refreshRendererAfterSwap(session)
     }
@@ -713,6 +750,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   function safeWrite(port: number, data: Uint8Array): void {
     const session = sessions.value.get(port)
     if (!session) return
+
+    if (session.terminalDisposed) {
+      return
+    }
 
     if (data.byteLength === 0) {
       return
@@ -786,6 +827,28 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function resolveHistoryRefresh(port: number): void {
+    const session = sessions.value.get(port)
+    if (session) {
+      session.isRestoring = false
+    }
+
+    const waiters = historyRefreshWaiters.get(port)
+    if (!waiters) {
+      return
+    }
+
+    historyRefreshWaiters.delete(port)
+    for (const resolve of waiters) {
+      resolve()
+    }
+  }
+
+  function cancelHistoryRefresh(port: number): void {
+    const session = sessions.value.get(port)
+    if (session) {
+      session.isRestoring = false
+    }
+
     const waiters = historyRefreshWaiters.get(port)
     if (!waiters) {
       return
@@ -841,6 +904,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     flushWrites,
     waitForHistoryRefresh,
     resolveHistoryRefresh,
+    cancelHistoryRefresh,
     forceRedraw,
     refreshTerminalSurface,
     pasteClipboardText,

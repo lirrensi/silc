@@ -17,15 +17,18 @@ const props = defineProps<{
 
 const manager = useTerminalManager()
 const containerRef = ref<HTMLElement | null>(null)
+const session = computed(() => manager.getSession(props.port) ?? null)
 const viewportClass = computed(() => {
   return props.interactive
     ? 'terminal-shell terminal-shell--interactive h-full w-full bg-[var(--color-bg-secondary)] box-border'
     : 'terminal-shell terminal-shell--preview h-full w-full bg-[var(--color-bg-primary)] box-border'
 })
 const hostClass = computed(() => {
+  const restoringClass = session.value?.isRestoring === true ? ' terminal-host--restoring' : ''
+
   return props.interactive
-    ? 'terminal-host terminal-host--interactive min-h-0 flex-1'
-    : 'terminal-host terminal-host--preview min-h-0 h-full w-full'
+    ? `terminal-host terminal-host--interactive min-h-0 flex-1${restoringClass}`
+    : `terminal-host terminal-host--preview min-h-0 h-full w-full${restoringClass}`
 })
 
 let resizeObserver: ResizeObserver | null = null
@@ -99,19 +102,16 @@ async function fetchAndCreateSession(): Promise<void> {
 function attachAndConnect(): void {
   if (!containerRef.value) return
 
-  const session = manager.getSession(props.port)
-  if (!session) return
-
-  const hadTerminalElement = session.terminal.element !== null
+  const currentSession = manager.getSession(props.port)
+  if (!currentSession) return
 
   manager.attach(props.port, containerRef.value, {
     propagate: props.interactive === true,
   })
 
-  if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
-    connectWebSocket(props.port)
-  } else if (hadTerminalElement) {
-    requestHistoryFrame(session.ws)
+  const ws = connectWebSocket(props.port)
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    requestHistoryFrame(ws)
   }
 
   if (props.interactive) {
@@ -145,6 +145,11 @@ function attachAndConnect(): void {
 .terminal-host {
   min-height: 0;
   overflow: hidden;
+}
+
+.terminal-host--restoring {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .terminal-shell :deep(.xterm),
