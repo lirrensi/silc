@@ -1,6 +1,8 @@
 # SILC - SharedInteractiveLinkedCmd
 (bruh)
 
+💀 btw its under rewrite now, so wait a lil pls before next v4 version stable;
+
 [![PyPI version](https://badge.fury.io/py/silc.svg)](https://badge.fury.io/py/silc)
 [![Python Version](https://img.shields.io/pypi/pyversions/silc.svg)](https://pypi.org/project/silc/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
