@@ -41,3 +41,10 @@ def test_get_since_handles_trimmed_cursor() -> None:
 
     chunk_since_first, _ = buffer.get_since(first_cursor)
     assert chunk_since_first == b"56"
+
+
+def test_append_keeps_escape_prefix_when_trimming() -> None:
+    buffer = RawByteBuffer(maxlen=5)
+    buffer.append(b"abcde\x1b[?1;2c")
+
+    assert buffer.get_bytes().startswith(b"\x1b[")

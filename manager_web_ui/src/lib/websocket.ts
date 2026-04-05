@@ -62,7 +62,7 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
 
       if (header.type === 'history') {
         await manager.flushWrites(port)
-        session.terminal.clear()
+        session.terminal.reset()
         if (payload.byteLength > 0) {
           manager.safeWrite(port, payload)
         }

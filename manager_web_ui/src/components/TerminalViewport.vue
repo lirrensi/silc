@@ -7,7 +7,7 @@
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { listSessions } from '@/lib/daemonApi'
-import { connectWebSocket } from '@/lib/websocket'
+import { connectWebSocket, requestHistoryFrame } from '@/lib/websocket'
 import { useTerminalManager } from '@/stores/terminalManager'
 
 const props = defineProps<{
@@ -102,12 +102,16 @@ function attachAndConnect(): void {
   const session = manager.getSession(props.port)
   if (!session) return
 
+  const hadTerminalElement = session.terminal.element !== null
+
   manager.attach(props.port, containerRef.value, {
     propagate: props.interactive === true,
   })
 
   if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
     connectWebSocket(props.port)
+  } else if (hadTerminalElement) {
+    requestHistoryFrame(session.ws)
   }
 
   if (props.interactive) {

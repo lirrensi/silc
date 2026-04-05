@@ -12,7 +12,12 @@ const session = {
   title: '',
   cwd: null as string | null,
   titleUpdatedAt: null as string | null,
-  terminal: { onData: vi.fn().mockReturnValue({ dispose: vi.fn() }), clear: vi.fn() },
+  terminal: {
+    onData: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+    clear: vi.fn(),
+    reset: vi.fn(),
+    write: vi.fn(),
+  },
 }
 
 const manager = {
@@ -70,6 +75,9 @@ describe('connectWebSocket', () => {
     session.title = ''
     session.cwd = null
     session.titleUpdatedAt = null
+    session.terminal.clear.mockClear()
+    session.terminal.reset.mockClear()
+    session.terminal.write.mockClear()
     MockWebSocket.instances = []
     vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket)
   })
@@ -115,5 +123,22 @@ describe('connectWebSocket', () => {
 
     expect(manager.updateSessionCwd).toHaveBeenCalledWith(20000, 'C:/Temp/Project')
     expect(session.cwd).toBe('C:/Temp/Project')
+  })
+
+  it('resets the terminal before replaying history', async () => {
+    const ws = connectWebSocket(20000)
+    expect(ws).toBeTruthy()
+
+    ws?.onopen?.(new Event('open'))
+
+    await ws?.onmessage?.(
+      new MessageEvent('message', {
+        data: encodeWsFrame({ type: 'history' }, new TextEncoder().encode('\u001b[31mRED\u001b[0m')).buffer,
+      }),
+    )
+
+    expect(session.terminal.reset).toHaveBeenCalled()
+    expect(session.terminal.clear).not.toHaveBeenCalled()
+    expect(manager.safeWrite).toHaveBeenCalledWith(20000, expect.any(Uint8Array))
   })
 })

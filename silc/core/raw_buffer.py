@@ -8,6 +8,9 @@ from typing import List, Tuple
 class RawByteBuffer:
     """Store PTY bytes along with a cursor so callers can replay ranges."""
 
+    _ESCAPE_BYTE = 0x1B
+    _TRIM_LOOKBACK = 64
+
     def __init__(self, maxlen: int = 65536) -> None:
         self.maxlen = maxlen
         self._buffer = bytearray()
@@ -28,8 +31,22 @@ class RawByteBuffer:
             return
 
         overflow = len(self._buffer) - self.maxlen
-        del self._buffer[:overflow]
-        self._start_offset += overflow
+        cut = self._find_safe_trim_cut(overflow)
+        del self._buffer[:cut]
+        self._start_offset += cut
+
+    def _find_safe_trim_cut(self, overflow: int) -> int:
+        """Prefer trimming before a nearby escape prefix instead of mid-sequence."""
+        cut = max(0, min(overflow, len(self._buffer)))
+        if cut == 0:
+            return 0
+
+        search_start = max(0, cut - self._TRIM_LOOKBACK)
+        esc_index = self._buffer.rfind(bytes([self._ESCAPE_BYTE]), search_start, cut)
+        if esc_index != -1:
+            return esc_index
+
+        return cut
 
     def get_last(self, lines: int | None = 100) -> List[str]:
         """Return the decoded text split into the last N logical lines."""
