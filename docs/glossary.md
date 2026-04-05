@@ -6,19 +6,39 @@ This document defines terms used throughout SILC documentation. Link to this ins
 
 ## Daemon
 
-The background process that manages sessions. Listens on port 19999 for management API requests. Creates and destroys sessions on demand. See [arch_daemon.md](arch_daemon.md).
+The background process that owns session records and reconciles live runtime to those records. Listens on port 19999 for management API requests. See [arch_daemon.md](arch_daemon.md).
 
 ---
 
 ## Session
 
-An independent shell with its own PTY (pseudo-terminal). Each session:
+An independent shell identity owned by a daemon record. Each session:
 - Has a unique port (20000+)
 - Has a unique session ID (8-char UUID)
 - Maintains its own output buffer
 - Can be accessed via CLI, HTTP API, or WebSocket
 
+The live PTY is the primary runtime resource for a session, but the session continues to exist conceptually while its record exists, even if runtime is being restarted or reconciled.
+
 See [arch_core.md](arch_core.md).
+
+---
+
+## Session Record
+
+The daemon-owned desired-state entry that defines that a session should exist. Removing the record is the real death of a session.
+
+---
+
+## Session Runtime
+
+The currently realized live resources for a session record, including PTY, per-session server, socket, generation, and health state.
+
+---
+
+## Messenger
+
+The replaceable per-session HTTP/WebSocket server attached to a session runtime. Messenger failure does not imply session death.
 
 ---
 
@@ -123,7 +143,7 @@ __silc_exec() {
 
 ## Session Registry
 
-In-memory tracking of active sessions. Maps port → session metadata.
+Daemon-owned tracking of desired sessions. The registry is the source of truth for which sessions should exist; live runtime may be recreated to match it.
 
 ---
 
@@ -135,7 +155,7 @@ A file containing the daemon process ID. Used to detect if daemon is already run
 
 ## Garbage Collection
 
-Background process that closes idle sessions (default: 30 minutes idle).
+Background daemon work such as reconciliation, log rotation, and bounded cleanup. Session lifetime is controlled by record existence, not idle timeout.
 
 ---
 

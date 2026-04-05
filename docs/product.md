@@ -88,8 +88,8 @@ Unlike tmux, screen, or SSH, SILC provides:
 ```
 
 **Components:**
-- **Daemon** — Background process managing sessions (port 19999)
-- **Session** — Independent shell with its own PTY (ports 20000+)
+- **Daemon** — Background process that owns session records and reconciles live runtime (port 19999)
+- **Session** — Persistent session identity whose live PTY can be restarted without losing the session record (ports 20000+)
 - **CLI** — Command-line interface for human interaction
 - **API** — FastAPI server for programmatic access
 - **TUI/Web UI** — Interactive interfaces

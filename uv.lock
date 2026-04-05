@@ -1391,7 +1391,7 @@ wheels = [
 
 [[package]]
 name = "silc"
-version = "0.3.6"
+version = "0.3.8"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
