@@ -52,6 +52,7 @@ DEFAULT_COMMAND_TIMEOUT = 600  # 10 minutes in seconds
 # Buffer and PTY configuration
 DEFAULT_BUFFER_SIZE = 65536  # 64KB buffer for PTY output
 DEFAULT_READ_SIZE = 4096  # Default read chunk size from PTY
+STATUS_TAIL_LIMIT = 8192  # Keep enough recent text for prompt metadata
 
 # Timing constants (in seconds)
 POLL_INTERVAL = 0.05  # Default poll interval for async operations
@@ -102,6 +103,9 @@ class SilcSession:
         self._snapshot_cache: bytes | None = None
         self._snapshot_dirty = True
         self._output_event: asyncio.Event | None = None
+        self._status_tail_text = ""
+        self._status_last_line = ""
+        self._status_waiting_for_input = False
         self.created_at = datetime.utcnow()
         self.last_access = datetime.utcnow()
         self.last_output = datetime.utcnow()
@@ -127,6 +131,11 @@ class SilcSession:
             return
         self._output_event = asyncio.Event()
         self._read_task = asyncio.create_task(self._read_loop())
+        # Keep a short startup grace period so the PTY/read task can settle
+        # before callers treat the session as fully ready.
+        # This is intentionally conservative and can be replaced later by a
+        # real readiness signal if we add one.
+        await asyncio.sleep(0.5)
         self._gc_task = asyncio.create_task(self._garbage_collect())
 
     async def _read_loop(self) -> None:
@@ -141,6 +150,7 @@ class SilcSession:
                     for cwd in self._osc_cwd_parser.feed(data):
                         self._apply_cwd(cwd)
                     self.buffer.append(data)
+                    self._update_status_metadata(data)
                     if self._output_event is not None:
                         self._output_event.set()
                     for listener in list(self._output_listeners):
@@ -213,6 +223,9 @@ class SilcSession:
         self.buffer.clear()
         self._snapshot_cache = None
         self._snapshot_dirty = True
+        self._status_tail_text = ""
+        self._status_last_line = ""
+        self._status_waiting_for_input = False
         await self.pty.write(sequence.encode("utf-8", errors="replace"))
         await self._wait_for_prompt(timeout=2.0)
         self.last_access = datetime.utcnow()
@@ -225,6 +238,9 @@ class SilcSession:
         self.buffer.clear()
         self._snapshot_cache = None
         self._snapshot_dirty = True
+        self._status_tail_text = ""
+        self._status_last_line = ""
+        self._status_waiting_for_input = False
         await self.pty.write(sequence.encode("utf-8", errors="replace"))
         await self._wait_for_prompt(timeout=2.0)
         self.last_access = datetime.utcnow()
@@ -504,12 +520,6 @@ class SilcSession:
 
     def get_status(self) -> dict:
         self.last_access = datetime.utcnow()
-        rendered_output = self.get_output(lines=1)
-        last_line = ""
-        rendered_lines = rendered_output.splitlines()
-        if rendered_lines:
-            last_line = rendered_lines[-1]
-        waiting = bool(last_line and last_line.strip().endswith((":?", "]")))
         return {
             "session_id": self.session_id,
             "port": self.port,
@@ -519,8 +529,8 @@ class SilcSession:
             "title_updated_at": self.title_updated_at.isoformat() + "Z",
             "alive": self._read_task is not None and not self._read_task.done(),
             "idle_seconds": (datetime.utcnow() - self.last_output).seconds,
-            "waiting_for_input": waiting,
-            "last_line": last_line,
+            "waiting_for_input": self._status_waiting_for_input,
+            "last_line": self._status_last_line,
             "run_locked": self.run_lock.locked(),
         }
 
@@ -539,6 +549,39 @@ class SilcSession:
         self.buffer.clear()
         self._snapshot_cache = None
         self._snapshot_dirty = True
+        self._status_tail_text = ""
+        self._status_last_line = ""
+        self._status_waiting_for_input = False
+
+    def _update_status_metadata(self, data: bytes) -> None:
+        """Update cached prompt metadata from a new PTY chunk."""
+        decoded = data.decode("utf-8", errors="replace")
+        if not decoded:
+            return
+
+        self._status_tail_text += decoded
+        if len(self._status_tail_text) > STATUS_TAIL_LIMIT:
+            self._status_tail_text = self._status_tail_text[-STATUS_TAIL_LIMIT:]
+
+        normalized = self._status_tail_text.replace("\r\n", "\n").replace("\r", "\n")
+        lines = normalized.split("\n")
+
+        last_line = ""
+        for line in reversed(lines):
+            trimmed = line.rstrip()
+            if not trimmed:
+                continue
+            if any(fragment in trimmed for fragment in HELPER_ECHO_FRAGMENTS):
+                continue
+            if SILC_SENTINEL_PATTERN.search(trimmed):
+                continue
+            last_line = trimmed
+            break
+
+        self._status_last_line = last_line
+        self._status_waiting_for_input = bool(
+            last_line and last_line.strip().endswith((":?", "]"))
+        )
 
     async def close(self) -> None:
         if self._closed:

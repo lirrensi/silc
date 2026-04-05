@@ -6,13 +6,14 @@
 """Tests that exercise the SILC shell lifecycle."""
 
 import asyncio
+import re
 import sys
 import uuid
 
 import pytest
 
 from silc.core.session import SilcSession
-from silc.utils.shell_detect import detect_shell
+from silc.utils.shell_detect import ShellInfo, detect_shell
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
@@ -42,6 +43,29 @@ class _BatchBuffer:
             self.cursor = len(self.all_data)
             return remaining, self.cursor
         return b"", cursor
+
+
+class _DummyPTY:
+    async def read(self, size: int) -> bytes:
+        return b""
+
+    async def write(self, data: bytes) -> None:
+        return None
+
+    def resize(self, rows: int, cols: int) -> None:
+        return None
+
+    def is_alive(self) -> bool:
+        return True
+
+    def kill(self) -> None:
+        return None
+
+    def send_sigterm(self) -> None:
+        return None
+
+    def send_sigkill(self) -> None:
+        return None
 
     def get_last(self, lines: int = 100):
         return []
@@ -152,3 +176,24 @@ async def test_run_command_brackets_between_markers(monkeypatch) -> None:
         assert "__SILC_END" not in result["output"]
     finally:
         await session.close()
+
+
+def test_get_status_uses_incremental_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "silc.core.session.create_pty", lambda *args, **kwargs: _DummyPTY()
+    )
+
+    shell_info = ShellInfo("bash", "bash", re.compile(r".*"))
+    session = SilcSession(port=20003, name="status-test", shell_info=shell_info)
+
+    session._update_status_metadata(b"__SILC_BEGIN_deadbeef__\r\nworking...\r\nready]")
+    monkeypatch.setattr(
+        session,
+        "get_rendered_output",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("render used")),
+    )
+
+    status = session.get_status()
+
+    assert status["last_line"] == "ready]"
+    assert status["waiting_for_input"] is True

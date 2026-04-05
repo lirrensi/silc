@@ -56,3 +56,24 @@ def test_session_status_tracks_live_cwd(monkeypatch) -> None:
     status = session.get_status()
     assert status["cwd"] == "/tmp/project"
     assert events == ["/tmp/project"]
+
+
+def test_session_status_uses_incremental_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "silc.core.session.create_pty", lambda *args, **kwargs: _DummyPTY()
+    )
+
+    shell_info = ShellInfo("pwsh", "pwsh.exe", re.compile(r".*"))
+    session = SilcSession(port=20004, name="status-test", shell_info=shell_info)
+
+    session._update_status_metadata(b"__SILC_BEGIN_deadbeef__\r\nworking...\r\nready]")
+    monkeypatch.setattr(
+        session,
+        "get_rendered_output",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("render used")),
+    )
+
+    status = session.get_status()
+
+    assert status["last_line"] == "ready]"
+    assert status["waiting_for_input"] is True
