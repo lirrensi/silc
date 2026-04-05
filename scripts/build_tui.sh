@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPTS_DIR/.." && pwd)"
 TUI_DIR="$ROOT_DIR/tui_client"
 DIST_DIR="$TUI_DIR/dist"
 

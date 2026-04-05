@@ -44,7 +44,7 @@ packages = ["silc"]
 include = ["static/manager/**/*", "static/scripts/**/*"]
 
 [tool.hatch.build.hooks.custom]
-path = "hatch_build.py"
+path = "scripts/hatch_build.py"
 
 [build-system]
 requires = ["hatchling"]

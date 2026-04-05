@@ -1,7 +1,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$RootDir = Split-Path -Parent $PSCommandPath
+$ScriptsDir = Split-Path -Parent $PSCommandPath
+$RootDir = Split-Path -Parent $ScriptsDir
 $TuiDir = Join-Path $RootDir 'tui_client'
 $DistDir = Join-Path $TuiDir 'dist'
 $Target = 'x86_64-pc-windows-gnu'
