@@ -38,6 +38,7 @@ const isRestarting = computed(() => session.value?.status === 'restarting')
 const hasConnectionProblem = computed(() => !isActive.value)
 const controlsDisabled = computed(() => !isActive.value || activeOperation.value !== null)
 const disconnectReason = computed(() => session.value?.disconnectReason ?? '')
+const sessionBootstrapped = ref(false)
 
 function tip(primary: string, secondary: string): string {
   return `${primary}\n${secondary}`
@@ -45,6 +46,38 @@ function tip(primary: string, secondary: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function ensureCurrentSessionVisible(): Promise<boolean> {
+  try {
+    const daemonSessions = await listSessions()
+    manager.reconcileSessions(daemonSessions)
+
+    if (!daemonSessions.some((daemonSession) => daemonSession.port === port.value)) {
+      sessionBootstrapped.value = false
+      manager.removeSession(port.value)
+      await router.replace('/')
+      return false
+    }
+
+    return true
+  } catch (err) {
+    console.error('Failed to sync session with daemon:', err)
+    return true
+  }
+}
+
+async function bootstrapSession(): Promise<void> {
+  manager.setFocused(port.value)
+  sessionBootstrapped.value = false
+
+  const isVisible = await ensureCurrentSessionVisible()
+  if (!isVisible) {
+    return
+  }
+
+  sessionBootstrapped.value = true
+  await refreshTerminal()
 }
 
 async function runOperation(
@@ -126,17 +159,25 @@ const connectionLabel = computed(() => {
 })
 
 onMounted(() => {
-  manager.setFocused(port.value)
-  void refreshTerminal()
+  void bootstrapSession()
 })
 
 onUnmounted(() => {
+  sessionBootstrapped.value = false
   manager.setFocused(null)
 })
 
+watch(session, (next, previous) => {
+  if (!sessionBootstrapped.value || previous === undefined || next !== undefined) {
+    return
+  }
+
+  sessionBootstrapped.value = false
+  void router.replace('/')
+})
+
 watch(port, () => {
-  manager.setFocused(port.value)
-  void refreshTerminal()
+  void bootstrapSession()
 })
 
 async function refreshTerminal(): Promise<void> {
@@ -168,6 +209,11 @@ async function refreshTerminal(): Promise<void> {
 
 async function handleRefresh(): Promise<void> {
   try {
+    const isVisible = await ensureCurrentSessionVisible()
+    if (!isVisible) {
+      return
+    }
+
     await runOperation('Refresh', 'info', [
       {
         stage: 'Requesting backend history',

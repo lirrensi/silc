@@ -12,7 +12,10 @@ export interface WsFrame {
   payload: Uint8Array
 }
 
-export function encodeWsFrame(header: Record<string, unknown>, payload: Uint8Array = new Uint8Array()): Uint8Array {
+export function encodeWsFrame(
+  header: Record<string, unknown>,
+  payload: Uint8Array = new Uint8Array(),
+): Uint8Array {
   const headerBytes = textEncoder.encode(JSON.stringify(header))
   const frame = new Uint8Array(4 + headerBytes.length + payload.byteLength)
   const view = new DataView(frame.buffer)
@@ -63,7 +66,7 @@ export function sendWsFrame(
   header: Record<string, unknown>,
   payload: Uint8Array = new Uint8Array(),
 ): void {
-  ws.send(encodeWsFrame(header, payload))
+  ws.send(encodeWsFrame(header, payload).buffer as ArrayBuffer)
 }
 
 export function sendInputFrame(ws: WebSocket, text: string, nonewline: boolean = true): void {

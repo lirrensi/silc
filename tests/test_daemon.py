@@ -448,6 +448,37 @@ async def test_remove_session_publishes_removed(
     assert published == ["session/removed"]
 
 
+@pytest.mark.asyncio
+async def test_cleanup_runtime_generation_ignores_cancelled_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry = daemon.registry.add(20021, "cleanup-test", "sess-cleanup", "bash")
+    session = _EventTestSession(entry.port, entry.name, entry.session_id)
+    task = asyncio.create_task(asyncio.sleep(10))
+    runtime = SimpleNamespace(
+        generation=1,
+        session=session,
+        server=None,
+        socket=None,
+        server_task=task,
+        state=SessionState.RUNNING,
+    )
+    daemon.runtime_by_port[entry.port] = runtime
+    daemon._session_tasks[entry.port] = task
+
+    monkeypatch.setattr(
+        daemon, "_kill_processes_on_port", lambda *args, **kwargs: asyncio.sleep(0)
+    )
+    monkeypatch.setattr(daemon, "_close_session_socket", lambda *args, **kwargs: None)
+
+    await daemon._cleanup_runtime_generation(
+        entry.port, runtime.generation, remove_record=False
+    )
+
+    assert task.cancelled()
+
+
 # ============================================================================
 # Integration tests (daemon needed)
 # ============================================================================

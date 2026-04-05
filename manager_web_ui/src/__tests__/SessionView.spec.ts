@@ -12,6 +12,8 @@ import SessionView from '../views/SessionView.vue'
 
 const mockSendInputFrame = vi.hoisted(() => vi.fn())
 const mockPasteClipboardText = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockListSessions = vi.hoisted(() => vi.fn())
+const mockRemoveSession = vi.hoisted(() => vi.fn())
 
 const session = {
   status: 'idle' as SessionStatus,
@@ -27,7 +29,7 @@ const session = {
 vi.mock('@/lib/daemonApi', () => ({
   closeSession: vi.fn(),
   killSession: vi.fn(),
-  listSessions: vi.fn().mockResolvedValue([]),
+  listSessions: mockListSessions,
   restartSession: vi.fn(),
   sendInterrupt: vi.fn(),
   sendSigkill: vi.fn(),
@@ -50,7 +52,7 @@ vi.mock('@/stores/terminalManager', () => ({
     resolveHistoryRefresh: vi.fn(),
     refreshTerminalSurface: vi.fn(),
     forceRedraw: vi.fn(),
-    removeSession: vi.fn(),
+    removeSession: mockRemoveSession,
     setStatus: vi.fn(),
     reconcileSessions: vi.fn(),
   }),
@@ -61,10 +63,25 @@ describe('SessionView', () => {
     localStorage.clear()
     session.status = 'idle'
     session.ws = null
+    mockListSessions.mockResolvedValue([
+      {
+        port: 1234,
+        name: 'demo',
+        title: 'demo',
+        session_id: 'sess-1',
+        shell: 'bash',
+        cwd: null,
+        title_updated_at: null,
+        idle_seconds: 0,
+        alive: true,
+        runtime_state: 'running',
+      },
+    ])
     mockSendInputFrame.mockClear()
     mockPasteClipboardText.mockClear()
     session.terminal.reset.mockClear()
     session.terminal.scrollToBottom.mockClear()
+    mockRemoveSession.mockClear()
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: vi.fn().mockImplementation(() => ({
@@ -170,5 +187,31 @@ describe('SessionView', () => {
     expect(mockPasteClipboardText).toHaveBeenCalledWith(1234)
     expect(wrapper.text()).not.toContain('Paste text into shell')
     expect(wrapper.text()).not.toContain('Processing')
+  })
+
+  it('redirects home when the selected session is no longer in the registry', async () => {
+    mockListSessions.mockResolvedValueOnce([])
+
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/:port(\\d+)', component: SessionView, props: true }],
+    })
+
+    await router.push('/1234')
+    await router.isReady()
+
+    const wrapper = mount(SessionView, {
+      global: {
+        plugins: [createPinia(), router],
+        stubs: {
+          TerminalViewport: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(mockRemoveSession).toHaveBeenCalledWith(1234)
   })
 })

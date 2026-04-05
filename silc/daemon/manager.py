@@ -223,7 +223,9 @@ class SilcDaemon:
         self._session_tasks: Dict[int, asyncio.Task] = {}
         self._cleanup_tasks: Dict[int, asyncio.Task[None]] = {}
         self._daemon_server: uvicorn.Server | None = None
-        self._session_create_lock = asyncio.Lock()  # Serialize session creation
+        self._registry_lock = (
+            asyncio.Lock()
+        )  # Serialize registry mutations and persistence
 
     def _create_daemon_api(self) -> FastAPI:
         """Create daemon management API."""
@@ -288,7 +290,7 @@ class SilcDaemon:
             """Create a new session."""
             operation = "create_session"
             try:
-                async with self._session_create_lock:
+                async with self._registry_lock:
                     selected_port = port
                     is_global = False
                     token: str | None = None
@@ -463,44 +465,45 @@ class SilcDaemon:
             """Rename a session in place."""
             operation = "rename_session"
             try:
-                entry = self._get_desired_entry_for_port(port)
-                if not entry:
-                    raise HTTPException(status_code=404, detail="Session not found")
+                async with self._registry_lock:
+                    entry = self._get_desired_entry_for_port(port)
+                    if not entry:
+                        raise HTTPException(status_code=404, detail="Session not found")
 
-                session_name = request.name.lower().strip()
-                if not is_valid_name(session_name):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=_build_validation_error_payload(
-                            operation,
-                            "Invalid name format. Must match [a-z][a-z0-9-]*[a-z0-9]",
-                        ),
-                    )
+                    session_name = request.name.lower().strip()
+                    if not is_valid_name(session_name):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=_build_validation_error_payload(
+                                operation,
+                                "Invalid name format. Must match [a-z][a-z0-9-]*[a-z0-9]",
+                            ),
+                        )
 
-                existing = self.registry.get_by_name(session_name)
-                if existing is not None and existing.port != port:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=_build_validation_error_payload(
-                            operation,
-                            f"Session name '{session_name}' is already in use",
-                        ),
-                    )
+                    existing = self.registry.get_by_name(session_name)
+                    if existing is not None and existing.port != port:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=_build_validation_error_payload(
+                                operation,
+                                f"Session name '{session_name}' is already in use",
+                            ),
+                        )
 
-                updated_entry = self.registry.rename(port, session_name)
-                if updated_entry is None:
-                    raise HTTPException(status_code=404, detail="Session not found")
+                    updated_entry = self.registry.rename(port, session_name)
+                    if updated_entry is None:
+                        raise HTTPException(status_code=404, detail="Session not found")
 
-                runtime = self.runtime_by_port.get(port)
-                if runtime is not None:
-                    runtime.name = session_name
-                    if runtime.session is not None:
-                        runtime.session.name = session_name
+                    runtime = self.runtime_by_port.get(port)
+                    if runtime is not None:
+                        runtime.name = session_name
+                        if runtime.session is not None:
+                            runtime.session.name = session_name
 
-                self._persist_desired_sessions()
-                await self._publish_session_event("session/renamed", updated_entry)
+                    self._persist_desired_sessions()
+                    await self._publish_session_event("session/renamed", updated_entry)
 
-                return self._serialize_session_entry(updated_entry)
+                    return self._serialize_session_entry(updated_entry)
             except HTTPException:
                 raise
             except Exception as exc:
@@ -514,17 +517,18 @@ class SilcDaemon:
             """Reorder active sessions and persist the new order."""
             operation = "reorder_sessions"
             try:
-                self.registry.reorder(request.ports)
-                self._persist_desired_sessions()
-                await self.events.publish(
-                    build_manager_event_header(
-                        "session/reordered",
-                        sessions=self._list_session_snapshots(),
-                        ports=request.ports,
+                async with self._registry_lock:
+                    self.registry.reorder(request.ports)
+                    self._persist_desired_sessions()
+                    await self.events.publish(
+                        build_manager_event_header(
+                            "session/reordered",
+                            sessions=self._list_session_snapshots(),
+                            ports=request.ports,
+                        )
                     )
-                )
-                await self._publish_session_snapshot()
-                return {"sessions": self._list_session_snapshots()}
+                    await self._publish_session_snapshot()
+                    return {"sessions": self._list_session_snapshots()}
             except ValueError as exc:
                 raise HTTPException(
                     status_code=400,
@@ -586,11 +590,12 @@ class SilcDaemon:
             """Gracefully close a session."""
             operation = "close_session"
             try:
-                if not self._get_desired_entry_for_port(port):
-                    raise HTTPException(status_code=404, detail="Session not found")
+                async with self._registry_lock:
+                    if not self._get_desired_entry_for_port(port):
+                        raise HTTPException(status_code=404, detail="Session not found")
 
-                await self._remove_record_and_stop_reconciliation(port)
-                return {"status": "closed"}
+                    await self._remove_record_and_stop_reconciliation(port)
+                    return {"status": "closed"}
             except HTTPException:
                 raise
             except Exception as exc:
@@ -604,26 +609,27 @@ class SilcDaemon:
             """Force kill a session."""
             operation = "kill_session"
             try:
-                entry = self._get_desired_entry_for_port(port)
-                if not entry:
-                    raise HTTPException(status_code=404, detail="Session not found")
+                async with self._registry_lock:
+                    entry = self._get_desired_entry_for_port(port)
+                    if not entry:
+                        raise HTTPException(status_code=404, detail="Session not found")
 
-                runtime = self.runtime_by_port.get(port)
-                session = runtime.session if runtime else None
-                if session:
-                    try:
-                        await asyncio.wait_for(session.force_kill(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        write_daemon_log(
-                            f"Timeout force-killing session PTY: port={port}"
-                        )
-                    except Exception as exc:
-                        write_daemon_log(
-                            f"Error force-killing session PTY: port={port}, error={exc}"
-                        )
+                    runtime = self.runtime_by_port.get(port)
+                    session = runtime.session if runtime else None
+                    if session:
+                        try:
+                            await asyncio.wait_for(session.force_kill(), timeout=1.0)
+                        except asyncio.TimeoutError:
+                            write_daemon_log(
+                                f"Timeout force-killing session PTY: port={port}"
+                            )
+                        except Exception as exc:
+                            write_daemon_log(
+                                f"Error force-killing session PTY: port={port}, error={exc}"
+                            )
 
-                await self._remove_record_and_stop_reconciliation(port)
-                return {"status": "killed"}
+                    await self._remove_record_and_stop_reconciliation(port)
+                    return {"status": "killed"}
             except HTTPException:
                 raise
             except Exception as exc:
@@ -637,38 +643,43 @@ class SilcDaemon:
             """Restart a session with the same port, name, cwd, and shell type."""
             operation = "restart_session"
             try:
-                entry = self._get_desired_entry_for_port(port)
-                if not entry:
-                    raise HTTPException(status_code=404, detail="Session not found")
+                async with self._registry_lock:
+                    entry = self._get_desired_entry_for_port(port)
+                    if not entry:
+                        raise HTTPException(status_code=404, detail="Session not found")
 
-                runtime = self._get_or_create_runtime(entry)
-                runtime.state = SessionState.STOPPING
-                session = runtime.session
-                if session:
-                    with contextlib.suppress(Exception):
-                        await asyncio.wait_for(session.force_kill(), timeout=1.0)
+                    runtime = self._get_or_create_runtime(entry)
+                    runtime.state = SessionState.STOPPING
+                    session = runtime.session
+                    if session:
+                        with contextlib.suppress(Exception):
+                            await asyncio.wait_for(session.force_kill(), timeout=1.0)
 
-                await self._cleanup_runtime_generation(
-                    port, runtime.generation, remove_record=False
-                )
+                    await self._cleanup_runtime_generation(
+                        port, runtime.generation, remove_record=False
+                    )
 
-                runtime = self._get_or_create_runtime(entry)
-                runtime = await self._realize_runtime(
-                    entry,
-                    runtime,
-                    preserve_session_id=entry.session_id,
-                )
+                    runtime = self._get_or_create_runtime(entry)
+                    runtime = await self._realize_runtime(
+                        entry,
+                        runtime,
+                        preserve_session_id=entry.session_id,
+                    )
 
-                write_daemon_log(f"Session restarted: port={port}, name={entry.name}")
-                await self._publish_session_event("session/restarted", entry)
+                    write_daemon_log(
+                        f"Session restarted: port={port}, name={entry.name}"
+                    )
+                    await self._publish_session_event("session/restarted", entry)
 
-                return {
-                    "status": "restarted",
-                    "port": port,
-                    "name": entry.name,
-                    "title": runtime.session.title if runtime.session else entry.title,
-                    "shell": entry.shell_type,
-                }
+                    return {
+                        "status": "restarted",
+                        "port": port,
+                        "name": entry.name,
+                        "title": (
+                            runtime.session.title if runtime.session else entry.title
+                        ),
+                        "shell": entry.shell_type,
+                    }
             except HTTPException:
                 raise
             except Exception as exc:
@@ -929,8 +940,9 @@ class SilcDaemon:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
                 await asyncio.wait_for(task, timeout=2.0)
-            with contextlib.suppress(Exception):
-                task.exception()
+            if not task.cancelled():
+                with contextlib.suppress(Exception):
+                    task.exception()
 
         session = self.sessions.pop(port, None) or runtime.session
         if session:
