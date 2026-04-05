@@ -16,13 +16,13 @@ export async function enableRenderer(session: Session): Promise<void> {
 
   try {
     addon = new WebglAddon()
-    session.terminal.loadAddon(addon)
     addon.onContextLoss(() => {
       disposeRenderer(session)
       session.rendererType = 'dom'
       session.rendererFailed = true
       refreshRendererAfterSwap(session)
     })
+    session.terminal.loadAddon(addon)
     session.webglAddon = addon
     session.rendererType = 'webgl'
     session.rendererFailed = false
