@@ -14,6 +14,10 @@ The API server exposes session operations via:
 
 Each session gets its own FastAPI app instance bound to its port.
 
+The daemon management API in `silc/daemon/manager.py` is a separate FastAPI app
+that owns daemon-wide failure containment for manager operations such as session
+creation, restart, resurrection, and shutdown.
+
 ---
 
 ## Scope Boundary
@@ -339,6 +343,22 @@ The JSON header uses `type`, not `event`.
 ---
 
 ## Error Handling
+
+### Daemon Request-Failure Boundary
+
+The daemon API installs app-wide exception handlers for both `HTTPException` and
+generic `Exception`.
+
+- `HTTPException` is always returned as JSON and must not crash the daemon.
+- Unexpected daemon route failures are converted into HTTP 500 JSON responses
+  with `error`, `detail`, `operation`, and `traceback` fields.
+- Route-local failures in daemon endpoints such as `create_session` and
+  `restart_session` must be contained inside the request boundary and must not
+  terminate the daemon process.
+- Session resurrection failures are quarantined per saved session entry,
+  appended to the resurrection result as failures, and logged with full
+  traceback detail instead of aborting daemon startup.
+- Shutdown and `killall` remain the only expected process-exit paths.
 
 ### Session Not Alive
 

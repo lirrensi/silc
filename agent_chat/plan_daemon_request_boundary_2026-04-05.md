@@ -4,13 +4,13 @@ _Done means no daemon API request can crash the daemon process; non-shutdown fai
 ---
 
 # Checklist
-- [ ] Step 1: Add shared daemon error formatting and traceback logging helpers
-- [ ] Step 2: Install daemon-wide FastAPI exception handlers
-- [ ] Step 3: Wrap create-session and daemon control endpoints with explicit failure boundaries
-- [ ] Step 4: Harden daemon background tasks and startup watchers against unhandled exceptions
-- [ ] Step 5: Harden resurrect and restart flows so bad session state is quarantined instead of crashing the daemon
-- [ ] Step 6: Update architecture docs for daemon request-failure boundaries
-- [ ] Step 7: Run focused verification that failed requests return errors without killing the daemon
+- [x] Step 1: Add shared daemon error formatting and traceback logging helpers
+- [x] Step 2: Install daemon-wide FastAPI exception handlers
+- [x] Step 3: Wrap create-session and daemon control endpoints with explicit failure boundaries
+- [x] Step 4: Harden daemon background tasks and startup watchers against unhandled exceptions
+- [x] Step 5: Harden resurrect and restart flows so bad session state is quarantined instead of crashing the daemon
+- [x] Step 6: Update architecture docs for daemon request-failure boundaries
+- [x] Step 7: Run focused verification that failed requests return errors without killing the daemon
 
 ---
 

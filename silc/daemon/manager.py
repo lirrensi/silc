@@ -1,13 +1,21 @@
 """Silc daemon that manages multiple shell sessions."""
 
+# FILE: silc/daemon/manager.py
+# PURPOSE: Run the daemon API and contain request, watcher, and session failures so they do not crash the daemon.
+# OWNS: Daemon API routes, session server lifecycle, restart/shutdown watchers, and daemon-level failure boundaries.
+# EXPORTS: SilcDaemon (daemon lifecycle manager), DAEMON_PORT (default daemon API port).
+# DOCS: docs/arch_api.md, docs/arch_daemon.md
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import shutil
 import signal
 import socket
 import sys
+import traceback
 from dataclasses import asdict
 from datetime import datetime
 from functools import partial
@@ -15,8 +23,8 @@ from pathlib import Path
 from typing import Dict
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -36,7 +44,7 @@ from silc.utils.persistence import (
     write_daemon_log,
 )
 from silc.utils.ports import bind_port, find_available_port
-from silc.utils.shell_detect import detect_shell, get_available_shell_choices
+from silc.utils.shell_detect import ShellInfo, detect_shell, get_available_shell_choices
 
 
 def setup_uvicorn_logging():
@@ -60,6 +68,82 @@ def setup_uvicorn_logging():
 
 DAEMON_PORT = 19999
 MAX_SESSIONS = 100  # Prevent resource exhaustion
+SESSION_START_TIMEOUT_SECONDS = 10.0
+
+
+def _exception_detail(exc: BaseException) -> str:
+    if isinstance(exc, HTTPException):
+        if isinstance(exc.detail, dict):
+            detail = exc.detail.get("detail") or exc.detail.get("error")
+            if detail:
+                return str(detail)
+        elif exc.detail:
+            return str(exc.detail)
+    detail = str(exc)
+    return detail if detail else exc.__class__.__name__
+
+
+def _capture_exception_traceback(exc: BaseException) -> str:
+    return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+
+
+def _build_daemon_error_payload(
+    *,
+    error: str,
+    detail: str,
+    operation: str,
+    traceback_text: str = "",
+) -> dict[str, str]:
+    return {
+        "error": error,
+        "detail": detail,
+        "operation": operation,
+        "traceback": traceback_text,
+    }
+
+
+def _log_daemon_exception(operation: str, exc: BaseException) -> str:
+    detail = _exception_detail(exc)
+    traceback_text = _capture_exception_traceback(exc)
+    write_daemon_log(
+        f"Daemon operation failed: operation={operation}, error={exc.__class__.__name__}: {detail}"
+    )
+    write_daemon_log(f"{operation} traceback:\n{traceback_text}")
+    return traceback_text
+
+
+def _build_logged_daemon_exception_payload(
+    operation: str,
+    exc: BaseException,
+    *,
+    error: str = "Internal daemon error",
+) -> dict[str, str]:
+    traceback_text = _log_daemon_exception(operation, exc)
+    return _build_daemon_error_payload(
+        error=error,
+        detail=_exception_detail(exc),
+        operation=operation,
+        traceback_text=traceback_text,
+    )
+
+
+def _build_validation_error_payload(
+    operation: str, detail: str, *, error: str = "Invalid daemon request"
+) -> dict[str, str]:
+    return _build_daemon_error_payload(
+        error=error,
+        detail=detail,
+        operation=operation,
+    )
+
+
+def _request_operation_label(request: Request) -> str:
+    route = request.scope.get("route")
+    name = getattr(route, "name", None)
+    if name:
+        return str(name)
+    path = request.url.path.strip("/").replace("/", "_")
+    return path or "root"
 
 
 class SessionCreateRequest(BaseModel):
@@ -107,6 +191,26 @@ class SilcDaemon:
         """Create daemon management API."""
         app = FastAPI(title="Silc Daemon")
 
+        @app.exception_handler(HTTPException)
+        async def handle_http_exception(
+            request: Request, exc: HTTPException
+        ) -> JSONResponse:
+            del request
+            if isinstance(exc.detail, dict):
+                content = exc.detail
+            else:
+                content = {"error": str(exc.detail)}
+            return JSONResponse(status_code=exc.status_code, content=content)
+
+        @app.exception_handler(Exception)
+        async def handle_unexpected_exception(
+            request: Request, exc: Exception
+        ) -> JSONResponse:
+            payload = _build_logged_daemon_exception_payload(
+                _request_operation_label(request), exc
+            )
+            return JSONResponse(status_code=500, content=payload)
+
         @app.on_event("startup")
         async def startup_event():
             write_daemon_log("Daemon API is ready to accept requests")
@@ -144,63 +248,71 @@ class SilcDaemon:
             port: int | None = None, request: SessionCreateRequest | None = None
         ):
             """Create a new session."""
+            operation = "create_session"
             selected_port = port
             is_global = False
             token: str | None = None
             shell: str | None = None
             cwd: str | None = None
             session_name: str | None = None
-            async with self._session_create_lock:
-                if selected_port is None and request:
-                    selected_port = request.port
-                    is_global = request.is_global
-                    token = request.token
-                    shell = request.shell
-                    cwd = request.cwd
-                    session_name = request.name
-                is_global = is_global or self._share_mode
-                if selected_port is None:
-                    selected_port = self._find_available_session_port()
+            session: SilcSession | None = None
+            task: asyncio.Task[None] | None = None
+            try:
+                async with self._session_create_lock:
+                    if selected_port is None and request:
+                        selected_port = request.port
+                        is_global = request.is_global
+                        token = request.token
+                        shell = request.shell
+                        cwd = request.cwd
+                        session_name = request.name
+                    is_global = is_global or self._share_mode
+                    if selected_port is None:
+                        selected_port = self._find_available_session_port()
 
-                if selected_port in self.sessions:
-                    raise HTTPException(
-                        status_code=400, detail=f"Port {selected_port} already in use"
-                    )
-
-                if len(self.sessions) >= MAX_SESSIONS:
-                    raise HTTPException(
-                        status_code=503,
-                        detail=f"Maximum session count ({MAX_SESSIONS}) reached. Close unused sessions.",
-                    )
-
-                # Handle name validation and generation
-                if session_name:
-                    session_name = session_name.lower().strip()
-                    if not is_valid_name(session_name):
+                    if selected_port in self.sessions:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Invalid name format. Must match [a-z][a-z0-9-]*[a-z0-9]",
+                            detail=_build_validation_error_payload(
+                                operation, f"Port {selected_port} already in use"
+                            ),
                         )
-                    if self.registry.name_exists(session_name):
+
+                    if len(self.sessions) >= MAX_SESSIONS:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Session name '{session_name}' is already in use",
+                            detail=_build_validation_error_payload(
+                                operation,
+                                f"Maximum session count ({MAX_SESSIONS}) reached. Close unused sessions.",
+                            ),
                         )
-                else:
-                    # Auto-generate name
-                    for _ in range(10):  # Try 10 times to avoid collision
-                        session_name = generate_name()
-                        if not self.registry.name_exists(session_name):
-                            break
+
+                    if session_name:
+                        session_name = session_name.lower().strip()
+                        if not is_valid_name(session_name):
+                            raise HTTPException(
+                                status_code=400,
+                                detail=_build_validation_error_payload(
+                                    operation,
+                                    "Invalid name format. Must match [a-z][a-z0-9-]*[a-z0-9]",
+                                ),
+                            )
+                        if self.registry.name_exists(session_name):
+                            raise HTTPException(
+                                status_code=400,
+                                detail=_build_validation_error_payload(
+                                    operation,
+                                    f"Session name '{session_name}' is already in use",
+                                ),
+                            )
                     else:
-                        raise HTTPException(
-                            status_code=500,
-                            detail="Failed to generate unique session name",
-                        )
+                        for _ in range(10):
+                            session_name = generate_name()
+                            if not self.registry.name_exists(session_name):
+                                break
+                        else:
+                            raise RuntimeError("Failed to generate unique session name")
 
-                session_socket = self._reserve_session_socket(selected_port, is_global)
-                try:
-                    # Handle shell override
                     if shell:
                         from silc.utils.shell_detect import get_shell_info_by_type
 
@@ -208,41 +320,74 @@ class SilcDaemon:
                         if shell_info is None:
                             raise HTTPException(
                                 status_code=400,
-                                detail=f"Unknown shell type: {shell}. Supported: bash, zsh, sh, pwsh, powershell, cmd",
+                                detail=_build_validation_error_payload(
+                                    operation,
+                                    f"Unknown shell type: {shell}. Supported: bash, zsh, sh, pwsh, powershell, cmd",
+                                ),
                             )
                     else:
                         shell_info = detect_shell()
-                    session = SilcSession(
-                        selected_port,
-                        session_name,
-                        shell_info,
-                        api_token=token,
-                        cwd=cwd,
-                        on_title_change=self._handle_session_title_change,
-                    )
-                    await session.start()
 
-                    self.sessions[selected_port] = session
-                    entry = self.registry.add(
-                        selected_port,
-                        session_name,
-                        session.session_id,
-                        shell_info.type,
-                        cwd=cwd,
-                        is_global=is_global,
-                    )
-                    # Persist to sessions.json
-                    append_session_to_json(entry.to_json())
+                    try:
+                        self._validate_session_launch(shell_info, cwd)
+                    except ValueError as exc:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=_build_validation_error_payload(
+                                operation, _exception_detail(exc)
+                            ),
+                        ) from exc
 
-                    server = self._create_session_server(session, is_global=is_global)
-                    self.servers[selected_port] = server
+                    try:
+                        self._reserve_session_socket(selected_port, is_global)
+                    except HTTPException as exc:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=_build_validation_error_payload(
+                                operation, _exception_detail(exc)
+                            ),
+                        ) from exc
 
-                    # Start session server in background
-                    task = asyncio.create_task(server.serve(sockets=[session_socket]))
-                    self._session_tasks[selected_port] = task
-                    self._attach_session_task(selected_port, task)
+                    try:
+                        session = await self._construct_session(
+                            selected_port,
+                            session_name,
+                            shell_info,
+                            api_token=token,
+                            cwd=cwd,
+                        )
+                        await self._start_session_with_timeout(session)
 
-                    # Log if session is globally accessible
+                        self.sessions[selected_port] = session
+                        entry = self.registry.add(
+                            selected_port,
+                            session_name,
+                            session.session_id,
+                            shell_info.type,
+                            cwd=cwd,
+                            is_global=is_global,
+                        )
+                        append_session_to_json(entry.to_json())
+
+                        server = self._create_session_server(
+                            session, is_global=is_global
+                        )
+                        self.servers[selected_port] = server
+
+                        task = asyncio.create_task(
+                            server.serve(sockets=[self._session_sockets[selected_port]])
+                        )
+                        self._session_tasks[selected_port] = task
+                        self._attach_session_task(selected_port, task)
+                    except Exception:
+                        await self._discard_partial_session_state(
+                            selected_port,
+                            operation=operation,
+                            session=session,
+                            task=task,
+                        )
+                        raise
+
                     if is_global:
                         write_daemon_log(
                             f"Session {selected_port} is globally accessible on 0.0.0.0 (RCE RISK)"
@@ -259,10 +404,10 @@ class SilcDaemon:
                         write_daemon_log(
                             "WARNING: Consider using SSH tunneling or reverse proxy with TLS for remote access."
                         )
-                except Exception:
-                    self._close_session_socket(selected_port)
-                    raise
 
+                assert selected_port is not None
+                assert session_name is not None
+                assert session is not None
                 write_daemon_log(
                     f"Session created: port={selected_port}, name={session_name}, id={session.session_id}"
                 )
@@ -275,212 +420,272 @@ class SilcDaemon:
                     "shell": shell_info.type,
                     "cwd": cwd,
                 }
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
 
         @app.get("/sessions")
         async def list_sessions():
             """List all sessions."""
-            sessions = []
-            for entry in self.registry.list_all():
-                session = self.sessions.get(entry.port)
-                if not session:
-                    try:
-                        self._ensure_cleanup_task(entry.port)
-                    except RuntimeError:
-                        write_daemon_log(
-                            f"Failed to schedule cleanup for port={entry.port} during listing"
-                        )
-                    continue
+            operation = "list_sessions"
+            try:
+                sessions = []
+                for entry in self.registry.list_all():
+                    session = self.sessions.get(entry.port)
+                    if not session:
+                        try:
+                            self._ensure_cleanup_task(entry.port)
+                        except RuntimeError:
+                            write_daemon_log(
+                                f"Failed to schedule cleanup for port={entry.port} during listing"
+                            )
+                        continue
 
-                status = session.get_status()
-                if status["alive"]:
-                    sessions.append(
-                        {
-                            "port": entry.port,
-                            "name": entry.name,
-                            "title": entry.title,
-                            "session_id": entry.session_id,
-                            "shell": entry.shell_type,
-                            "cwd": session.cwd,
-                            "title_updated_at": entry.title_updated_at.isoformat()
-                            + "Z",
-                            "idle_seconds": status["idle_seconds"],
-                            "alive": status["alive"],
-                        }
-                    )
-                else:
-                    try:
-                        self._ensure_cleanup_task(entry.port)
-                    except RuntimeError:
-                        write_daemon_log(
-                            f"Failed to schedule cleanup for port={entry.port} during listing"
+                    status = session.get_status()
+                    if status["alive"]:
+                        sessions.append(
+                            {
+                                "port": entry.port,
+                                "name": entry.name,
+                                "title": entry.title,
+                                "session_id": entry.session_id,
+                                "shell": entry.shell_type,
+                                "cwd": session.cwd,
+                                "title_updated_at": entry.title_updated_at.isoformat()
+                                + "Z",
+                                "idle_seconds": status["idle_seconds"],
+                                "alive": status["alive"],
+                            }
                         )
+                    else:
+                        try:
+                            self._ensure_cleanup_task(entry.port)
+                        except RuntimeError:
+                            write_daemon_log(
+                                f"Failed to schedule cleanup for port={entry.port} during listing"
+                            )
 
-            return sessions
+                return sessions
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
 
         @app.get("/defaults")
         async def get_defaults():
             """Expose daemon-side defaults for manager UI helpers."""
-            shell_choices = get_available_shell_choices()
-            return {
-                "cwd": str(Path.home()),
-                "share_mode": self._share_mode,
-                "manager_url": self._get_manager_url(),
-                "shell": (
-                    shell_choices[0].type if shell_choices else detect_shell().type
-                ),
-                "shell_options": [asdict(choice) for choice in shell_choices],
-            }
+            operation = "get_defaults"
+            try:
+                shell_choices = get_available_shell_choices()
+                return {
+                    "cwd": str(Path.home()),
+                    "share_mode": self._share_mode,
+                    "manager_url": self._get_manager_url(),
+                    "shell": (
+                        shell_choices[0].type if shell_choices else detect_shell().type
+                    ),
+                    "shell_options": [asdict(choice) for choice in shell_choices],
+                }
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
 
         @app.get("/resolve/{name}")
         async def resolve_session(name: str):
             """Resolve session name to session info."""
-            entry = self.registry.get_by_name(name)
-            if not entry:
-                raise HTTPException(
-                    status_code=404, detail=f"Session '{name}' not found"
-                )
+            operation = "resolve_session"
+            try:
+                entry = self.registry.get_by_name(name)
+                if not entry:
+                    raise HTTPException(
+                        status_code=404, detail=f"Session '{name}' not found"
+                    )
 
-            session = self.sessions.get(entry.port)
-            return {
-                "port": entry.port,
-                "name": entry.name,
-                "title": entry.title,
-                "session_id": entry.session_id,
-                "shell": entry.shell_type,
-                "title_updated_at": entry.title_updated_at.isoformat() + "Z",
-                "idle_seconds": (datetime.utcnow() - entry.last_access).total_seconds(),
-                "alive": session is not None and session.pty.pid is not None,
-            }
+                session = self.sessions.get(entry.port)
+                return {
+                    "port": entry.port,
+                    "name": entry.name,
+                    "title": entry.title,
+                    "session_id": entry.session_id,
+                    "shell": entry.shell_type,
+                    "title_updated_at": entry.title_updated_at.isoformat() + "Z",
+                    "idle_seconds": (
+                        datetime.utcnow() - entry.last_access
+                    ).total_seconds(),
+                    "alive": session is not None and session.pty.pid is not None,
+                }
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
 
         @app.post("/sessions/{port}/close")
         async def close_session(port: int):
             """Gracefully close a session."""
-            if port not in self.sessions:
-                raise HTTPException(status_code=404, detail="Session not found")
+            operation = "close_session"
+            try:
+                if port not in self.sessions:
+                    raise HTTPException(status_code=404, detail="Session not found")
 
-            await self._ensure_cleanup_task(port)
-            return {"status": "closed"}
+                await self._ensure_cleanup_task(port)
+                return {"status": "closed"}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
 
         @app.post("/sessions/{port}/kill")
         async def kill_session(port: int):
             """Force kill a session."""
-            if port not in self.sessions:
-                raise HTTPException(status_code=404, detail="Session not found")
+            operation = "kill_session"
+            try:
+                if port not in self.sessions:
+                    raise HTTPException(status_code=404, detail="Session not found")
 
-            session = self.sessions.get(port)
-            if session:
-                try:
-                    await asyncio.wait_for(session.force_kill(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    write_daemon_log(f"Timeout force-killing session PTY: port={port}")
-                except Exception as exc:
-                    write_daemon_log(
-                        f"Error force-killing session PTY: port={port}, error={exc}"
-                    )
+                session = self.sessions.get(port)
+                if session:
+                    try:
+                        await asyncio.wait_for(session.force_kill(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        write_daemon_log(
+                            f"Timeout force-killing session PTY: port={port}"
+                        )
+                    except Exception as exc:
+                        write_daemon_log(
+                            f"Error force-killing session PTY: port={port}, error={exc}"
+                        )
 
-            await self._ensure_cleanup_task(port)
-            return {"status": "killed"}
+                await self._ensure_cleanup_task(port)
+                return {"status": "killed"}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
 
         @app.post("/sessions/{port}/restart")
         async def restart_session(port: int):
             """Restart a session with the same port, name, cwd, and shell type."""
-            if port not in self.sessions:
-                raise HTTPException(status_code=404, detail="Session not found")
-
-            session = self.sessions.get(port)
-            if not session:
-                raise HTTPException(status_code=404, detail="Session not found")
-
-            # Capture session properties before cleanup
-            name = session.name
-            shell_info = session.shell_info
-            cwd = session.cwd
-            api_token = session.api_token
-            is_global = False
-
-            # Check if session was global by checking the registry
-            entry = self.registry.get(port)
-            if entry:
-                is_global = getattr(entry, "is_global", False)
-
-            # Get the socket before cleanup (we'll reuse it)
-            session_socket = self._session_sockets.get(port)
-
-            # Kill the old session but keep the socket
+            operation = "restart_session"
+            new_session: SilcSession | None = None
+            new_task: asyncio.Task[None] | None = None
             try:
-                await asyncio.wait_for(session.force_kill(), timeout=1.0)
-            except asyncio.TimeoutError:
-                write_daemon_log(
-                    f"Timeout force-killing session PTY during restart: port={port}"
-                )
-            except Exception as exc:
-                write_daemon_log(
-                    f"Error force-killing session PTY during restart: port={port}, error={exc}"
-                )
+                if port not in self.sessions:
+                    raise HTTPException(status_code=404, detail="Session not found")
 
-            # Remove from sessions dict but NOT from registry (we're keeping the identity)
-            self.sessions.pop(port, None)
+                session = self.sessions.get(port)
+                if not session:
+                    raise HTTPException(status_code=404, detail="Session not found")
 
-            # Cancel the old server task
-            old_task = self._session_tasks.pop(port, None)
-            if old_task:
-                old_task.cancel()
+                name = session.name
+                shell_info = session.shell_info
+                cwd = session.cwd
+                api_token = session.api_token
+                is_global = False
+
+                entry = self.registry.get(port)
+                if entry:
+                    is_global = getattr(entry, "is_global", False)
+
+                session_socket = self._session_sockets.get(port)
+                target_port = port
+
                 try:
-                    await asyncio.wait_for(old_task, timeout=1.0)
-                except (asyncio.CancelledError, asyncio.TimeoutError):
-                    pass
+                    await asyncio.wait_for(session.force_kill(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    write_daemon_log(
+                        f"Timeout force-killing session PTY during restart: port={port}"
+                    )
+                except Exception as exc:
+                    write_daemon_log(
+                        f"Error force-killing session PTY during restart: port={port}, error={exc}"
+                    )
 
-            # Remove old server
-            self.servers.pop(port, None)
+                self.sessions.pop(port, None)
 
-            # Create new session with same properties
-            try:
-                new_session = SilcSession(
-                    port,
-                    name,
-                    shell_info,
-                    api_token=api_token,
-                    cwd=cwd,
-                    on_title_change=self._handle_session_title_change,
-                )
-                await new_session.start()
-
-                self.sessions[port] = new_session
-
-                # Update registry with new session_id
-                self.registry.remove(port)
-                self.registry.add(
-                    port,
-                    name,
-                    new_session.session_id,
-                    shell_info.type,
-                    cwd=cwd,
-                    is_global=is_global,
-                )
-
-                # Update sessions.json
-                append_session_to_json(self.registry.get(port).to_json())
-
-                # Reuse existing socket or create new one
-                if not session_socket:
+                old_task = self._session_tasks.pop(port, None)
+                if old_task:
+                    old_task.cancel()
                     try:
-                        session_socket = self._reserve_session_socket(port, is_global)
-                    except OSError:
-                        # Port taken, find new one
-                        new_port = find_available_port(20000, 21000)
-                        session_socket = self._reserve_session_socket(
-                            new_port, is_global
-                        )
-                        port = new_port
+                        await asyncio.wait_for(old_task, timeout=1.0)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        pass
 
-                # Create new server
-                server = self._create_session_server(new_session, is_global=is_global)
-                self.servers[port] = server
+                self.servers.pop(port, None)
 
-                # Start server in background
-                task = asyncio.create_task(server.serve(sockets=[session_socket]))
-                self._session_tasks[port] = task
-                self._attach_session_task(port, task)
+                try:
+                    self._validate_session_launch(shell_info, cwd)
+
+                    if not session_socket:
+                        try:
+                            self._reserve_session_socket(target_port, is_global)
+                        except HTTPException:
+                            target_port = find_available_port(20000, 21000)
+                            self._reserve_session_socket(target_port, is_global)
+
+                    new_session = await self._construct_session(
+                        target_port,
+                        name,
+                        shell_info,
+                        api_token=api_token,
+                        cwd=cwd,
+                    )
+                    await self._start_session_with_timeout(new_session)
+
+                    self.sessions[target_port] = new_session
+
+                    self.registry.remove(port)
+                    self.registry.add(
+                        target_port,
+                        name,
+                        new_session.session_id,
+                        shell_info.type,
+                        cwd=cwd,
+                        is_global=is_global,
+                    )
+                    append_session_to_json(self.registry.get(target_port).to_json())
+
+                    server = self._create_session_server(
+                        new_session, is_global=is_global
+                    )
+                    self.servers[target_port] = server
+
+                    new_task = asyncio.create_task(
+                        server.serve(sockets=[self._session_sockets[target_port]])
+                    )
+                    self._session_tasks[target_port] = new_task
+                    self._attach_session_task(target_port, new_task)
+                    port = target_port
+                except Exception:
+                    failed_port = (
+                        target_port if target_port in self._session_sockets else port
+                    )
+                    await self._discard_partial_session_state(
+                        failed_port,
+                        operation=operation,
+                        session=new_session,
+                        task=new_task,
+                    )
+                    raise
 
                 write_daemon_log(f"Session restarted: port={port}, name={name}")
 
@@ -491,16 +696,13 @@ class SilcDaemon:
                     "title": new_session.title,
                     "shell": shell_info.type,
                 }
-
+            except HTTPException:
+                raise
             except Exception as exc:
-                write_daemon_log(f"Error restarting session: port={port}, error={exc}")
-                # Fallback: cleanup the broken state
-                self._close_session_socket(port)
-                self.sessions.pop(port, None)
-                self.registry.remove(port)
                 raise HTTPException(
-                    status_code=500, detail=f"Failed to restart session: {exc}"
-                )
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
 
         @app.post("/shutdown")
         async def shutdown():
@@ -589,16 +791,34 @@ class SilcDaemon:
         @app.post("/restart-server")
         async def restart_server():
             """Restart the HTTP server without killing sessions."""
-            write_daemon_log("Server restart requested")
-            self._restart_event.set()
-            return {"status": "restarting"}
+            operation = "restart_server"
+            try:
+                write_daemon_log("Server restart requested")
+                self._restart_event.set()
+                return {"status": "restarting"}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
 
         @app.post("/resurrect")
         async def resurrect():
             """Resurrect sessions from sessions.json."""
-            write_daemon_log("Resurrect requested")
-            result = await self._resurrect_sessions()
-            return result
+            operation = "resurrect"
+            try:
+                write_daemon_log("Resurrect requested")
+                result = await self._resurrect_sessions()
+                return result
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
 
         return app
 
@@ -629,21 +849,125 @@ class SilcDaemon:
     def _attach_session_task(self, port: int, task: asyncio.Task[None]) -> None:
         task.add_done_callback(partial(self._handle_session_task_done, port))
 
-    def _handle_session_task_done(self, port: int, task: asyncio.Task[None]) -> None:
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if not exc:
-            return
-        write_daemon_log(f"Session server failed: port={port}, error={exc}")
-        if port not in self.sessions:
-            return
+    async def _construct_session(
+        self,
+        port: int,
+        name: str,
+        shell_info: ShellInfo,
+        *,
+        api_token: str | None = None,
+        cwd: str | None = None,
+        title: str | None = None,
+    ) -> SilcSession:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                SilcSession,
+                port,
+                name,
+                shell_info,
+                api_token,
+                cwd,
+                title,
+                self._handle_session_title_change,
+            ),
+            timeout=SESSION_START_TIMEOUT_SECONDS,
+        )
+
+    async def _start_session_with_timeout(self, session: SilcSession) -> None:
+        await asyncio.wait_for(session.start(), timeout=SESSION_START_TIMEOUT_SECONDS)
+
+    def _validate_session_launch(
+        self, shell_info: ShellInfo, cwd: str | None = None
+    ) -> None:
+        if cwd:
+            cwd_path = Path(cwd).expanduser()
+            if not cwd_path.exists() or not cwd_path.is_dir():
+                raise ValueError(f"Invalid cwd: {cwd}")
+
+        shell_path = shell_info.path
+        if not Path(shell_path).is_file() and not shutil.which(shell_path):
+            raise ValueError(f"Shell executable not found: {shell_path}")
+
+    async def _discard_partial_session_state(
+        self,
+        port: int,
+        *,
+        operation: str,
+        session: SilcSession | None = None,
+        task: asyncio.Task[None] | None = None,
+    ) -> None:
+        """Remove any partially-created session state after a failed start path."""
+
+        server = self.servers.pop(port, None)
+        if server:
+            server.should_exit = True
+
+        tracked_task = self._session_tasks.pop(port, None)
+        tasks_to_cancel: list[asyncio.Task[None]] = []
+        if tracked_task:
+            tasks_to_cancel.append(tracked_task)
+        if task and task is not tracked_task:
+            tasks_to_cancel.append(task)
+
+        for task_to_cancel in tasks_to_cancel:
+            task_to_cancel.cancel()
+            try:
+                await asyncio.wait_for(task_to_cancel, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            except Exception as cleanup_exc:
+                _log_daemon_exception(f"{operation}_rollback_task", cleanup_exc)
+
+        tracked_session = self.sessions.pop(port, None)
+        sessions_to_close: list[SilcSession] = []
+        if tracked_session:
+            sessions_to_close.append(tracked_session)
+        if session and session is not tracked_session:
+            sessions_to_close.append(session)
+
+        for session_to_close in sessions_to_close:
+            try:
+                await asyncio.wait_for(session_to_close.close(), timeout=2.0)
+            except asyncio.TimeoutError:
+                write_daemon_log(
+                    f"Timeout closing partial session during rollback: operation={operation}, port={port}"
+                )
+            except Exception as cleanup_exc:
+                _log_daemon_exception(f"{operation}_rollback_session", cleanup_exc)
+
+        self._close_session_socket(port)
         try:
-            self._ensure_cleanup_task(port)
-        except RuntimeError:
-            write_daemon_log(
-                f"Failed to schedule cleanup for port={port} after server error"
-            )
+            self.registry.remove(port)
+        except Exception as cleanup_exc:
+            _log_daemon_exception(f"{operation}_rollback_registry", cleanup_exc)
+        try:
+            remove_session_from_json(port)
+        except Exception as cleanup_exc:
+            _log_daemon_exception(f"{operation}_rollback_persistence", cleanup_exc)
+
+    def _handle_session_task_done(self, port: int, task: asyncio.Task[None]) -> None:
+        operation = "handle_session_task_done"
+        try:
+            if task.cancelled():
+                return
+            try:
+                exc = task.exception()
+            except Exception as task_exc:
+                _log_daemon_exception(f"{operation}_task_exception", task_exc)
+                return
+            if not exc:
+                return
+            _log_daemon_exception(f"{operation}_session_server_port_{port}", exc)
+            if port not in self.sessions:
+                return
+            try:
+                self._ensure_cleanup_task(port)
+            except RuntimeError as cleanup_exc:
+                _log_daemon_exception(
+                    f"{operation}_schedule_cleanup_port_{port}", cleanup_exc
+                )
+        except Exception as exc:
+            _log_daemon_exception(operation, exc)
 
     def _ensure_cleanup_task(self, port: int) -> asyncio.Task[None]:
         """Ensure a cleanup task exists for the given port."""
@@ -876,61 +1200,46 @@ class SilcDaemon:
             cwd = entry.get("cwd")
             is_global = entry.get("is_global", False) or self._share_mode
             original_port = entry.get("port")
-
-            if not name or not shell:
-                result["failed"].append({"name": name, "reason": "missing_fields"})
-                continue
-
-            # Check for name collision
-            if self.registry.name_exists(name):
-                result["failed"].append({"name": name, "reason": "name_collision"})
-                write_daemon_log(f"Resurrect skip: name '{name}' already exists")
-                continue
-
-            # Find available port (try original first)
             port = original_port
-            if port and port in self.sessions:
-                port = find_available_port(20000, 21000)
-
-            if port is None:
-                port = find_available_port(20000, 21000)
+            session: SilcSession | None = None
+            task: asyncio.Task[None] | None = None
 
             try:
-                session_socket = self._reserve_session_socket(port, is_global)
-            except OSError:
-                # Port still taken, try another
-                try:
+                if not name or not shell:
+                    raise ValueError("missing_fields")
+
+                if self.registry.name_exists(name):
+                    write_daemon_log(f"Resurrect skip: name '{name}' already exists")
+                    raise ValueError("name_collision")
+
+                if port and port in self.sessions:
                     port = find_available_port(20000, 21000)
-                    session_socket = self._reserve_session_socket(port, is_global)
-                except OSError as exc:
-                    result["failed"].append(
-                        {"name": name, "reason": f"port_unavailable: {exc}"}
-                    )
-                    write_daemon_log(f"Resurrect failed: port unavailable for '{name}'")
-                    continue
 
-            try:
-                # Get shell info
+                if port is None:
+                    port = find_available_port(20000, 21000)
+
+                try:
+                    self._reserve_session_socket(port, is_global)
+                except HTTPException:
+                    port = find_available_port(20000, 21000)
+                    self._reserve_session_socket(port, is_global)
+
                 from silc.utils.shell_detect import get_shell_info_by_type
 
                 shell_info = get_shell_info_by_type(shell)
                 if shell_info is None:
-                    self._close_session_socket(port)
-                    result["failed"].append(
-                        {"name": name, "reason": f"unknown_shell: {shell}"}
-                    )
-                    continue
+                    raise ValueError(f"unknown_shell: {shell}")
 
-                # Create session
-                session = SilcSession(
+                self._validate_session_launch(shell_info, cwd)
+
+                session = await self._construct_session(
                     port,
                     name,
                     shell_info,
                     cwd=cwd,
                     title=entry.get("title", ""),
-                    on_title_change=self._handle_session_title_change,
                 )
-                await session.start()
+                await self._start_session_with_timeout(session)
 
                 self.sessions[port] = session
                 registry_entry = self.registry.add(
@@ -945,7 +1254,9 @@ class SilcDaemon:
                 server = self._create_session_server(session, is_global=is_global)
                 self.servers[port] = server
 
-                task = asyncio.create_task(server.serve(sockets=[session_socket]))
+                task = asyncio.create_task(
+                    server.serve(sockets=[self._session_sockets[port]])
+                )
                 self._session_tasks[port] = task
                 self._attach_session_task(port, task)
 
@@ -965,14 +1276,21 @@ class SilcDaemon:
                     }
                 )
                 write_daemon_log(f"Resurrected: {name} on port {port}")
-
-                # Update sessions.json with actual port
                 append_session_to_json(registry_entry.to_json())
-
             except Exception as exc:
-                self._close_session_socket(port)
-                result["failed"].append({"name": name, "reason": str(exc)})
-                write_daemon_log(f"Resurrect failed for '{name}': {exc}")
+                failure_name = name or "<unknown>"
+                failure_reason = _exception_detail(exc)
+                if port is not None:
+                    await self._discard_partial_session_state(
+                        port,
+                        operation="resurrect_session",
+                        session=session,
+                        task=task,
+                    )
+                result["failed"].append(
+                    {"name": failure_name, "reason": failure_reason}
+                )
+                _log_daemon_exception(f"resurrect_session_{failure_name}", exc)
 
         return result
 
@@ -982,79 +1300,99 @@ class SilcDaemon:
         Sessions never expire - they stay alive indefinitely.
         Idle tracking is kept for status/metrics only.
         """
-        while self._running and not self._shutdown_event.is_set():
-            await asyncio.sleep(60)
+        try:
+            while self._running and not self._shutdown_event.is_set():
+                try:
+                    await asyncio.sleep(60)
 
-            # Rotate daemon log
-            rotate_daemon_log(max_lines=1000)
+                    rotate_daemon_log(max_lines=1000)
+                except asyncio.CancelledError:
+                    return
+                except Exception as exc:
+                    _log_daemon_exception("garbage_collect", exc)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            _log_daemon_exception("garbage_collect", exc)
 
     async def _watch_shutdown(self) -> None:
         """Propagate shutdown events to the uvicorn server and cleanup sessions."""
-        await self._shutdown_event.wait()
+        operation = "watch_shutdown"
+        try:
+            await self._shutdown_event.wait()
 
-        write_daemon_log("Graceful shutdown initiated")
+            write_daemon_log("Graceful shutdown initiated")
 
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 30.0
-        ports = list(self.sessions.keys())
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 30.0
+            ports = list(self.sessions.keys())
 
-        for port in ports:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                write_daemon_log(
-                    "Shutdown exceeded 30s budget; leaving remaining sessions"
-                )
-                break
-            try:
-                await asyncio.wait_for(
-                    self._ensure_cleanup_task(port), timeout=remaining
-                )
-            except asyncio.TimeoutError:
-                write_daemon_log(f"Shutdown timeout closing session: port={port}")
-            except Exception as exc:
-                write_daemon_log(
-                    f"Shutdown error closing session: port={port}, error={exc}"
-                )
+            for port in ports:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    write_daemon_log(
+                        "Shutdown exceeded 30s budget; leaving remaining sessions"
+                    )
+                    break
+                try:
+                    await asyncio.wait_for(
+                        self._ensure_cleanup_task(port), timeout=remaining
+                    )
+                except asyncio.TimeoutError:
+                    write_daemon_log(f"Shutdown timeout closing session: port={port}")
+                except Exception as exc:
+                    _log_daemon_exception(f"{operation}_cleanup_port_{port}", exc)
 
-        if self._daemon_server:
-            self._daemon_server.should_exit = True
+            if self._daemon_server:
+                self._daemon_server.should_exit = True
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            _log_daemon_exception(operation, exc)
 
     async def _watch_restart(self) -> None:
         """Watch for restart requests and restart the HTTP server."""
-        while self._running and not self._shutdown_event.is_set():
-            await self._restart_event.wait()
-            if self._shutdown_event.is_set():
-                return
+        operation = "watch_restart"
+        try:
+            while self._running and not self._shutdown_event.is_set():
+                try:
+                    await self._restart_event.wait()
+                except asyncio.CancelledError:
+                    return
 
-            write_daemon_log("Restarting HTTP server...")
+                if self._shutdown_event.is_set():
+                    return
 
-            # Stop current server
-            if self._daemon_server:
-                self._daemon_server.should_exit = True
-                # Give it time to drain connections
-                await asyncio.sleep(0.5)
+                try:
+                    write_daemon_log("Restarting HTTP server...")
 
-            # Recreate and restart
-            self._daemon_api_app = self._create_daemon_api()
-            config = uvicorn.Config(
-                self._daemon_api_app,
-                host=self._host,
-                port=DAEMON_PORT,
-                log_level="info",
-                access_log=True,
-            )
-            self._daemon_server = uvicorn.Server(config)
+                    if self._daemon_server:
+                        self._daemon_server.should_exit = True
+                        await asyncio.sleep(0.5)
 
-            # Clear the restart event before serving
-            self._restart_event.clear()
+                    self._daemon_api_app = self._create_daemon_api()
+                    config = uvicorn.Config(
+                        self._daemon_api_app,
+                        host=self._host,
+                        port=DAEMON_PORT,
+                        log_level="info",
+                        access_log=True,
+                    )
+                    self._daemon_server = uvicorn.Server(config)
+                    self._restart_event.clear()
+                    asyncio.create_task(self._daemon_server.serve())
 
-            # Start serving in a new task (we're in a background task)
-            asyncio.create_task(self._daemon_server.serve())
-
-            write_daemon_log("HTTP server restarted")
-
-            # Small delay to prevent tight restart loops
-            await asyncio.sleep(0.1)
+                    write_daemon_log("HTTP server restarted")
+                    await asyncio.sleep(0.1)
+                except asyncio.CancelledError:
+                    return
+                except Exception as exc:
+                    self._restart_event.clear()
+                    _log_daemon_exception(operation, exc)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            _log_daemon_exception(operation, exc)
 
     def _setup_signals(self) -> None:
         """Setup signal handlers for graceful shutdown."""
@@ -1124,8 +1462,10 @@ class SilcDaemon:
         self._running = True
         self._setup_signals()
 
-        # Resurrect persisted sessions
-        await self._resurrect_sessions()
+        try:
+            await self._resurrect_sessions()
+        except Exception as exc:
+            _log_daemon_exception("start_resurrect_sessions", exc)
 
         # Create daemon server
         daemon_config = uvicorn.Config(
@@ -1144,7 +1484,10 @@ class SilcDaemon:
 
         # Run daemon server
         try:
-            await self._daemon_server.serve()
+            try:
+                await self._daemon_server.serve()
+            except Exception as exc:
+                _log_daemon_exception("start_daemon_server", exc)
         finally:
             # Cleanup on exit
             gc_task.cancel()

@@ -491,12 +491,16 @@ Custom clipboard handling to prevent browser interference:
 - Otherwise → let xterm handle it
 
 **Ctrl+V:**
-- Read from clipboard → send via WebSocket
-- Block browser's native paste
+- Read from clipboard → send directly into the terminal input stream
+- Block the browser's native paste UI
+
+**Refresh:**
+- Reload terminal history from the daemon
+- Refit the viewport and redraw the terminal surface
 
 **Paste button / right-click:**
-- Read clipboard text and send it straight to the shell
-- Suppress the browser context menu while pasting
+- Use the same clipboard-to-terminal path as Ctrl+V
+- Suppress the browser context menu on Firefox
 
 **Custom Key Events:**
 - `Ctrl+Enter` → Send `\x1b[13;5u`
