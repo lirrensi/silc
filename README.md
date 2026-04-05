@@ -381,6 +381,15 @@ pip install -e .
 
 **Note:** PyPI package coming soon. For production use, install from git (recommended uv or pipx).
 
+### Building the full frozen executable
+
+```bash
+python build.py
+python install_to_path.py
+```
+
+`build.py` builds the frozen app. `install_to_path.py` copies it into a PATH directory.
+
 ### Building the Web UI
 
 The Web UI is a Vue 3 + Vite application. It builds automatically when packaging, but for development:
