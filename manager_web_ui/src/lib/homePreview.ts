@@ -5,7 +5,6 @@
 // DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 import { getSessionHttpUrl } from '@/lib/daemonApi'
-import { decodeWsFrame, requestHistoryFrame } from '@/lib/websocketFrame'
 
 export type HomeGridDensity = '2x2' | '3x3' | '4x4'
 
@@ -14,8 +13,8 @@ export const HOME_GRID_OPTIONS: HomeGridDensity[] = ['2x2', '3x3', '4x4']
 const SNAPSHOT_CACHE_TTL_MS = 2_500
 const SNAPSHOT_QUEUE_GAP_MS = 140
 
-const snapshotCache = new Map<number, { data: string; fetchedAt: number }>()
-const inflightRequests = new Map<number, Promise<string>>()
+const snapshotCache = new Map<number, { data: Uint8Array; fetchedAt: number }>()
+const inflightRequests = new Map<number, Promise<Uint8Array>>()
 let queueTail: Promise<void> = Promise.resolve()
 
 export function getHomeGridSlots(density: HomeGridDensity): number {
@@ -29,7 +28,7 @@ export function getHomeGridSlots(density: HomeGridDensity): number {
   }
 }
 
-export function getCachedHomePreviewSnapshot(port: number): string | null {
+export function getCachedHomePreviewSnapshot(port: number): Uint8Array | null {
   const cached = snapshotCache.get(port)
   if (!cached) {
     return null
@@ -43,7 +42,10 @@ export function getCachedHomePreviewSnapshot(port: number): string | null {
   return cached.data
 }
 
-export async function loadHomePreviewSnapshot(port: number, timeoutMs: number = 2500): Promise<string> {
+export async function loadHomePreviewSnapshot(
+  port: number,
+  timeoutMs: number = 2500,
+): Promise<Uint8Array> {
   const cached = getCachedHomePreviewSnapshot(port)
   if (cached !== null) {
     return cached
@@ -83,69 +85,29 @@ function enqueue<T>(job: () => Promise<T>): Promise<T> {
   return run
 }
 
-function requestSnapshot(port: number, timeoutMs: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const wsUrl = `${getSessionHttpUrl(port).replace(/^http/, 'ws')}/ws`
-    const ws = new WebSocket(wsUrl)
-    ws.binaryType = 'arraybuffer'
-    let settled = false
-    let timer: number | null = null
-    const textDecoder = new TextDecoder()
+async function requestSnapshot(port: number, timeoutMs: number): Promise<Uint8Array> {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(`${getSessionHttpUrl(port)}/snapshot`, {
+      signal: controller.signal,
+      cache: 'no-store',
+      headers: { Accept: 'application/octet-stream' },
+    })
 
-    const finish = (resolver: () => void): void => {
-      if (settled) {
-        return
-      }
-
-      settled = true
-      if (timer !== null) {
-        window.clearTimeout(timer)
-      }
-      try {
-        ws.close()
-      } catch {
-        // Best-effort cleanup only.
-      }
-      resolver()
+    if (!response.ok) {
+      throw new Error(`Failed to load preview snapshot for :${port} (${response.status})`)
     }
 
-    timer = window.setTimeout(() => {
-      finish(() => reject(new Error(`Timed out waiting for preview snapshot on :${port}`)))
-    }, timeoutMs)
-
-    ws.onopen = () => {
-      try {
-        requestHistoryFrame(ws)
-      } catch (err) {
-        finish(() => reject(err instanceof Error ? err : new Error(String(err))))
-      }
+    return new Uint8Array(await response.arrayBuffer())
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error(`Timed out waiting for preview snapshot on :${port}`)
     }
-
-    ws.onmessage = (event) => {
-      try {
-        if (!(event.data instanceof ArrayBuffer)) {
-          throw new Error('Expected binary websocket frame')
-        }
-
-        const { header, payload } = decodeWsFrame(event.data)
-        if (header.type === 'history') {
-          finish(() => resolve(textDecoder.decode(payload)))
-        }
-      } catch (err) {
-        finish(() => reject(err instanceof Error ? err : new Error(String(err))))
-      }
-    }
-
-    ws.onerror = () => {
-      finish(() => reject(new Error(`Failed to load preview snapshot for :${port}`)))
-    }
-
-    ws.onclose = () => {
-      if (!settled) {
-        finish(() => reject(new Error(`Preview snapshot websocket closed for :${port}`)))
-      }
-    }
-  })
+    throw err instanceof Error ? err : new Error(String(err))
+  } finally {
+    window.clearTimeout(timer)
+  }
 }
 
 function sleep(ms: number): Promise<void> {

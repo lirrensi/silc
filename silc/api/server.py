@@ -24,7 +24,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 
 from ..core.cleaner import clean_output
 from ..core.session import SilcSession
@@ -165,6 +165,15 @@ def create_app(session: SilcSession) -> FastAPI:
         output = session.get_output(lines, raw=True)
         return {"output": output, "lines": len(output.splitlines())}
 
+    @app.get("/snapshot", dependencies=[Depends(_require_token)])
+    async def get_snapshot() -> Response:
+        _check_alive()
+        return Response(
+            content=session.get_snapshot_bytes(),
+            media_type="application/octet-stream",
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.get("/logs", dependencies=[Depends(_require_token)])
     async def get_logs(tail: int = 100) -> dict:
         _check_alive()
@@ -276,21 +285,28 @@ def create_app(session: SilcSession) -> FastAPI:
         if not _verify_websocket_token(websocket):
             await websocket.close(code=1008, reason="Invalid API token")
             return
+
+        mode = websocket.query_params.get("mode", "interactive")
+        if mode not in {"interactive", "preview"}:
+            await websocket.close(code=1002, reason="Unsupported websocket mode")
+            return
+
         await websocket.accept()
 
         previous_websocket: WebSocket | None = None
-        async with active_websocket_lock:
-            previous_websocket = active_websocket
-            active_websocket = websocket
-            session.tui_active = True
+        if mode == "interactive":
+            async with active_websocket_lock:
+                previous_websocket = active_websocket
+                active_websocket = websocket
+                session.tui_active = True
 
-        if previous_websocket is not None and previous_websocket is not websocket:
-            try:
-                await previous_websocket.close(
-                    code=4002, reason="Session claimed by another client"
-                )
-            except RuntimeError:
-                pass
+            if previous_websocket is not None and previous_websocket is not websocket:
+                try:
+                    await previous_websocket.close(
+                        code=4002, reason="Session claimed by another client"
+                    )
+                except RuntimeError:
+                    pass
 
         send_lock = asyncio.Lock()
 
@@ -299,6 +315,23 @@ def create_app(session: SilcSession) -> FastAPI:
         ) -> None:
             async with send_lock:
                 await websocket.send_bytes(encode_ws_frame(header, payload))
+
+        async def send_output_chunks() -> None:
+            cursor = session.buffer.cursor
+            while True:
+                await session._output_event.wait()
+                session._output_event.clear()
+
+                while True:
+                    new_bytes, cursor = session.buffer.get_since(cursor)
+                    if not new_bytes:
+                        break
+                    if active_websocket is not websocket:
+                        return
+                    try:
+                        await safe_send_frame({"type": "output"}, new_bytes)
+                    except Exception:
+                        return
 
         def title_listener(updated_session: SilcSession) -> None:
             if updated_session is not session:
@@ -336,18 +369,12 @@ def create_app(session: SilcSession) -> FastAPI:
 
             asyncio.create_task(_send_cwd())
 
-        session.add_title_listener(title_listener)
-        session.add_cwd_listener(cwd_listener)
-
-        async def send_updates() -> None:
-            cursor = session.buffer.cursor
-            while True:
-                new_bytes, cursor = session.buffer.get_since(cursor)
-                if new_bytes:
-                    await safe_send_frame({"type": "output"}, new_bytes)
-                await asyncio.sleep(0.1)
-
-        sender_task = asyncio.create_task(send_updates())
+        if mode == "interactive":
+            session.add_title_listener(title_listener)
+            session.add_cwd_listener(cwd_listener)
+            sender_task = asyncio.create_task(send_output_chunks())
+        else:
+            sender_task = None
         try:
             while True:
                 try:
@@ -368,6 +395,11 @@ def create_app(session: SilcSession) -> FastAPI:
 
                 message_type = header.get("type")
                 if message_type == "input":
+                    if mode != "interactive":
+                        await websocket.close(
+                            code=1002, reason="Preview websocket is read-only"
+                        )
+                        return
                     nonewline = bool(header.get("nonewline", False))
                     text = payload.decode("utf-8", errors="replace")
 
@@ -389,17 +421,18 @@ def create_app(session: SilcSession) -> FastAPI:
         except WebSocketDisconnect:
             pass
         finally:
-            session.remove_title_listener(title_listener)
-            session.remove_cwd_listener(cwd_listener)
-            async with active_websocket_lock:
-                if active_websocket is websocket:
-                    active_websocket = None
-                    session.tui_active = False
-            sender_task.cancel()
-            try:
-                await sender_task
-            except asyncio.CancelledError:
-                pass
+            if mode == "interactive":
+                session.remove_title_listener(title_listener)
+                session.remove_cwd_listener(cwd_listener)
+                async with active_websocket_lock:
+                    if active_websocket is websocket:
+                        active_websocket = None
+                        session.tui_active = False
+                if sender_task is not None:
+                    try:
+                        await sender_task
+                    except asyncio.CancelledError:
+                        pass
 
     @app.get("/web", response_class=HTMLResponse)
     async def web_ui() -> HTMLResponse:

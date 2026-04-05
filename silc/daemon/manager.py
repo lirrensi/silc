@@ -428,7 +428,9 @@ class SilcDaemon:
                 write_daemon_log(
                     f"Session created: port={selected_port}, name={session_name}, id={runtime.session.session_id}"
                 )
-                await self._publish_session_event("session/created", entry)
+                asyncio.create_task(
+                    self._publish_session_event("session/created", entry)
+                )
 
                 return {
                     "port": selected_port,
@@ -1090,7 +1092,7 @@ class SilcDaemon:
             self._session_tasks[entry.port] = task
             self._attach_session_task(entry.port, runtime.generation, task)
             self._schedule_reconcile()
-            await self._publish_session_event("session/started", entry)
+            asyncio.create_task(self._publish_session_event("session/started", entry))
             return runtime
         except Exception as exc:
             await self._discard_partial_session_state(

@@ -293,6 +293,18 @@ disconnectWebSocket(port: number): void
 6. On close: set status 'idle'
 7. On error: set status 'dead'
 
+### Frozen Terminal Preview
+
+Home/session cards render from a plain HTTP snapshot endpoint, not a websocket.
+
+**Fetch URL:** `http://127.0.0.1:<port>/snapshot`
+
+**Behavior:**
+- Fetch raw PTY bytes with `GET /snapshot`
+- Cache snapshots briefly on the client
+- Feed bytes directly into a throwaway xterm instance for color-safe rendering
+- Never claim the interactive websocket or interfere with live typing
+
 ---
 
 ### Idle Manager

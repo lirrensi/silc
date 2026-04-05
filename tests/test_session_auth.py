@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime as dt
+import json
 import socket
 import time
 
@@ -11,9 +13,10 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from silc.api.server import create_app
 import silc.daemon.manager as manager_module
 import tests.test_daemon as test_daemon_module
+from silc.api.server import create_app
+from silc.core.raw_buffer import RawByteBuffer
 from silc.daemon import kill_daemon
 from silc.daemon.manager import DAEMON_PORT, SilcDaemon
 from tests.test_daemon import _shutdown_daemon, wait_for_daemon_start
@@ -54,6 +57,54 @@ class _CorsSession:
     def resize(self, rows: int, cols: int) -> None:
         self.rows = rows
         self.cols = cols
+
+
+class _WsSession:
+    def __init__(self) -> None:
+        self.session_id = "ws-test"
+        self.api_token = None
+        self.title = ""
+        self.title_updated_at = dt.datetime.utcnow()
+        self.cwd = None
+        self.tui_active = False
+        self.buffer = RawByteBuffer()
+        self._output_event = asyncio.Event()
+        self._title_listeners = []
+        self._cwd_listeners = []
+        self._output_listeners = []
+
+    def get_status(self) -> dict:
+        return {"alive": True}
+
+    def add_title_listener(self, listener):
+        self._title_listeners.append(listener)
+
+    def remove_title_listener(self, listener):
+        with contextlib.suppress(ValueError):
+            self._title_listeners.remove(listener)
+
+    def add_cwd_listener(self, listener):
+        self._cwd_listeners.append(listener)
+
+    def remove_cwd_listener(self, listener):
+        with contextlib.suppress(ValueError):
+            self._cwd_listeners.remove(listener)
+
+    def add_output_listener(self, listener):
+        self._output_listeners.append(listener)
+
+    def remove_output_listener(self, listener):
+        with contextlib.suppress(ValueError):
+            self._output_listeners.remove(listener)
+
+    def push_output(self, data: bytes) -> None:
+        self.buffer.append(data)
+        self._output_event.set()
+        for listener in list(self._output_listeners):
+            listener(self, data)
+
+    def get_snapshot_bytes(self) -> bytes:
+        return self.buffer.get_bytes()
 
 
 @pytest.mark.asyncio
@@ -126,3 +177,31 @@ def test_session_api_allows_browser_resize_cors() -> None:
 
     assert resp.status_code == 200
     assert resp.headers.get("access-control-allow-origin") is not None
+
+
+def test_session_websocket_pushes_output_without_polling() -> None:
+    session = _WsSession()
+    client = TestClient(create_app(session))
+
+    with client.websocket_connect("/ws") as websocket:
+        session.push_output(b"\x1b[31mRED\x1b[0m")
+
+        frame = websocket.receive_bytes()
+        header_length = int.from_bytes(frame[:4], "big")
+        header = json.loads(frame[4 : 4 + header_length].decode("utf-8"))
+        payload = frame[4 + header_length :]
+
+        assert header["type"] == "output"
+        assert payload == b"\x1b[31mRED\x1b[0m"
+
+
+def test_session_snapshot_endpoint_returns_raw_bytes() -> None:
+    session = _WsSession()
+    client = TestClient(create_app(session))
+
+    session.push_output(b"\x1b[31mRED\x1b[0m")
+
+    resp = client.get("/snapshot")
+
+    assert resp.status_code == 200
+    assert resp.content == b"\x1b[31mRED\x1b[0m"

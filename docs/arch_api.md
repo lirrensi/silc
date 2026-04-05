@@ -169,6 +169,12 @@ Returns raw terminal output (no rendering).
 **Query Parameters:**
 - `lines` (int, default: 100) — Number of lines
 
+### `GET /snapshot`
+
+Returns a cached raw PTY byte snapshot for preview rendering.
+
+**Response:** `application/octet-stream`
+
 ### `GET /logs`
 
 Returns session log.
@@ -343,6 +349,7 @@ The JSON header uses `type`, not `event`.
 - `/ws` accepts only binary application frames.
 - PTY bytes are forwarded without UTF-8 decoding on output/history paths.
 - Malformed or unsupported frames close the socket with a protocol error.
+- The websocket is for interactive sessions; frozen previews use `GET /snapshot`.
 
 ---
 
@@ -423,6 +430,6 @@ def _check_alive():
 
 | Aspect | Value | Notes |
 |--------|-------|-------|
-| WebSocket poll interval | 100ms | Output update frequency |
+| WebSocket poll interval | event-driven | Output update frequency |
 | SSE poll interval | 500ms | Event stream frequency |
 | Max request body | None | No explicit limit |

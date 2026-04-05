@@ -7,20 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import FrozenTerminalPreview from '../components/FrozenTerminalPreview.vue'
-import { encodeWsFrame } from '../lib/websocketFrame'
 
 const mocks = vi.hoisted(() => {
   const terminalInstances: Array<{ open: ReturnType<typeof vi.fn>; reset: ReturnType<typeof vi.fn>; write: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; options: { theme?: unknown }; element: HTMLElement | null; loadAddon: ReturnType<typeof vi.fn>; unicode: { activeVersion: string } }> = []
   const fitInstances: Array<{ fit: ReturnType<typeof vi.fn> }> = []
   const intersectionObservers: Array<{ callback: IntersectionObserverCallback; observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = []
-  const socketInstances: Array<{
-    onopen: null | ((event: Event) => void)
-    onmessage: null | ((event: MessageEvent) => void)
-    onerror: null | ((event: Event) => void)
-    onclose: null | ((event: CloseEvent) => void)
-    send: ReturnType<typeof vi.fn>
-    close: ReturnType<typeof vi.fn>
-  }> = []
 
   class MockTerminal {
     element: HTMLElement | null = null
@@ -69,52 +60,15 @@ const mocks = vi.hoisted(() => {
     constructor() {}
   }
 
-  class MockWebSocket {
-    onopen: null | ((event: Event) => void) = null
-    onmessage: null | ((event: MessageEvent) => void) = null
-    onerror: null | ((event: Event) => void) = null
-    onclose: null | ((event: CloseEvent) => void) = null
-    send = vi.fn((payload: string | ArrayBuffer | Uint8Array) => {
-      const buffer = payload instanceof ArrayBuffer
-        ? payload
-        : payload instanceof Uint8Array
-          ? payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength)
-          : new TextEncoder().encode(payload).buffer
-      const view = new DataView(buffer)
-      const headerLength = view.getUint32(0, false)
-      const headerBytes = new Uint8Array(buffer, 4, headerLength)
-      const header = JSON.parse(new TextDecoder().decode(headerBytes)) as { type?: string }
-
-      if (header.type === 'load_history') {
-        window.setTimeout(() => {
-          const frame = encodeWsFrame({ type: 'history' }, new TextEncoder().encode('\u001b[31mRED\u001b[0m'))
-          this.onmessage?.({ data: frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength) } as MessageEvent)
-        }, 0)
-      }
-    })
-    close = vi.fn(() => {
-      this.onclose?.({ reason: '' } as CloseEvent)
-    })
-
-    constructor() {
-      socketInstances.push(this)
-      window.setTimeout(() => {
-        this.onopen?.(new Event('open'))
-      }, 0)
-    }
-  }
-
   return {
     terminalInstances,
     fitInstances,
     intersectionObservers,
-    socketInstances,
     MockTerminal,
     MockFitAddon,
     MockUnicode11Addon,
     MockIntersectionObserver,
     MockResizeObserver,
-    MockWebSocket,
   }
 })
 
@@ -130,12 +84,15 @@ vi.mock('@xterm/addon-unicode11', () => ({
   Unicode11Addon: mocks.MockUnicode11Addon,
 }))
 
+vi.mock('../lib/homePreview', () => ({
+  loadHomePreviewSnapshot: vi.fn(async () => new Uint8Array([27, 91, 51, 49, 109, 82, 69, 68, 27, 91, 48, 109])),
+}))
+
 describe('FrozenTerminalPreview', () => {
   beforeEach(() => {
     mocks.terminalInstances.length = 0
     mocks.fitInstances.length = 0
     mocks.intersectionObservers.length = 0
-    mocks.socketInstances.length = 0
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: vi.fn().mockImplementation(() => ({
@@ -152,7 +109,6 @@ describe('FrozenTerminalPreview', () => {
     vi.useFakeTimers()
     vi.stubGlobal('IntersectionObserver', mocks.MockIntersectionObserver)
     vi.stubGlobal('ResizeObserver', mocks.MockResizeObserver)
-    vi.stubGlobal('WebSocket', mocks.MockWebSocket as unknown as typeof WebSocket)
   })
 
   afterEach(() => {
@@ -187,15 +143,13 @@ describe('FrozenTerminalPreview', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(mocks.socketInstances).toHaveLength(1)
     expect(mocks.terminalInstances).toHaveLength(1)
     expect(mocks.terminalInstances[0].reset).toHaveBeenCalled()
-    expect(mocks.terminalInstances[0].write).toHaveBeenCalledWith('\u001b[31mRED\u001b[0m')
+    expect(mocks.terminalInstances[0].write).toHaveBeenCalledWith(expect.any(Uint8Array))
 
     await vi.advanceTimersByTimeAsync(1140)
     await Promise.resolve()
 
-    expect(mocks.socketInstances).toHaveLength(1)
     expect(mocks.terminalInstances[0].write.mock.calls.length).toBeGreaterThanOrEqual(2)
 
     mocks.intersectionObservers[0].callback(

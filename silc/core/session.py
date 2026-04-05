@@ -92,12 +92,16 @@ class SilcSession:
         self._cwd_listeners: list[Callable[["SilcSession"], None]] = []
         if on_cwd_change:
             self._cwd_listeners.append(on_cwd_change)
+        self._output_listeners: list[Callable[["SilcSession", bytes], None]] = []
         launch_spec = shell_info.build_launch_spec()
         pty_env = os.environ.copy()
         pty_env.update(launch_spec.env)
         self.pty: PTYBase = create_pty(launch_spec.argv, pty_env, cwd=cwd)
 
         self.buffer = RawByteBuffer(maxlen=DEFAULT_BUFFER_SIZE)
+        self._snapshot_cache: bytes | None = None
+        self._snapshot_dirty = True
+        self._output_event: asyncio.Event | None = None
         self.created_at = datetime.utcnow()
         self.last_access = datetime.utcnow()
         self.last_output = datetime.utcnow()
@@ -121,8 +125,8 @@ class SilcSession:
     async def start(self) -> None:
         if self._read_task is not None:
             return
+        self._output_event = asyncio.Event()
         self._read_task = asyncio.create_task(self._read_loop())
-        await asyncio.sleep(0.5)
         self._gc_task = asyncio.create_task(self._garbage_collect())
 
     async def _read_loop(self) -> None:
@@ -137,6 +141,16 @@ class SilcSession:
                     for cwd in self._osc_cwd_parser.feed(data):
                         self._apply_cwd(cwd)
                     self.buffer.append(data)
+                    if self._output_event is not None:
+                        self._output_event.set()
+                    for listener in list(self._output_listeners):
+                        try:
+                            listener(self, data)
+                        except Exception as exc:
+                            write_session_log(
+                                self.port, f"Output update callback error: {exc}"
+                            )
+                    self._snapshot_dirty = True
                     self.last_output = datetime.utcnow()
                     write_session_log(
                         self.port, f"OUTPUT: {data.decode('utf-8', errors='replace')}"
@@ -197,6 +211,8 @@ class SilcSession:
         newline = "\r\n" if sys.platform == "win32" else "\n"
         sequence = f"\x1b[2J\x1b[H{newline}"
         self.buffer.clear()
+        self._snapshot_cache = None
+        self._snapshot_dirty = True
         await self.pty.write(sequence.encode("utf-8", errors="replace"))
         await self._wait_for_prompt(timeout=2.0)
         self.last_access = datetime.utcnow()
@@ -207,6 +223,8 @@ class SilcSession:
         newline = "\r\n" if sys.platform == "win32" else "\n"
         sequence = f"\x1bc{newline}"
         self.buffer.clear()
+        self._snapshot_cache = None
+        self._snapshot_dirty = True
         await self.pty.write(sequence.encode("utf-8", errors="replace"))
         await self._wait_for_prompt(timeout=2.0)
         self.last_access = datetime.utcnow()
@@ -227,6 +245,13 @@ class SilcSession:
             snapshot = self.buffer.get_last(lines)
             return "\n".join(snapshot)
         return self.get_rendered_output(lines)
+
+    def get_snapshot_bytes(self) -> bytes:
+        """Get cached raw PTY bytes for preview rendering."""
+        if self._snapshot_dirty or self._snapshot_cache is None:
+            self._snapshot_cache = self.buffer.get_bytes()
+            self._snapshot_dirty = False
+        return self._snapshot_cache
 
     def get_rendered_output(self, lines: int | None = None) -> str:
         """Get a snapshot of what the terminal screen currently displays.
@@ -322,6 +347,21 @@ class SilcSession:
         """Unregister a live cwd update callback."""
         try:
             self._cwd_listeners.remove(listener)
+        except ValueError:
+            pass
+
+    def add_output_listener(
+        self, listener: Callable[["SilcSession", bytes], None]
+    ) -> None:
+        """Register a callback for live raw output chunks."""
+        self._output_listeners.append(listener)
+
+    def remove_output_listener(
+        self, listener: Callable[["SilcSession", bytes], None]
+    ) -> None:
+        """Unregister a live raw output callback."""
+        try:
+            self._output_listeners.remove(listener)
         except ValueError:
             pass
 
@@ -497,6 +537,8 @@ class SilcSession:
 
     async def clear_buffer(self) -> None:
         self.buffer.clear()
+        self._snapshot_cache = None
+        self._snapshot_dirty = True
 
     async def close(self) -> None:
         if self._closed:

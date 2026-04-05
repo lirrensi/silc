@@ -59,7 +59,7 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
   }
 
   const wsBase = getSessionHttpUrl(port).replace(/^http/, 'ws')
-  const wsUrl = `${wsBase}/ws`
+  const wsUrl = `${wsBase}/ws?mode=interactive`
   console.log(`[WebSocket] Connecting to ${wsUrl}`)
   const ws = new WebSocket(wsUrl)
   ws.binaryType = 'arraybuffer'
