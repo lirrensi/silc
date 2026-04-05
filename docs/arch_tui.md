@@ -1,222 +1,86 @@
-# Architecture: TUI (Terminal User Interface)
+# Architecture: TUI
 
-This document describes the terminal user interface. Complete enough to rewrite `silc/tui/` from scratch.
-
----
+This document describes `silc/tui/` and the CLI TUI launch flow.
 
 ## Overview
 
-SILC provides two TUI options:
+SILC currently has two TUI paths:
 
-1. **Native TUI** — Pre-built binary (recommended)
-2. **Textual TUI** — Python-based (deprecated)
-
-The native TUI is a separate Rust binary that connects to sessions via WebSocket.
-
----
+1. **Native TUI** — the primary path launched by `silc tui`
+2. **Textual TUI** — legacy Python app launched by deprecated `silc open`
 
 ## Scope Boundary
 
-**This component owns:**
-- Native TUI binary installation
-- Textual TUI application (deprecated)
-- TUI launching logic
+Owns:
 
-**This component does NOT own:**
-- Session logic (see [arch_core.md](arch_core.md))
-- WebSocket protocol (see [arch_api.md](arch_api.md))
-- CLI parsing (see [arch_cli.md](arch_cli.md))
+- native TUI binary discovery and installation
+- TUI launch wiring from the CLI
+- legacy Textual app implementation
 
-**Boundary interfaces:**
-- Connects to: WebSocket endpoint `/ws`
-- Exposes: `launch_tui(port)`, `ensure_native_tui_binary()`
+Does not own:
 
----
+- session PTY behavior (`silc/core/`)
+- websocket protocol implementation (`silc/api/server.py`)
+- daemon lifecycle (`silc/daemon/`)
 
 ## Native TUI
 
-### Binary Distribution
+### Installer
 
-Binaries are distributed via GitHub Releases:
-
-```
-https://github.com/lirrensi/silc/releases/latest
-```
-
-**Platform binaries:**
-- `silc-tui-windows.exe` — Windows
-- `silc-tui-linux` — Linux
-- `silc-tui-macos` — macOS
-
-### Installation Flow
-
-```python
-def ensure_native_tui_binary(progress: Callable[[str], None]) -> Path:
-    # 1. Check cache directory
-    cache_dir = platformdirs.user_cache_dir("silc") / "bin"
-
-    # 2. Check for existing binary
-    binary_path = cache_dir / f"silc-tui-{platform}"
-    if binary_path.exists():
-        return binary_path
-
-    # 3. Fetch release info from GitHub API
-    api_url = os.environ.get(
-        "SILC_TUI_RELEASE_API",
-        "https://api.github.com/repos/lirrensi/silc/releases/latest"
-    )
-    release = requests.get(api_url).json()
-
-    # 4. Find matching asset
-    asset = find_asset_for_platform(release["assets"])
-
-    # 5. Download binary
-    progress(f"Downloading TUI binary from {asset['browser_download_url']}")
-    download_file(asset["browser_download_url"], binary_path)
-
-    # 6. Make executable (Unix)
-    if sys.platform != "win32":
-        os.chmod(binary_path, 0o755)
-
-    return binary_path
-```
-
-### Configuration
+`ensure_native_tui_binary()` resolves a cached binary or downloads one from GitHub Releases.
 
 Environment variables:
 
-| Variable | Description |
-|----------|-------------|
-| `SILC_TUI_BIN_DIR` | Custom binary cache directory |
-| `SILC_TUI_RELEASE_REPO` | Custom GitHub repo (owner/repo) |
-| `SILC_TUI_RELEASE_API` | Custom release API URL |
+| Variable | Purpose |
+|---|---|
+| `SILC_TUI_BIN_DIR` | Override install cache directory |
+| `SILC_TUI_RELEASE_REPO` | Override release repo (`owner/repo`) |
+| `SILC_TUI_RELEASE_API` | Override release API URL |
+
+Default repo/API:
+
+- `lirrensi/silc`
+- `https://api.github.com/repos/lirrensi/silc/releases/latest`
+
+The installer selects an asset by platform + architecture keywords, extracts or copies `silc-tui` / `silc-tui.exe`, and marks it executable.
 
 ### Launching
 
-```python
-def _launch_native_tui_client(port: int):
-    executable = _find_native_tui_binary()
-    ws_url = f"ws://127.0.0.1:{port}/ws"
-    subprocess.run([str(executable), ws_url])
+`silc tui`:
+
+- resolves the binary
+- prints the websocket URL
+- launches the binary with `ws://127.0.0.1:<port>/ws`
+
+The websocket endpoint accepts token query params for remote use; the local CLI launcher itself passes a plain localhost websocket URL.
+
+## Websocket Protocol
+
+The native TUI uses the same binary envelope as the session websocket:
+
+```text
+[4-byte big-endian header length][JSON header UTF-8 bytes][raw payload bytes]
 ```
 
----
+Server messages include `output`, `history`, `title`, and `cwd`.
+Client messages include `input` and `load_history`.
 
-## Textual TUI (Deprecated)
+## Legacy Textual TUI
 
-### Application
+`silc open` is deprecated and still launches `launch_tui(port)` from `silc/tui/app.py`.
 
-```python
-class SilcTUI(App):
-    CSS_PATH = "app.css"
+That app is a legacy websocket client that:
 
-    def __init__(self, port: int):
-        self.port = port
-        self.ws_url = f"ws://127.0.0.1:{port}/ws"
+- connects to the per-session websocket
+- renders output in Textual
+- sends keyboard input from the terminal
 
-    async def on_mount(self):
-        # Connect to WebSocket
-        # Start output stream
-        pass
-```
+It still speaks the older JSON websocket shape in `app.py`, so treat it as stale compatibility code relative to the current binary frame protocol.
 
-### Launching
-
-```python
-async def launch_tui(port: int):
-    app = SilcTUI(port)
-    await app.run_async()
-```
-
----
-
-## WebSocket Protocol
-
-The TUI connects to the session via WebSocket at `/ws`.
-
-### Connection
-
-```
-ws://127.0.0.1:<port>/ws?token=<token>
-```
-
-### Server → Client Messages
-
-**Output update:**
-```json
-{
-  "event": "update",
-  "data": "terminal output..."
-}
-```
-
-**History:**
-```json
-{
-  "event": "history",
-  "data": "full terminal history..."
-}
-```
-
-### Client → Server Messages
-
-**Send input:**
-```json
-{
-  "event": "type",
-  "text": "ls -la",
-  "nonewline": false
-}
-```
-
-**Request history:**
-```json
-{
-  "event": "load_history"
-}
-```
-
----
-
-## Contracts / Invariants
-
-| Invariant | Description |
-|-----------|-------------|
-| WebSocket connection | TUI MUST connect via WebSocket |
-| Token for remote | Remote connections require token in query string |
-| Binary caching | Downloaded binaries are cached in user cache directory |
-| Platform detection | Correct binary is selected for current platform |
-
----
-
-## Design Decisions
-
-| Decision | Why | Confidence |
-|----------|-----|------------|
-| Native binary | Better performance, no Python overhead | High |
-| GitHub Releases | Standard distribution mechanism | High |
-| WebSocket protocol | Real-time bidirectional communication | High |
-| Cache directory | Avoid re-downloading binaries | High |
-| Deprecate Textual | Native binary is superior | High |
-
----
-
-## Implementation Pointers
-
-- **Repos/paths:** `silc/tui/`
-- **Entry points:** `launch_tui(port)`, `ensure_native_tui_binary()`
-- **Key files:**
-  - `installer.py` — Binary installation
-  - `app.py` — Textual TUI (deprecated)
-- **External:** TUI binary source in separate repo
-
----
+It remains in the repo for backwards compatibility, but it is not the primary TUI path.
 
 ## Error Handling
 
-| Error | Behavior |
-|-------|----------|
-| Binary not found | Download from GitHub Releases |
-| Download failure | Print error, suggest manual build |
-| WebSocket disconnect | Exit TUI |
-| Invalid token | Connection rejected |
+- If the native binary cannot be resolved, the CLI prints a manual-install hint.
+- If `pywebview` is missing, desktop launch fails with a clear error.
+- Legacy websocket disconnects simply end the app.

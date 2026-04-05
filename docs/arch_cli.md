@@ -1,84 +1,53 @@
 # Architecture: CLI
 
-This document describes the command-line interface. Complete enough to rewrite `silc/__main__.py` from scratch.
-
----
+This document describes `silc/__main__.py`.
 
 ## Overview
 
-The CLI provides user-friendly commands to interact with SILC:
+The CLI is a Click-based front end for:
 
-- Daemon management (start, shutdown, killall)
-- Session operations (run, out, status, etc.)
-- TUI/Web UI launching
-- Log viewing
-- OS context-menu integration install/remove
-
----
+- starting or managing the daemon
+- operating on an existing session by port or name
+- launching the manager UI, desktop webview, TUI, and MCP server
+- installing OS integrations
 
 ## Scope Boundary
 
-**This component owns:**
-- Command parsing and validation
-- HTTP client for daemon/session communication
-- Output formatting
-- TUI binary installation
+Owns:
 
-**This component does NOT own:**
-- Session logic (see [arch_core.md](arch_core.md))
-- Daemon management (see [arch_daemon.md](arch_daemon.md))
-- API endpoints (see [arch_api.md](arch_api.md))
+- command parsing and validation
+- daemon/session HTTP client behavior
+- user-facing output and warnings
+- native TUI launch/install flow
 
-**Boundary interfaces:**
-- Communicates with: Daemon API (port 19999), Session API (ports 20000+)
-- Exposes: `silc` console script
+Does not own:
 
----
+- daemon runtime logic (`silc/daemon/`)
+- session behavior (`silc/core/`)
+- session API behavior (`silc/api/server.py`)
 
-## Dependencies
+## Command Tree
 
-### External Packages
-
-| Package | Purpose | Version |
-|---------|---------|---------|
-| `click` | CLI framework | any |
-| `requests` | HTTP client | any |
-| `pywebview` | Native window launcher | any |
-| `uvicorn` | ASGI server (for daemon mode) | any |
-
-### Internal Modules
-
-| Module | Purpose |
-|--------|---------|
-| `silc/daemon/manager.py` | Daemon class |
-| `silc/daemon/__init__.py` | Daemon utilities |
-| `silc/tui/app.py` | Textual TUI |
-| `silc/tui/installer.py` | TUI binary installer |
-| `silc/os_integration.py` | Finder / Explorer / file-manager integration |
-| `silc/utils/ports.py` | Port utilities |
-| `silc/stream/cli_commands.py` | Streaming commands |
-
----
-
-## Command Structure
-
-```
+```text
 silc
-├── start [name] [--port] [--global] [--no-detach] [--token]
-├── manager
-├── desktop
-├── os-integration
-│   ├── install
-│   └── uninstall
+├── start [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]
+├── manager [--share]
+├── desktop [--share]
+├── mcp
 ├── list
 ├── shutdown
 ├── killall
 ├── restart-server
+├── resurrect
+├── restart
 ├── logs [--tail]
+├── os-integration install|uninstall
 ├── daemon (hidden)
-└── <port-or-name>
+├── desktop-window (hidden)
+├── open (deprecated session command)
+└── <port|name>
     ├── run <command...> [--timeout]
-    ├── out [<lines>]
+    ├── out [lines]
     ├── in <text...>
     ├── status
     ├── interrupt
@@ -87,389 +56,92 @@ silc
     ├── resize <rows> <cols>
     ├── close
     ├── kill
+    ├── restart
     ├── logs [--tail]
     ├── tui
     ├── web
-    ├── open (deprecated)
-    ├── stream-render <filename> [--interval]
-    ├── stream-append <filename> [--interval]
-    ├── stream-stop <filename>
+    ├── stream-file-render
+    ├── stream-file-append
+    ├── stream-stop
     └── stream-status
 ```
 
----
+## Session Target Resolution
 
-## Command Groups
+- A session selector may be a **port** or a **name**.
+- Numeric selectors become `port`-bound groups.
+- Valid names are resolved through the daemon (`GET /resolve/{name}`).
+- Invalid names are rejected before any request is sent.
 
-### `SilcCLI` (Custom Group)
+## `silc start`
 
-```python
-class SilcCLI(click.Group):
-    port_subcommands = click.Group()
+Behavior:
 
-    def get_command(self, ctx, cmd_name):
-        # Distinguish port (all digits) from name (contains letters)
-        if cmd_name.isdigit():
-            return SessionGroup(port=int(cmd_name), commands=self.port_subcommands.commands)
-        elif _is_valid_name(cmd_name):
-            return SessionGroup(name=cmd_name, commands=self.port_subcommands.commands)
-        return super().get_command(ctx, cmd_name)
-```
+1. Validate an explicit name if provided.
+2. Generate a token for `--global` if one is not supplied.
+3. Warn loudly about network exposure when using `--global` or `--share`.
+4. Start or reuse the daemon.
+5. If no name is provided, derive one from the current folder name.
+6. Create the session through the daemon API.
+7. Print connection hints for TUI, web UI, and API access.
 
-### `SessionGroup`
+Notes:
 
-Handles both port and name identification:
+- Folder-derived names are sanitized and collision-safe (`name`, `name-2`, ...).
+- `--no-detach` starts the daemon in-process instead of detaching.
+- `--global` is a session-level network exposure mode, distinct from daemon `--share`.
 
-```python
-class SessionGroup(click.Group):
-    def __init__(self, port: int | None = None, name: str | None = None, **kwargs):
-        self.port = port
-        self.name = name
-        super().__init__(**kwargs)
+## Manager / Desktop
 
-    def invoke(self, ctx):
-        # Resolve name to port if needed
-        if self.name and not self.port:
-            self.port = _resolve_name(self.name)
-        ctx.params["port"] = self.port
-        return super().invoke(ctx)
-```
+- `silc manager` opens the manager UI in a browser tab.
+- `silc desktop` opens the same UI in a detached native webview window.
+- `--share` restarts or starts the daemon in LAN share mode if needed.
 
-### Name Detection
+## Daemon Control
 
-```python
-def _is_valid_name(s: str) -> bool:
-    """Check if string is a valid session name (not a port)."""
-    if s.isdigit():
-        return False  # It's a port number
-    # Must match [a-z][a-z0-9-]*[a-z0-9]
-    return bool(re.match(r'^[a-z][a-z0-9-]*[a-z0-9]$', s.lower()))
-```
-
-### Name Resolution
-
-```python
-def _resolve_name(name: str) -> int:
-    """Resolve session name to port via daemon API."""
-    resp = requests.get(f"http://127.0.0.1:19999/resolve/{name}", timeout=2)
-    if resp.status_code == 404:
-        raise click.ClickException(f"Session '{name}' not found")
-    return resp.json()["port"]
-```
-
----
-
-## Daemon Commands
-
-### `silc start`
-
-```python
-@cli.command()
-@click.argument("name", required=False, default=None)
-@click.option("--port", type=int, default=None)
-@click.option("--global", "is_global", is_flag=True)
-@click.option("--no-detach", is_flag=True)
-@click.option("--token", type=str, default=None)
-@click.option("--shell", type=str, default=None)
-@click.option("--cwd", type=str, default=None)
-def start(name, port, is_global, no_detach, token, shell, cwd):
-    # 1. Validate name format if provided
-    # 2. Show security warning if --global
-    # 3. Check if daemon is running
-    # 4. Start daemon if needed (detached or foreground)
-    # 5. Create session via daemon API with name
-    # 6. Print session info (port, name, session_id)
-```
-
-**Name handling:**
-- If `name` is provided, validate format and send to daemon
-- If `name` is not provided, daemon auto-generates one
-- Name collision results in error from daemon
-
-### `silc manager`
-
-```python
-@cli.command()
-def manager():
-    # 1. Check if daemon is running
-    # 2. Start daemon if needed (detached)
-    # 3. Open browser to http://127.0.0.1:19999/
-```
-
-Opens the session manager web UI. Auto-starts the daemon if not already running.
-
-### `silc desktop`
-
-```python
-@cli.command()
-def desktop():
-    # 1. Share the same daemon startup flow as silc manager
-    # 2. Start daemon if needed (detached)
-    # 3. Launch a detached child process that opens pywebview
-```
-
-Opens the same session manager UI in a separate native desktop window.
-
-### `silc list`
-
-```python
-@cli.command(name="list")
-def list_sessions():
-    resp = requests.get("http://127.0.0.1:19999/sessions")
-    sessions = resp.json()
-    # Format and print
-```
-
-### `silc shutdown`
-
-```python
-@cli.command()
-def shutdown():
-    requests.post("http://127.0.0.1:19999/shutdown", timeout=35)
-    _wait_for_daemon_stop(timeout=30)
-```
-
-### `silc killall`
-
-```python
-@cli.command()
-def killall():
-    requests.post("http://127.0.0.1:19999/killall", timeout=3)
-    kill_daemon(port=19999, force=True)
-```
-
-### `silc restart-server`
-
-```python
-@cli.command(name="restart-server")
-def restart_server():
-    requests.post("http://127.0.0.1:19999/restart-server", timeout=5)
-```
-
-Restarts the daemon HTTP server without killing PTY sessions. Useful for recovering from HTTP issues while keeping shells alive.
-
-### `silc os-integration`
-
-```python
-@cli.group(name="os-integration")
-def os_integration_group():
-    pass
-
-@os_integration_group.command()
-def install():
-    # macOS: Finder Quick Action (.workflow)
-    # Windows: per-user Explorer context-menu registry keys
-    # Linux: Nautilus scripts, Thunar custom actions, Dolphin servicemenus
-    pass
-
-@os_integration_group.command()
-def uninstall():
-    pass
-```
-
-Creates a right-click entry that launches `silc start --cwd <selected-path>`.
-
----
+- `list` prints active sessions from the daemon registry.
+- `shutdown` gracefully stops the daemon but preserves records.
+- `killall` forcefully terminates sessions and daemon.
+- `restart-server` restarts the daemon HTTP server only.
+- `resurrect` reloads persisted session records and reconciles them.
+- `restart` performs a full daemon restart while preserving share mode.
 
 ## Session Commands
 
-All session commands use the pattern `silc <port-or-name> <command>`. Sessions can be identified by port number (e.g., `20000`) or by name (e.g., `my-project`).
+- `run` posts JSON `{command, timeout}` to `/run`.
+- `out` reads rendered output from `/out`.
+- `in` posts raw input bytes to `/in`.
+- `status` reads `/status` and prints session metadata.
+- `interrupt`, `clear`, `reset`, `resize` map directly to the session API.
+- `close`, `kill`, `restart` call daemon lifecycle endpoints.
+- `logs` reads the daemon-maintained session log file.
+- `web` opens the per-session web UI.
+- `tui` launches the native TUI binary.
+- `open` is deprecated and launches the legacy Textual TUI.
 
-### `silc <port-or-name> run`
+## Stream Commands
 
-```python
-@cli.port_subcommands.command()
-@click.argument("command", nargs=-1)
-@click.option("--timeout", default=60)
-def run(ctx, command, timeout):
-    port = ctx.parent.params["port"]  # Resolved from name if needed
-    resp = requests.post(
-        f"http://127.0.0.1:{port}/run",
-        json={"command": " ".join(command), "timeout": timeout},
-        timeout=120
-    )
-    print(resp.json().get("output", ""))
-```
+- `stream-file-render` starts overwrite-mode file streaming.
+- `stream-file-append` starts append-mode file streaming with deduplication.
+- `stream-stop` stops streaming for the named file.
+- `stream-status` shows active file streams.
 
-### `silc <port-or-name> out`
+The CLI fetches the session token from `/token` when one is needed for stream calls.
 
-```python
-@cli.port_subcommands.command()
-@click.argument("lines", default=100, type=int)
-def out(ctx, lines):
-    port = ctx.parent.params["port"]
-    resp = requests.get(f"http://127.0.0.1:{port}/out", params={"lines": lines})
-    print(resp.json().get("output", ""))
-```
+## Native TUI Launch
 
-### `silc <port-or-name> tui`
+- `silc tui` resolves a cached or downloaded native binary.
+- The binary path is platform-specific and may be installed from GitHub releases.
+- The launcher passes the session websocket URL directly to the binary.
 
-```python
-@cli.port_subcommands.command()
-def tui(ctx):
-    port = ctx.parent.params["port"]
-    executable = _find_native_tui_binary()
-    ws_url = f"ws://127.0.0.1:{port}/ws"
-    subprocess.run([str(executable), ws_url])
-```
+## Hidden/Internal Commands
 
----
-
-## TUI Binary Management
-
-### Binary Location
-
-```
-tui_client/dist/silc-tui-<platform>[.exe]  # Local build
-~/.cache/silc/bin/silc-tui-<platform>      # Downloaded release
-```
-
-### Installation
-
-```python
-def _find_native_tui_binary() -> Path | None:
-    # 1. Check local build directory
-    dist_dir = _tui_dist_dir()
-    if dist_dir:
-        candidate = _native_tui_binary_path(dist_dir)
-        if candidate.exists():
-            return candidate
-
-    # 2. Download from GitHub releases
-    try:
-        return ensure_native_tui_binary(progress=click.echo)
-    except InstallerError:
-        return None
-```
-
-### Platform Detection
-
-```python
-def _native_tui_binary_path(dist_dir: Path) -> Path:
-    if sys.platform.startswith("win"):
-        filename = "silc-tui-windows.exe"
-    elif sys.platform.startswith("linux"):
-        filename = "silc-tui-linux"
-    elif sys.platform == "darwin":
-        filename = "silc-tui-macos"
-    return dist_dir / filename
-```
-
----
-
-## Daemon Startup
-
-### Detached Mode
-
-```python
-def _start_detached_daemon():
-    python_exec = _get_daemon_python_executable()
-    cmd = [python_exec, "-m", "silc", "daemon"]
-
-    if sys.platform == "win32":
-        creationflags = (
-            subprocess.CREATE_NEW_PROCESS_GROUP
-            | subprocess.DETACHED_PROCESS
-            | subprocess.CREATE_NO_WINDOW
-        )
-        subprocess.Popen(cmd, creationflags=creationflags, ...)
-    else:
-        subprocess.Popen(cmd, start_new_session=True, ...)
-```
-
-### Foreground Mode
-
-```python
-@cli.command(name="daemon", hidden=True)
-def run_as_daemon():
-    from silc.daemon.manager import SilcDaemon
-    daemon = SilcDaemon()
-    asyncio.run(daemon.start())
-```
-
----
-
-## Utility Functions
-
-### Daemon URL
-
-```python
-def _daemon_url(path: str) -> str:
-    return f"http://127.0.0.1:19999{path}"
-```
-
-### Daemon Available Check
-
-```python
-def _daemon_available(timeout: float = 2.0) -> bool:
-    try:
-        requests.get(_daemon_url("/sessions"), timeout=timeout)
-        return True
-    except requests.RequestException:
-        return False
-```
-
-### Wait for Daemon
-
-```python
-def _wait_for_daemon_start(timeout: float = 10.0) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if _daemon_available(timeout=0.5):
-            return True
-        time.sleep(0.3)
-    return _daemon_available(timeout=0.5)
-```
-
----
-
-## Contracts / Invariants
-
-| Invariant | Description |
-|-----------|-------------|
-| Port or name as subcommand | `<port-or-name>` is parsed as a command group |
-| Port = all digits | If argument is all digits, treat as port |
-| Name = contains letters | If argument matches name pattern, resolve via daemon |
-| HTTP communication | CLI communicates with daemon/sessions via HTTP |
-| Detached daemon | Daemon runs in background by default |
-| TUI binary fallback | Downloads binary if not found locally |
-
----
-
-## Design Decisions
-
-| Decision | Why | Confidence |
-|----------|-----|------------|
-| Click framework | Mature, well-documented | High |
-| Port or name as subcommand | Natural `silc 20000 run` or `silc my-project run` syntax | High |
-| Digits = port, letters = name | Unambiguous distinction | High |
-| Resolve name via daemon API | Centralized name registry | High |
-| HTTP client | Simple, reliable communication | High |
-| Detached daemon | Background operation, no terminal required | High |
-| Native TUI binary | Better performance than Python TUI | High |
-
----
-
-## Implementation Pointers
-
-- **Repos/paths:** `silc/__main__.py`
-- **Entry points:** `main()` function
-- **Related:**
-  - `silc/daemon/__init__.py` — Daemon utilities
-  - `silc/tui/installer.py` — TUI binary installer
-  - `silc/stream/cli_commands.py` — Streaming commands
-
----
+- `daemon` is the internal daemon entry point.
+- `desktop-window` is an internal helper for the detached native webview.
 
 ## Error Handling
 
-| Error | Behavior |
-|-------|----------|
-| Daemon not running | Start daemon automatically |
-| Session not found (port) | Print error message |
-| Session not found (name) | Print "Session 'name' not found" |
-| Name collision | Print error from daemon |
-| Invalid name format | Print error message with format rules |
-| Port in use | Print error with existing session info |
-| TUI binary not found | Print warning, suggest manual build |
-| Request timeout | Print error message |
+- HTTP 410 is treated as a dead session.
+- Connection failures print a friendly "session does not exist" message.
+- Daemon startup failures print log details before aborting.
+- Global/share modes print prominent RCE warnings.

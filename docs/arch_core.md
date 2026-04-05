@@ -1,532 +1,143 @@
-# Architecture: Core (Session, PTY, Buffer, Cleaner)
+# Architecture: Core
 
-This document describes the core shell interaction layer. Complete enough to rewrite `silc/core/` from scratch.
-
----
+This document describes `silc/core/`.
 
 ## Overview
 
-The core layer provides:
+The core layer owns the PTY-backed session runtime:
 
-- **PTY abstraction** — Cross-platform pseudo-terminal management
-- **Session orchestration** — Ties PTY, buffer, and command execution together
-- **Output buffering** — Ring buffer for terminal output
-- **Output cleaning** — ANSI/control sequence removal
-- **OSC title capture** — Extracts window titles from PTY byte streams
-
----
+- shell process creation and PTY I/O
+- output buffering and rendering
+- command execution with sentinel capture
+- title/cwd extraction from PTY output
+- live session status and lifecycle methods
 
 ## Scope Boundary
 
-**This component owns:**
-- PTY creation and lifecycle management
-- Session state and command execution
-- Output buffering and retrieval
-- ANSI/control sequence cleaning
-- Shell detection and helper function injection
+Owns:
 
-**This component does NOT own:**
-- HTTP/WebSocket API (see [arch_api.md](arch_api.md))
-- Daemon management (see [arch_daemon.md](arch_daemon.md))
-- CLI parsing (see [arch_cli.md](arch_cli.md))
-- Configuration loading (see `silc/config.py`)
+- PTY lifecycle and I/O
+- session runtime state
+- output buffering, cleaning, and snapshots
+- prompt/title/cwd tracking
 
-**Boundary interfaces:**
-- Receives: port number, shell info, API token from daemon
-- Exposes: `SilcSession` class with `run_command()`, `get_output()`, `write_input()`, etc.
+Does not own:
 
----
+- daemon record management (`silc/daemon/`)
+- session HTTP/WebSocket routing (`silc/api/server.py`)
+- CLI parsing (`silc/__main__.py`)
 
-## Dependencies
+## Key Modules
 
-### External Packages
+| Module | Role |
+|---|---|
+| `silc/core/session.py` | `SilcSession` orchestration |
+| `silc/core/pty_manager.py` | PTY abstraction/factory |
+| `silc/core/raw_buffer.py` | Raw PTY ring buffer |
+| `silc/core/cleaner.py` | Output cleaning |
+| `silc/core/osc.py` | OSC title/CWD parsing |
 
-| Package | Purpose | Version |
-|---------|---------|---------|
-| `asyncio` | Async I/O | stdlib |
-| `psutil` | Process management | any |
-| `pty` | Unix PTY (Unix only) | stdlib |
-| `pywinpty` / `winpty` | Windows PTY (Windows only) | any |
+## `SilcSession`
 
-### Internal Modules
-
-| Module | Purpose |
-|--------|---------|
-| `silc/config.py` | Configuration values |
-| `silc/utils/persistence.py` | Session logging |
-| `silc/utils/shell_detect.py` | Shell detection |
-| `silc/core/osc.py` | OSC title parsing |
-
----
-
-## Data Models
-
-### `ShellInfo`
+Important fields:
 
 ```python
-@dataclass
-class ShellInfo:
-    type: str              # "bash", "zsh", "sh", "pwsh", "cmd"
-    path: str              # Shell executable path
-    prompt_pattern: Pattern[str]  # Regex to detect prompt
+port: int
+name: str
+shell_info: ShellInfo
+session_id: str
+api_token: str | None
+cwd: str | None
+title: str
+title_updated_at: datetime
+buffer: RawByteBuffer
+created_at: datetime
+last_access: datetime
+last_output: datetime
+screen_columns: int
+screen_rows: int
+tui_active: bool
+run_lock: asyncio.Lock
+input_lock: asyncio.Lock
+current_run_cmd: str | None
 ```
 
-### `SilcSession`
+## Lifecycle
 
-```python
-class SilcSession:
-    port: int                    # Session port
-    name: str                    # Session name (unique, e.g., "happy-fox-42")
-    session_id: str              # 8-char UUID
-    shell_info: ShellInfo        # Shell configuration
-    api_token: str | None        # API token (optional)
-    cwd: str | None              # Working directory (optional)
-    title: str                   # Latest terminal title
-    title_updated_at: datetime   # Last observed title update
-    buffer: RawByteBuffer        # Output buffer
-    created_at: datetime         # Creation timestamp
-    last_access: datetime        # Last access timestamp
-    last_output: datetime        # Last output timestamp
-    screen_columns: int          # Terminal width (default: 120)
-    screen_rows: int             # Terminal height (default: 30)
-    tui_active: bool             # TUI connection status
-```
+- `__init__` creates the PTY, buffer, listeners, and default terminal geometry.
+- `start()` creates the read loop and a background GC task after a short startup grace period.
+- The GC task only rotates logs; sessions do **not** auto-expire.
+- `close()` cancels background tasks and kills the PTY.
+- `force_kill()` is a more aggressive close path with shorter waits.
 
-### `RawByteBuffer`
+## Read Loop
 
-```python
-class RawByteBuffer:
-    maxlen: int                  # Maximum buffer size (default: 65536)
-    cursor: int                  # Current read position
-```
+- The read loop pulls bytes from the PTY and appends them to the ring buffer.
+- OSC title and hidden-cwd sequences are parsed from the raw stream.
+- Live title/cwd listeners are notified when those values change.
+- Status metadata caches the latest visible line and a heuristic `waiting_for_input` flag.
+- Session output is written to the per-session log file.
 
----
+## Output Retrieval
 
-## Component Relationships
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      SilcSession                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │    PTY      │  │   Buffer    │  │      Cleaner        │  │
-│  │ (PTYBase)   │──│(RawByteBuffer)──│(clean_output)       │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-│        │                                                    │
-│        ▼                                                    │
-│  ┌─────────────┐                                           │
-│  │   Shell     │                                           │
-│  │ (bash/zsh/  │                                           │
-│  │  pwsh/cmd)  │                                           │
-│  └─────────────┘                                           │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## PTY Implementation
-
-### `PTYBase` (Abstract)
-
-```python
-class PTYBase(ABC):
-    pid: int | None
-
-    @abstractmethod
-    async def read(self, size: int = 1024) -> bytes: ...
-
-    @abstractmethod
-    async def write(self, data: bytes) -> None: ...
-
-    @abstractmethod
-    def resize(self, rows: int, cols: int) -> None: ...
-
-    @abstractmethod
-    def kill(self) -> None: ...
-
-    @abstractmethod
-    def send_sigterm(self) -> None:
-        """Send SIGTERM to foreground process group (graceful)."""
-        ...
-
-    @abstractmethod
-    def send_sigkill(self) -> None:
-        """Send SIGKILL to foreground process group (force)."""
-        ...
-```
-
-### `UnixPTY`
-
-**Implementation:**
-- Uses `pty.openpty()` to create master-slave pair
-- Spawns shell via `subprocess.Popen` with `preexec_fn=os.setsid`
-- Reads/writes via master file descriptor
-- Resizes with `ioctl(TIOCSWINSZ)`
-- Kills shell process and closes FD
-
-**Code path:**
-```python
-import pty, os, subprocess
-
-master_fd, slave_fd = pty.openpty()
-process = subprocess.Popen(
-    [shell_path],
-    stdin=slave_fd,
-    stdout=slave_fd,
-    stderr=slave_fd,
-    preexec_fn=os.setsid,
-)
-os.close(slave_fd)
-```
-
-**Signal handling:**
-
-Unix uses process groups (created via `preexec_fn=os.setsid`). Signal the entire group:
-
-```python
-import signal
-
-def send_sigterm(self) -> None:
-    if self.pid:
-        try:
-            os.killpg(os.getpgid(self.pid), signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-
-def send_sigkill(self) -> None:
-    if self.pid:
-        try:
-            os.killpg(os.getpgid(self.pid), signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-```
-
-### `WindowsPTY`
-
-**Implementation:**
-- Loads `winpty` or `pywinpty` module
-- Spawns shell via `winpty.PtyProcess.spawn()` or `winpty.PTY.spawn()`
-- Wraps synchronous read/write in `run_in_executor` for async
-- Resizes via `setwinsize(rows, cols)` or `set_size(rows, cols)`
-- Kills process tree (parent + children)
-
-**Code path:**
-```python
-import winpty
-
-process = winpty.PtyProcess.spawn(command, env=env)
-# or
-pty_handle = winpty.PTY(cols=120, rows=30)
-process = pty_handle.spawn(command, env=env)
-```
-
-**Signal handling:**
-
-Windows lacks POSIX signals. Use psutil to find and terminate child processes
-of the shell (foreground jobs), NOT the shell itself:
-
-```python
-import psutil
-
-def send_sigterm(self) -> None:
-    if self.pid:
-        try:
-            proc = psutil.Process(self.pid)
-            for child in proc.children(recursive=True):
-                try:
-                    child.terminate()
-                except psutil.NoSuchProcess:
-                    pass
-        except psutil.NoSuchProcess:
-            pass
-
-def send_sigkill(self) -> None:
-    if self.pid:
-        try:
-            proc = psutil.Process(self.pid)
-            for child in proc.children(recursive=True):
-                try:
-                    child.kill()
-                except psutil.NoSuchProcess:
-                    pass
-        except psutil.NoSuchProcess:
-            pass
-```
-
-### `StubPTY`
-
-Fallback when platform-specific PTY cannot be loaded. All methods are no-ops.
-
-Signal methods (`send_sigterm`, `send_sigkill`) are also no-ops.
-
-### Factory: `create_pty()`
-
-```python
-def create_pty(shell_cmd: str | None, env: Mapping[str, str], cwd: str | None = None) -> PTYBase:
-    if sys.platform == "win32":
-        return WindowsPTY(shell_cmd, env, cwd)
-    if sys.platform.startswith("linux") or sys.platform == "darwin":
-        return UnixPTY(shell_cmd, env, cwd)
-    return StubPTY(shell_cmd, env, cwd)
-```
-
----
-
-## Session Lifecycle
-
-### Initialization
-
-```python
-session = SilcSession(port, name, shell_info, api_token, cwd=cwd)
-session.pty = create_pty(shell_info.path, os.environ.copy(), cwd=cwd)
-session.buffer = RawByteBuffer(maxlen=65536)
-```
-
-### Startup
-
-```python
-await session.start()
-# 1. Start _read_loop() task
-# 2. Wait 0.5s for shell to initialize
-# 3. Inject helper function
-# 4. Start _garbage_collect() task
-```
-
-### Read Loop
-
-```python
-async def _read_loop():
-    while not self._closed:
-        data = await self.pty.read(4096)
-        if data:
-            self.buffer.append(data)
-            self.last_output = datetime.utcnow()
-            write_session_log(self.port, f"OUTPUT: {data}")
-        else:
-            await asyncio.sleep(0.1)
-```
-
-### Garbage Collection
-
-```python
-async def _garbage_collect():
-    while not self._closed:
-        await asyncio.sleep(60)
-        idle = (datetime.utcnow() - self.last_access).total_seconds()
-        if idle > 1800 and not self.tui_active and not self.run_lock.locked():
-            await self.close()
-            break
-        self.rotate_logs()
-```
-
-### Shutdown
-
-```python
-async def close():
-    self._closed = True
-    self._read_task.cancel()
-    self._gc_task.cancel()
-    self.pty.kill()
-    await asyncio.wait_for(self._read_task, timeout=1.0)
-```
-
----
+- `get_output(lines, raw=False)` returns either raw buffered output or a rendered terminal snapshot.
+- `get_rendered_output()` uses `par_term_emu_core_rust` when available.
+- Fallback rendering uses the cleaner and strips sentinel markers.
+- `get_snapshot_bytes()` caches raw bytes for preview rendering.
 
 ## Command Execution
 
-### Sentinel Pattern
+`run_command()`:
 
-Commands are wrapped with sentinel markers for reliable output capture:
+1. Rejects concurrent runs with a `busy` response.
+2. Wraps the requested command in a shell-specific helper invocation.
+3. Waits for begin/end sentinels and captures exit code.
+4. Caps collected output at 5 MB; overflow sends Ctrl+C and returns an error.
+5. Returns `completed`, `timeout`, or `error` with cleaned output.
 
-```
-__SILC_BEGIN_<token>__
-<command output>
-__SILC_END_<token>:<exit_code>
-```
+## Input and Terminal Control
 
-### Helper Function Injection
+- `write_input()` writes raw bytes to the PTY.
+- `interrupt()` sends Ctrl+C.
+- `send_sigterm()` and `send_sigkill()` delegate to the PTY process-group helpers.
+- `clear_screen()` and `reset_terminal()` send terminal control sequences and wait for prompt settlement.
+- `resize()` updates PTY and renderer geometry.
 
-**Bash/Zsh/Sh:**
-```bash
-__silc_exec() {
-    printf "__SILC_BEGIN_$2__\n"
-    eval "$1"
-    printf "__SILC_END_$2__:%d\n" $?
-}
-```
+## Status Model
 
-**PowerShell:**
-```powershell
-function __silc_exec($cmd, $token) {
-    Write-Host "__SILC_BEGIN_${token}__"
-    Invoke-Expression $cmd
-    Write-Host "__SILC_END_${token}__:$LASTEXITCODE"
-}
-```
+`get_status()` returns:
 
-**CMD:**
-```batch
-@echo off
-echo __SILC_BEGIN_%2__
-call %1
-echo __SILC_END_%2__:%ERRORLEVEL%
-```
+- `session_id`
+- `port`
+- `name`
+- `title`
+- `cwd`
+- `title_updated_at`
+- `alive`
+- `idle_seconds`
+- `waiting_for_input`
+- `last_line`
+- `run_locked`
 
-### Execution Flow
+`idle_seconds` is informational; it does not close the session.
 
-```python
-async def run_command(cmd: str, timeout: int = 600) -> dict:
-    if self.run_lock.locked():
-        return {"error": "busy", "running_cmd": self.current_run_cmd}
+## Listeners
 
-    async with self.run_lock:
-        token = str(uuid.uuid4())[:8]
-        invocation = self.shell_info.build_helper_invocation(cmd, token)
-        await self.pty.write(invocation + newline)
+The session supports live listeners for:
 
-        # Read until end sentinel or timeout
-        while time < deadline:
-            chunk, cursor = self.buffer.get_since(cursor)
-            collected.extend(chunk)
+- title changes
+- cwd changes
+- raw output chunks
 
-            # Check for buffer overflow
-            if len(collected) > MAX_COLLECTED_BYTES:
-                await self.pty.write(b"\x03")  # Ctrl+C
-                return {"error": "buffer overflow"}
+The daemon uses these listeners to persist updates back into the registry.
 
-            # Check for begin marker
-            if begin_marker in collected:
-                started = True
+## PTY Creation
 
-            # Check for end marker
-            if end_marker in collected:
-                return {"output": output, "exit_code": exit_code}
-
-        return {"error": "timeout"}
-```
-
----
-
-## Output Buffer
-
-### `RawByteBuffer`
-
-**Purpose:** Store PTY output with cursor tracking for incremental reads.
-
-**Operations:**
-
-| Method | Description |
-|--------|-------------|
-| `append(data: bytes)` | Add bytes, trim to maxlen |
-| `get_last(lines: int) -> List[str]` | Get last N lines |
-| `get_since(cursor: int) -> Tuple[bytes, int]` | Get bytes since cursor |
-| `clear()` | Reset buffer |
-| `get_bytes() -> bytes` | Get all buffered bytes |
-
-**Ring Buffer Behavior:**
-- When buffer exceeds `maxlen`, oldest bytes are discarded
-- `_start_offset` tracks how many bytes were discarded
-- `cursor` tracks total bytes appended
-
----
-
-## Output Cleaning
-
-### `clean_output(raw_lines: Iterable[str]) -> str`
-
-**Steps:**
-1. Handle carriage returns (keep last segment after `\r`)
-2. Remove ANSI/OSC/control sequences
-3. Remove non-printable characters (except tabs)
-4. Strip trailing whitespace
-5. Collapse progress bars (keep last)
-6. Collapse consecutive blank lines
-
-**Regex Patterns:**
-
-```python
-ANSI_CONTROL_SEQUENCE = re.compile(
-    r"\x1b\[[0-9;]*[a-zA-Z]|"      # CSI sequences
-    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|"  # OSC sequences
-    r"\x1b[PX^_].*?\x1b\\|"        # DCS, SOS, PM, APC
-    r"\x1b[@-Z\\-_]"               # Single-character ESC
-)
-```
-
----
-
-## Shell Detection
-
-### `detect_shell() -> ShellInfo`
-
-**Windows:**
-1. Check `PSModulePath` env var → PowerShell
-2. Fallback → CMD
-
-**Unix:**
-1. Check `SHELL` env var
-2. Parse basename for `zsh`, `bash`
-3. Fallback → `/bin/sh`
-
----
-
-## Contracts / Invariants
-
-| Invariant | Description |
-|-----------|-------------|
-| Single run lock | Only one `run_command()` can execute at a time |
-| Sentinel detection | Commands MUST use sentinel markers for output capture |
-| Buffer overflow protection | Commands exceeding 5MB MUST be interrupted |
-| Timeout enforcement | Commands exceeding timeout MUST be interrupted |
-| Clean shutdown | `close()` MUST cancel all background tasks |
-| PTY cleanup | `kill()` MUST terminate shell process tree |
-
----
-
-## Design Decisions
-
-| Decision | Why | Confidence |
-|----------|-----|------------|
-| Sentinel markers | Reliable output capture across shells | High |
-| Ring buffer | Memory-bounded output storage | High |
-| Async read loop | Non-blocking PTY reading | High |
-| Helper function injection | Shell-agnostic command execution | High |
-| psutil for process killing | Cross-platform process tree termination | High |
-
----
-
-## Implementation Pointers
-
-- **Repos/paths:** `silc/core/`
-- **Entry points:** `SilcSession.__init__()`, `SilcSession.start()`
-- **Key files:**
-  - `session.py` — Session orchestration
-  - `pty_manager.py` — PTY abstraction
-  - `raw_buffer.py` — Output buffering
-  - `cleaner.py` — Output cleaning
-- **Related:** `silc/utils/shell_detect.py` — Shell detection
-
----
+PTY selection is delegated to `create_pty()` in `pty_manager.py` based on platform.
 
 ## Error Handling
 
-| Error | Behavior |
-|-------|----------|
-| PTY creation failure | Raise exception (session creation fails) |
-| Shell not found | Use fallback shell (`/bin/sh` or `cmd.exe`) |
-| Read timeout | Return empty bytes |
-| Write failure | Silently ignore (PTY may be closed) |
-| Buffer overflow | Interrupt command, return error |
-| Command timeout | Return partial output with timeout status |
-
----
-
-## Performance Considerations
-
-| Aspect | Value | Notes |
-|--------|-------|-------|
-| Buffer size | 64KB default | Configurable via `maxlen` |
-| Read chunk size | 4KB | Balance between latency and throughput |
-| Read poll interval | 100ms | When no data available |
-| GC interval | 60s | Session idle check |
-| Idle timeout | 30 min | Auto-close idle sessions |
-| Max collected bytes | 5MB | Prevent DoS from large output |
+- PTY creation failure aborts session creation.
+- Read-loop exceptions end the session runtime.
+- Buffer overflow interrupts the foreground command.
+- Write/read operations are best-effort and avoid hanging the daemon.

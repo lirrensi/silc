@@ -37,7 +37,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 ### Advanced Features
 
 - **Token-based Auth** — Secure remote access
-- **Named Sessions** — Docker-style names for easy session identification (e.g., `horny-cat`)
+- **Named Sessions** — Docker-style names for easy session identification (e.g., `happy-fox-42`)
 - **Session Management** — Multiple concurrent sessions
 - **Output Buffering** — Configurable output history
 - **Command History** — Track executed commands
@@ -197,8 +197,8 @@ All session commands use the syntax `silc <port-or-name> <command>`. You can ide
 
 | Command | Description |
 |---------|-------------|
-| `silc <port-or-name> stream-render <filename> [--interval N]` | Stream rendered output to file |
-| `silc <port-or-name> stream-append <filename> [--interval N]` | Append output to file with deduplication |
+| `silc <port-or-name> stream-file-render [--name <file>] [--sec N]` | Stream rendered output to file |
+| `silc <port-or-name> stream-file-append [--name <file>] [--sec N]` | Append output to file with deduplication |
 | `silc <port-or-name> stream-stop <filename>` | Stop streaming to file |
 | `silc <port-or-name> stream-status` | Show streaming status |
 
@@ -254,6 +254,7 @@ The API is exposed by the FastAPI server. All endpoints (except `/web`) require 
 | `GET` | `/status` | Return session status |
 | `GET` | `/out?lines=N` | Return last N lines of terminal output |
 | `GET` | `/raw?lines=N` | Return raw output (no rendering) |
+| `GET` | `/snapshot` | Return raw PTY bytes for preview rendering |
 | `GET` | `/logs?tail=N` | Return last N lines of session log |
 | `GET` | `/stream` | Server-sent events stream of terminal output |
 | `POST` | `/in` | Send raw input to the session |
@@ -471,12 +472,20 @@ The daemon exposes a management API on port 19999 for session lifecycle operatio
 |--------|----------|-------------|
 | `POST` | `/sessions` | Create a new session |
 | `GET` | `/sessions` | List all active sessions |
+| `GET` | `/defaults` | Return UI defaults and shell choices |
 | `GET` | `/resolve/{name}` | Resolve session name to session info |
+| `POST` | `/sessions/{port}/rename` | Rename a session |
+| `POST` | `/sessions/reorder` | Reorder active sessions |
 | `POST` | `/sessions/{port}/close` | Gracefully close a session |
 | `POST` | `/sessions/{port}/kill` | Force kill a session |
 | `POST` | `/sessions/{port}/restart` | Restart session (same port/name/cwd/shell) |
+| `POST` | `/restart-server` | Restart daemon HTTP server |
+| `POST` | `/resurrect` | Reload persisted sessions and reconcile them |
 | `POST` | `/shutdown` | Graceful shutdown |
 | `POST` | `/killall` | Force kill all |
+| `GET` | `/events` | Daemon websocket event stream |
+
+The manager UI is served at `/ui/`, and `/` redirects there.
 
 ### `POST /sessions`
 
@@ -615,41 +624,31 @@ ws://localhost:20000/ws?token=YOUR_TOKEN
 
 Token is required for non-localhost connections.
 
+### Binary Frames
+
+All websocket application messages use the shared SILC binary envelope:
+
+```text
+[4-byte big-endian header length][JSON header UTF-8 bytes][raw payload bytes]
+```
+
 ### Server Messages
 
-**Output update:**
-```json
-{
-  "event": "update",
-  "data": "terminal output text..."
-}
-```
-
-**History (on request):**
-```json
-{
-  "event": "history",
-  "data": "full terminal history..."
-}
-```
+- `{"type":"output"}` + raw PTY bytes
+- `{"type":"history"}` + raw PTY bytes
+- `{"type":"title","title":...,"title_updated_at":...}` + empty payload
+- `{"type":"cwd","cwd":...}` + empty payload
 
 ### Client Messages
 
-**Send input:**
-```json
-{
-  "event": "type",
-  "text": "ls -la",
-  "nonewline": false
-}
-```
+- `{"type":"input","nonewline":true|false}` + UTF-8 input bytes
+- `{"type":"load_history"}` + empty payload
 
-**Request history:**
-```json
-{
-  "event": "load_history"
-}
-```
+### Modes
+
+- `mode=interactive` (default) claims the live terminal and streams output.
+- `mode=preview` is read-only and is used for frozen previews.
+- Token-protected sessions accept `?token=...` on the websocket URL.
 
 ---
 
