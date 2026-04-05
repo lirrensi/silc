@@ -214,12 +214,17 @@ class WindowsPTY(PTYBase):
     """Windows PTY via the pywinpty/winpty bindings."""
 
     def __init__(
-        self, shell_cmd: Optional[str], env: Mapping[str, str], cwd: str | None = None
+        self,
+        shell_cmd: Sequence[str] | str | None,
+        env: Mapping[str, str],
+        cwd: str | None = None,
     ):
         super().__init__(shell_cmd, env, cwd)
         self._pty_handle: Any | None = None
         winpty_module = self._load_winpty_module()
         command = shell_cmd or os.environ.get("COMSPEC", "cmd.exe")
+        if not isinstance(command, str):
+            command = subprocess.list2cmdline(list(command))
         if hasattr(winpty_module, "PtyProcess"):
             self._process = winpty_module.PtyProcess.spawn(
                 command, env=self.env, cwd=self.cwd

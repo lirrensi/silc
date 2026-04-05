@@ -690,7 +690,7 @@ class SilcDaemon:
 
         @app.post("/shutdown")
         async def shutdown():
-            """Graceful shutdown: close all sessions and stop the daemon.
+            """Graceful shutdown: close live sessions, preserve records, and stop the daemon.
 
             Must be bounded: never hang forever.
             """
@@ -710,7 +710,8 @@ class SilcDaemon:
                     break
                 try:
                     await asyncio.wait_for(
-                        self._ensure_cleanup_task(port), timeout=remaining
+                        self._ensure_cleanup_task(port, remove_record=False),
+                        timeout=remaining,
                     )
                 except asyncio.TimeoutError:
                     write_daemon_log(f"Shutdown timeout closing session: port={port}")
@@ -1387,12 +1388,16 @@ class SilcDaemon:
         except Exception as exc:
             _log_daemon_exception(operation, exc)
 
-    def _ensure_cleanup_task(self, port: int) -> asyncio.Task[None]:
+    def _ensure_cleanup_task(
+        self, port: int, *, remove_record: bool = True
+    ) -> asyncio.Task[None]:
         """Ensure a cleanup task exists for the given port."""
         task = self._cleanup_tasks.get(port)
         if task and not task.done():
             return task
-        task = asyncio.create_task(self._cleanup_session(port))
+        task = asyncio.create_task(
+            self._cleanup_session(port, remove_record=remove_record)
+        )
         self._cleanup_tasks[port] = task
         task.add_done_callback(lambda t, port=port: self._cleanup_tasks.pop(port, None))
         return task
@@ -1544,7 +1549,7 @@ class SilcDaemon:
         except OSError:
             pass
 
-    async def _cleanup_session(self, port: int) -> None:
+    async def _cleanup_session(self, port: int, *, remove_record: bool = True) -> None:
         """Cleanup a session: close server, close session, cleanup registry.
 
         This path must be *bounded* (never hang forever). The daemon shutdown
@@ -1558,14 +1563,16 @@ class SilcDaemon:
         if runtime:
             runtime.state = SessionState.STOPPING
             await self._cleanup_runtime_generation(
-                port, runtime.generation, remove_record=bool(entry)
+                port, runtime.generation, remove_record=remove_record and bool(entry)
             )
-            if entry:
-                self.runtime_by_port.pop(port, None)
-                cleanup_session_log(port)
-                return
+            self.runtime_by_port.pop(port, None)
+            cleanup_session_log(port)
+            return
 
         if entry:
+            if not remove_record:
+                cleanup_session_log(port)
+                return
             snapshot = serialize_session_snapshot(entry, runtime)
             self.registry.remove(port)
             self._persist_desired_sessions()
@@ -1631,7 +1638,8 @@ class SilcDaemon:
                     break
                 try:
                     await asyncio.wait_for(
-                        self._ensure_cleanup_task(port), timeout=remaining
+                        self._ensure_cleanup_task(port, remove_record=False),
+                        timeout=remaining,
                     )
                 except asyncio.TimeoutError:
                     write_daemon_log(f"Shutdown timeout closing session: port={port}")

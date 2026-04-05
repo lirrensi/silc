@@ -165,7 +165,7 @@ silc 20000 run "htop"         # Use TUI apps remotely
 | `silc os-integration install` | Install OS context-menu integration |
 | `silc os-integration uninstall` | Remove OS context-menu integration |
 | `silc list` | List all active sessions |
-| `silc shutdown` | Gracefully shut down daemon and all sessions |
+| `silc shutdown` | Gracefully shut down daemon, close live sessions, and preserve records |
 | `silc killall` | Force kill daemon and all sessions |
 | `silc resurrect` | Restore sessions from previous state |
 | `silc restart` | Shutdown and immediately start (resurrects sessions) |
@@ -740,7 +740,7 @@ Configuration is loaded from (highest to lowest priority):
 | **Auto-create session** | `silc start` creates first session automatically |
 | **No expiration** | Sessions stay alive indefinitely until explicitly closed |
 | **Shell exit detection** | Sessions automatically close when shell process exits |
-| **Graceful shutdown** | `silc shutdown` closes all sessions cleanly |
+| **Graceful shutdown** | `silc shutdown` closes live sessions cleanly while preserving records |
 | **Force kill** | `silc killall` terminates everything immediately |
 
 ### Command Execution
@@ -863,7 +863,7 @@ SILC deliberately does NOT:
 | `silc <port-or-name> kill` | Force kill session |
 | `silc <port-or-name> restart` | Restart session (same port/name/cwd/shell) |
 | `silc list` | List all sessions |
-| `silc shutdown` | Stop daemon |
+| `silc shutdown` | Stop daemon (records preserved) |
 | `silc killall` | Force kill everything |
 | `silc resurrect` | Restore sessions from previous state |
 | `silc restart` | Shutdown and immediately start |

@@ -972,7 +972,7 @@ def list_sessions() -> None:
 
 @cli.command()
 def shutdown() -> None:
-    """Gracefully shutdown daemon (closes all sessions)."""
+    """Gracefully shutdown daemon, closing live sessions but preserving records."""
 
     try:
         # Daemon side is bounded (~30s), but give a small cushion.
@@ -982,7 +982,7 @@ def shutdown() -> None:
         return
 
     if _wait_for_daemon_stop(timeout=30):
-        click.echo("✨ SILC daemon shut down (all sessions closed)")
+        click.echo("✨ SILC daemon shut down (session records preserved)")
         click.echo("SILC daemon is no longer running")
         return
 

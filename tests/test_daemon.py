@@ -1,7 +1,7 @@
 # FILE: tests/test_daemon.py
 # PURPOSE: Verify daemon lifecycle, registry behavior, session persistence, and websocket event emission.
 # OWNS: Daemon API coverage, session registry checks, and session event integration tests.
-# DOCS: docs/arch_daemon.md, agent_chat/plan_manager_qol_2026-04-05.md
+# DOCS: docs/arch_daemon.md, docs/product.md, agent_chat/plan_shutdown_preserve_records_2026-04-05.md
 
 """Tests for SILC daemon functionality.
 
@@ -872,3 +872,84 @@ async def test_daemon_shutdown_endpoint(running_daemon: SilcDaemon) -> None:
 
     # Verify daemon is no longer running
     assert not _is_port_open(DAEMON_PORT)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_preserves_records_and_start_reload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Shutdown should preserve records, and startup should reload them."""
+    from silc.utils import persistence
+
+    monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry = daemon.registry.add(20101, "preserve-me", "sess-preserve", "bash")
+    daemon._persist_desired_sessions()
+
+    runtime = SimpleNamespace(
+        session=_EventTestSession(entry.port, entry.name, entry.session_id),
+        generation=0,
+        state=SessionState.RUNNING,
+        server=None,
+        server_task=None,
+        socket=None,
+        name=entry.name,
+        shell_type=entry.shell_type,
+        cwd=entry.cwd,
+        is_global=entry.is_global,
+    )
+    daemon.runtime_by_port[entry.port] = runtime
+    daemon.sessions[entry.port] = runtime.session
+
+    resp = await _post_daemon_json(daemon, "/shutdown", {})
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "shutdown"
+    assert daemon.registry.get(entry.port) is not None
+    assert entry.port not in daemon.sessions
+    assert entry.port not in daemon.runtime_by_port
+    assert [item["port"] for item in persistence.read_sessions_json()] == [20101]
+
+    restarted = SilcDaemon(enable_hard_exit=False)
+    result = await restarted._load_persisted_desired_records()
+
+    assert result["loaded"] == [{"port": 20101, "name": "preserve-me"}]
+    assert restarted.registry.get(20101) is not None
+
+
+@pytest.mark.asyncio
+async def test_killall_removes_records(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Killall should still delete desired records and sessions.json."""
+    from silc.utils import persistence
+
+    monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry = daemon.registry.add(20102, "destroy-me", "sess-destroy", "bash")
+    daemon._persist_desired_sessions()
+
+    runtime = SimpleNamespace(
+        session=_EventTestSession(entry.port, entry.name, entry.session_id),
+        generation=0,
+        state=SessionState.RUNNING,
+        server=None,
+        server_task=None,
+        socket=None,
+        name=entry.name,
+        shell_type=entry.shell_type,
+        cwd=entry.cwd,
+        is_global=entry.is_global,
+    )
+    daemon.runtime_by_port[entry.port] = runtime
+    daemon.sessions[entry.port] = runtime.session
+
+    resp = await _post_daemon_json(daemon, "/killall", {})
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "killed"
+    assert daemon.registry.get(entry.port) is None
+    assert entry.port not in daemon.runtime_by_port
+    assert persistence.read_sessions_json() == []

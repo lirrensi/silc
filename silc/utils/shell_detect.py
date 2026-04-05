@@ -79,7 +79,7 @@ class ShellInfo:
             )
 
         if self.type == "cmd":
-            return ShellLaunchSpec(argv=[self.path, "/k", f'call "{bootstrap}"'])
+            return ShellLaunchSpec(argv=[self.path, "/k", str(bootstrap)])
 
         return ShellLaunchSpec(argv=[self.path])
 

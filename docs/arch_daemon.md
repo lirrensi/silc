@@ -124,7 +124,7 @@ Persistent desired-state registry stored at `~/.silc/sessions.json`.
 **Sync behavior:**
 - On session create: append entry to `sessions.json`
 - On close/kill: remove entry from `sessions.json`
-- On shutdown: do nothing; file persists as-is
+- On shutdown: do not remove records; file persists as-is
 - This file is the source of truth for desired session existence
 - If a record exists, the daemon MUST attempt to realize a matching PTY and per-session server until the record is explicitly removed or marked degraded/broken
 
@@ -247,7 +247,7 @@ The daemon exposes a management API on port 19999.
 | `POST` | `/sessions/{port}/restart` | Replace PTY, preserve record |
 | `POST` | `/restart-server` | Restart daemon HTTP server without killing sessions |
 | `POST` | `/resurrect` | Re-read persistent records and reconcile them |
-| `POST` | `/shutdown` | Graceful shutdown |
+| `POST` | `/shutdown` | Graceful shutdown; closes live runtime and preserves records |
 | `POST` | `/killall` | Force kill all |
 
 ### `POST /sessions`
@@ -339,6 +339,18 @@ This path is a reconciliation trigger, not a different ownership mode. It causes
 5. Daemon closes PTY and kills orphaned processes if needed
    ↓
 6. Daemon removes sessions.json entry and logs
+
+### Shutdown Flow
+
+```text
+1. Trigger: shutdown
+   ↓
+2. Daemon closes live PTYs and per-session servers
+   ↓
+3. Daemon preserves registry records and sessions.json
+   ↓
+4. Daemon exits; later start/resurrect reloads the records
+```
 ```
 
 ---

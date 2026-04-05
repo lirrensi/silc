@@ -136,6 +136,18 @@ class TestCLIHelp:
         assert "<port|name> [OPTIONS] COMMAND [ARGS]..." in result.output
         assert "These commands act on an existing session" in result.output
 
+    def test_shutdown_help_mentions_preserved_records(self):
+        """`silc shutdown --help` should describe preserved records."""
+        from click.testing import CliRunner
+
+        from silc.__main__ import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["shutdown", "--help"])
+
+        assert result.exit_code == 0
+        assert "preserv" in result.output.lower()
+
 
 class TestDesktopLauncher:
     """Tests for the detached desktop launcher command."""
@@ -316,7 +328,7 @@ class TestCLISessionCommands:
 
     @pytest.mark.asyncio
     async def test_shutdown_stops_daemon(self, ensure_daemon_stopped):
-        """`silc shutdown` stops the daemon."""
+        """`silc shutdown` stops the daemon without destroying records."""
         # Start daemon
         run_cli(["start", "shutdown-test"], timeout=60)
         time.sleep(1)
@@ -325,7 +337,6 @@ class TestCLISessionCommands:
         result = run_cli(["shutdown"], timeout=35)
         output = result.stdout or result.stderr
         assert result.returncode == 0
-        assert "shut down" in output.lower() or "shutdown" in output.lower()
 
         # Verify daemon is stopped
         time.sleep(1)

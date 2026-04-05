@@ -81,6 +81,14 @@ def test_build_helper_invocation(
     assert expected_fragment in invocation
 
 
+def test_cmd_launch_spec_uses_direct_bootstrap_path() -> None:
+    info = ShellInfo("cmd", "cmd.exe", re.compile(r".*$"))
+    spec = info.build_launch_spec()
+
+    assert spec.argv[1] == "/k"
+    assert spec.argv[2] == str(info.get_bootstrap_script_path())
+
+
 def _bootstrap_text(info: ShellInfo) -> str:
     path = info.get_bootstrap_script_path()
     return path.read_text(encoding="utf-8")
