@@ -177,6 +177,22 @@ async function handleRefresh(): Promise<void> {
         },
       },
       {
+        stage: 'Refitting viewport',
+        detail: 'The terminal viewport is recalculated to match the current browser size.',
+        run: async () => {
+          manager.refreshTerminalSurface(port.value)
+          await nextTick()
+        },
+      },
+      {
+        stage: 'Repainting display',
+        detail: 'The terminal surface is redrawn after the history and fit settle.',
+        run: async () => {
+          manager.forceRedraw(port.value)
+          await nextTick()
+        },
+      },
+      {
         stage: 'History restored',
         detail: 'The browser terminal now matches the daemon buffer again.',
         run: async () => {
@@ -463,24 +479,23 @@ function sendArrowKey(sequence: string): void {
       </div>
     </div>
 
-    <div v-if="activeOperation" class="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 md:px-4">
-      <div class="glass-panel flex items-center justify-between gap-3 px-3 py-2">
-        <div class="min-w-0">
-          <p class="text-[10px] uppercase tracking-[0.3em] text-[var(--color-text-muted)]">Processing</p>
-          <p class="truncate text-sm font-medium text-[var(--color-text-primary)]">{{ activeOperation.label }}</p>
-          <p class="text-xs text-[var(--color-text-secondary)]">{{ activeOperation.stage }}</p>
-          <p class="text-xs text-[var(--color-text-muted)]">{{ activeOperation.detail }}</p>
-        </div>
-        <div
-          class="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full"
-          :class="activeOperation.tone === 'danger' ? 'bg-red-400' : 'bg-[var(--color-accent)]'"
-        ></div>
-      </div>
-    </div>
-
     <div class="relative min-h-0 flex-1 overflow-hidden">
       <div :class="hasConnectionProblem ? 'pointer-events-none h-full grayscale opacity-55' : 'h-full'">
         <TerminalViewport :port="port" :interactive="true" />
+      </div>
+      <div v-if="activeOperation" class="pointer-events-none absolute right-3 top-3 z-20 w-[min(28rem,calc(100%-1.5rem))]">
+        <div class="glass-panel pointer-events-auto flex items-center justify-between gap-3 px-3 py-2 shadow-lg">
+          <div class="min-w-0">
+            <p class="text-[10px] uppercase tracking-[0.3em] text-[var(--color-text-muted)]">Processing</p>
+            <p class="truncate text-sm font-medium text-[var(--color-text-primary)]">{{ activeOperation.label }}</p>
+            <p class="text-xs text-[var(--color-text-secondary)]">{{ activeOperation.stage }}</p>
+            <p class="text-xs text-[var(--color-text-muted)]">{{ activeOperation.detail }}</p>
+          </div>
+          <div
+            class="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full"
+            :class="activeOperation.tone === 'danger' ? 'bg-red-400' : 'bg-[var(--color-accent)]'"
+          ></div>
+        </div>
       </div>
       <div
         v-if="hasConnectionProblem"
@@ -514,18 +529,21 @@ function sendArrowKey(sequence: string): void {
 
     <div class="control-bar soft-scrollbar shrink-0 overflow-x-auto border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
       <div class="flex min-h-[2.1rem] min-w-max items-stretch">
-        <button @click="handleInterrupt" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGINT', 'Equivalent to Ctrl+C for the foreground process.')" :disabled="controlsDisabled">SIGINT</button>
-        <button @click="handleSigterm" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGTERM', 'Requests a graceful shutdown from the shell process group.')" :disabled="controlsDisabled">SIGTERM</button>
-        <button @click="handleSigkill" class="bar-button bar-button-tight bar-button-danger border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGKILL', 'Forcibly terminates the foreground process immediately.')" :disabled="controlsDisabled">SIGKILL</button>
-        <button @click="handleRefresh" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Refresh the buffer', 'Reloads the current screen state from the daemon history.')" :disabled="controlsDisabled">Refresh</button>
-        <button @click="handlePaste" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Paste from clipboard', 'Reads clipboard text and sends it straight to the shell.')" :disabled="controlsDisabled">Paste</button>
-        <button @click="refitTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Refit the viewport', 'Recalculates the terminal dimensions after layout changes.')" :disabled="controlsDisabled">Refit</button>
-        <button @click="redrawTerminal" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Redraw the terminal', 'Forces a repaint without changing the buffer.')" :disabled="controlsDisabled">Redraw</button>
-        <button @click="handleBottom" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Jump to the bottom', 'Scrolls the viewport to the newest output line.')" :disabled="controlsDisabled">Bottom</button>
-        <button @click="sendArrowKey('\x1b[A')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Up Arrow', 'Useful for shell history and command-line navigation.')" :disabled="controlsDisabled">↑</button>
-        <button @click="sendArrowKey('\x1b[D')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Left Arrow', 'Moves the cursor one character to the left.')" :disabled="controlsDisabled">←</button>
-        <button @click="sendArrowKey('\x1b[B')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Down Arrow', 'Moves through command history or lists.')" :disabled="controlsDisabled">↓</button>
-        <button @click="sendArrowKey('\x1b[C')" class="bar-button bar-button-tight text-xs" :title="tip('Send Right Arrow', 'Moves the cursor one character to the right.')" :disabled="controlsDisabled">→</button>
+        <div class="flex items-stretch">
+          <button @click="handleRefresh" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Refresh the buffer', 'Reloads the current screen state from the daemon history.')" :disabled="controlsDisabled">Refresh</button>
+          <button @click="handleBottom" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Jump to the bottom', 'Scrolls the viewport to the newest output line.')" :disabled="controlsDisabled">Bottom</button>
+          <button @click="sendArrowKey('\x1b[A')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Up Arrow', 'Useful for shell history and command-line navigation.')" :disabled="controlsDisabled">↑</button>
+          <button @click="sendArrowKey('\x1b[D')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Left Arrow', 'Moves the cursor one character to the left.')" :disabled="controlsDisabled">←</button>
+          <button @click="sendArrowKey('\x1b[B')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Down Arrow', 'Moves through command history or lists.')" :disabled="controlsDisabled">↓</button>
+          <button @click="sendArrowKey('\x1b[C')" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send Right Arrow', 'Moves the cursor one character to the right.')" :disabled="controlsDisabled">→</button>
+          <button @click="handlePaste" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Paste from clipboard', 'Reads clipboard text and sends it straight to the shell.')" :disabled="controlsDisabled">Paste</button>
+        </div>
+        <div class="flex-1"></div>
+        <div class="flex items-stretch">
+          <button @click="handleInterrupt" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGINT', 'Equivalent to Ctrl+C for the foreground process.')" :disabled="controlsDisabled">SIGINT</button>
+          <button @click="handleSigterm" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGTERM', 'Requests a graceful shutdown from the shell process group.')" :disabled="controlsDisabled">SIGTERM</button>
+          <button @click="handleSigkill" class="bar-button bar-button-tight bar-button-danger border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGKILL', 'Forcibly terminates the foreground process immediately.')" :disabled="controlsDisabled">SIGKILL</button>
+        </div>
       </div>
     </div>
   </div>
