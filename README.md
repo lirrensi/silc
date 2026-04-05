@@ -56,8 +56,11 @@ The manager panel ties it all together:
 ## 🚀 Quick Start
 
 ```bash
-# Install
-pip install -e .
+# Install (recommended)
+uv tool install git+https://github.com/lirrensi/silc.git
+
+# Or with pipx
+pipx install git+https://github.com/lirrensi/silc.git
 
 # Start the daemon and create a session
 silc start
