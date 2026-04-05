@@ -953,6 +953,26 @@ class TestCLIStartOptions:
         assert "--shell" in output
         assert "--cwd" in output
 
+    def test_start_enter_forwards_to_start_with_tui(self, monkeypatch):
+        """`silc start-enter` should invoke the start flow and open TUI."""
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        captured: dict[str, object] = {}
+
+        def fake_start(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+
+        monkeypatch.setattr(main_mod.start, "callback", fake_start)
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.start_enter, ["demo-session"])
+
+        assert result.exit_code == 0
+        assert captured["kwargs"]["launch_native_tui"] is True
+
     def test_start_invalid_name_rejected(self):
         """Invalid session name should be rejected."""
         # This is a unit test - no daemon needed, just argument validation
