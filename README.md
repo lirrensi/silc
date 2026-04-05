@@ -1,14 +1,13 @@
-# SILC - SharedInteractiveLinkedCmd
-(bruh)
+# SILC - Shared Interactive Linked Cmd
 
-💀 btw its under rewrite now, so wait a lil pls before next v4 version stable;
+(bruh)
 
 [![PyPI version](https://badge.fury.io/py/silc.svg)](https://badge.fury.io/py/silc)
 [![Python Version](https://img.shields.io/pypi/pyversions/silc.svg)](https://pypi.org/project/silc/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/lirrensi/silc/workflows/CI/badge.svg)](https://github.com/lirrensi/silc/actions)
 
-**Your terminal, unified.** A manageable VI (Virtual Interface) for your shells — where humans and AI agents collaborate in real-time, with full visibility and control.
+**SILC is a shell-first terminal platform with shared state.** Part terminal tool, part manager panel, part shared session workspace — combining the best parts of tmux-like workflows, browser-based control, and persistent sessions into one place.
 
 ---
 
@@ -25,14 +24,34 @@ Most AI coding agents (Claude, GPT-4, Cursor, etc.) spawn isolated shells with n
 
 ## ✨ The SILC Solution
 
-SILC v3 is a **manageable VI** — a single place to work with your terminals, share them, and control them via REST API, WebSocket, TUI, or Web UI.
+### What SILC is
 
-- ✅ **Full environment access** - Agents work in your actual shell with all your tools
-- ✅ **Real-time visibility** - See exactly what agents are doing as it happens
-- ✅ **Interactive TUI support** - Agents can use vim, htop, git, and any terminal app
-- ✅ **Human-in-the-loop** - Monitor, interrupt, or take over at any moment
-- ✅ **True collaboration** - Work side-by-side with AI agents in the same session
-- ✅ **Unified interface** - One VI for all terminals: CLI, TUI, Web UI, REST API, WebSocket, MCP
+- **Shell-first**: Run commands in your actual shell with all your tools and aliases
+- **Shared sessions**: Every session is accessible via CLI and HTTP, and fully controllable from both
+- **Control center**: A manager panel (Web UI / desktop / TUI) where you see and direct every terminal
+- **Persistent state**: Sessions survive restarts and resurrect automatically — they stay until you delete them
+
+### At a glance
+
+| Pillar | What it gives you |
+|--------|------------------|
+| **Run commands** | Full shell access, TUI apps, agent-first CLI, MCP integration |
+| **Manage centrally** | Manager panel to create, monitor, open/close, and resurrect sessions |
+| **Persist and resurrect** | Sessions live across restarts with metadata (name, port, cwd, shell) retained |
+
+### Shared sessions and live access
+
+Every session is shared, addressable, and controllable via CLI or HTTP:
+
+- **HTTP control** is for APIs, agents, and tools that need to manage terminals programmatically
+- **Live terminal views** (Web UI, desktop, TUI, xterm.js) are for humans and real-time collaboration — this is where you watch changes as they happen
+- Sessions live until you explicitly close or kill them; automatic restart and resurrect keep them available across daemon restarts
+
+The manager panel ties it all together:
+
+- See every session in one place (names, ports, cwd, state)
+- Open, monitor, and control terminals from the browser, desktop app, or TUI
+- Use HTTP access and UI controls side-by-side with the shell-first workflow
 
 ## 🚀 Quick Start
 
@@ -42,6 +61,12 @@ pip install -e .
 
 # Start the daemon and create a session
 silc start
+
+# Open the manager panel in browser (auto-starts daemon if needed)
+silc manager
+
+# Or open in a native desktop window
+silc desktop
 
 # Run commands that complete (you or agent)
 silc 20000 run "git status"
@@ -140,9 +165,9 @@ silc list
 - ✅ Examples: `my-project`, `dev-server-1`, `test123`
 - ❌ Examples: `My-Project` (uppercase), `123test` (starts with number), `test-` (ends with hyphen)
 
-### Persistence — Sessions Survive Restarts
+### Persistence — Sessions Stay With You
 
-Sessions are persisted to `~/.silc/sessions.json` and can be resurrected:
+Sessions are persisted to `~/.silc/sessions.json` and can be resurrected after shutdown or restart:
 
 ```bash
 # Do work
@@ -157,12 +182,16 @@ silc resurrect
 # Output: ✨ Restored 1 session(s):
 #            my-project → port 20000
 
+# Or restart the daemon and auto-resurrect everything
+silc restart
+
 # Continue work
 silc my-project run "git status"
 ```
 
-**What persists:** port, name, shell, working directory
+**What persists:** port, name, shell, current working directory
 **What doesn't persist:** running commands, buffer content, process state
+**What stays easy:** sessions remain available until you explicitly close or kill them
 
 ---
 
@@ -194,7 +223,7 @@ silc 20000 out
 |-----------|----------|
 | **CLI** | Quick commands, agent integration |
 | **TUI** | Native terminal UI (Rust-based, blazing fast) |
-| **Web UI** | Browser-based terminal management |
+| **Web UI** | Browser-based manager panel for all terminals |
 | **REST API** | Programmatic control, automation |
 | **WebSocket** | Real-time streaming, live output |
 | **MCP Server** | AI agent integration (Claude Code, Cursor) |
@@ -314,27 +343,40 @@ silc mcp
 | HTTP API | ✅ REST + WebSocket | ❌ | ❌ |
 | Agent-Friendly | ✅ MCP + CLI | ✅ | ❌ |
 | Human Intervention | ✅ | ❌ | ✅ |
-| Web UI | ✅ Browser-based | ❌ | ❌ |
+| Manager Panel | ✅ Centralized browser/desktop/TUI control + shared sessions via CLI + HTTP | ❌ | ❌ |
 | Native TUI | ✅ Rust-based | ❌ | ❌ |
 | Session Sharing | ✅ Multi-user | ❌ | ⚠️ |
 | Named Sessions | ✅ Docker-style | ❌ | ❌ |
+| Session Persistence | ✅ Auto-resurrect + metadata | ❌ | ⚠️ |
 
 ---
 
 ## 🛠️ Installation
 
+### Recommended: Install from git with uv
+
 ```bash
-# With uv (recommended - fast)
+# Install from git (fast and recommended)
 uv tool install git+https://github.com/lirrensi/silc.git
+```
 
-# With pip (editable install for development)
-pip install -e .
+### Alternative installations
 
-# With pipx (global install)
+```bash
+# With pipx (global install from git)
 pipx install git+https://github.com/lirrensi/silc.git
 ```
 
-**Note:** PyPI package coming soon. For now, install from git.
+### For development: Editable install from folder
+
+```bash
+# Clone repository first, then install in editable mode
+git clone https://github.com/lirrensi/silc.git
+cd silc
+pip install -e .
+```
+
+**Note:** PyPI package coming soon. For production use, install from git (recommended uv or pipx).
 
 ### Building the Web UI
 
@@ -452,12 +494,15 @@ SILC v3 unifies all terminal interaction into one manageable VI:
 silc start [name]              # Start daemon + create session (auto name if not provided)
 silc start my-project          # Create named session (e.g., "my-project")
 silc start --port 20001        # Create session on specific port
-silc start --global --token xyz  # Network-accessible session with token auth
+silc start --global --token xyz  # Network-accessible session with token auth (⚠️ security warning)
 silc start --shell zsh         # Use specific shell (bash, zsh, pwsh, cmd)
 silc start --cwd /path/to/dir  # Set working directory for session
+silc start --no-detach         # Run daemon in foreground (not detached)
 
 silc manager                   # Open Web UI in browser (starts daemon if needed)
+silc manager --share           # Open manager on LAN (⚠️ exposes to network)
 silc desktop                   # Open Web UI in native desktop window
+silc desktop --share           # Open desktop manager on LAN (⚠️ exposes to network)
 silc list                      # List all active sessions (shows port, name, idle time)
 silc shutdown                  # Graceful shutdown (closes all sessions)
 silc killall                   # Force kill daemon + all sessions
@@ -466,6 +511,8 @@ silc restart                   # Shutdown + restart (auto-resurrects sessions)
 silc restart-server            # Restart HTTP server only (sessions survive)
 silc logs [--tail 100]         # Show daemon logs (last N lines)
 silc mcp                       # Start MCP server for AI agents
+silc os-integration install    # Install Finder/file-manager integrations
+silc os-integration uninstall  # Remove Finder/file-manager integrations
 
 # ═══════════════════════════════════════════════════════════
 # SESSION COMMANDS (use port or name)
@@ -502,6 +549,12 @@ silc 20000 in "vim config.py"    # ✅ Fire-and-forget (interactive app)
 # When to use each:
 # run: git, npm, pytest, ls, cat, scripts, any command that FINISHES
 # in:  vim, htop, SSH, REPLs, docker -it, any INTERACTIVE app
+
+# Streaming output to files:
+# stream-render: Write full rendered terminal output (including ANSI sequences) to file
+# stream-append: Append deduplicated screen updates to a plain text file
+# stream-stop: Stop streaming to a specific file
+# stream-status: Show which files are currently being streamed
 
 # Named sessions vs ports:
 silc start my-project            # Creates session named "my-project"
@@ -652,13 +705,14 @@ close_session(20000)
 
 ### Native TUI (Rust-based)
 ```bash
-silc tui  # Launches fast, native terminal UI
+# Launch TUI for a specific session
+silc <port|name> tui  # Launches fast, native terminal UI
 ```
 
-### Web UI (Browser-based)
+### Web UI (Browser-Based Manager Panel)
 ```bash
-silc manager  # Opens browser to session management UI
-silc desktop  # Opens the same UI in a native desktop window
+silc manager [--share]      # Opens browser to session management UI
+silc desktop [--share]      # Opens the same UI in a native desktop window
 ```
 
 ---
