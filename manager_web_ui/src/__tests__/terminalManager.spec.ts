@@ -6,6 +6,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => {
+  const resizeSession = vi.fn().mockResolvedValue(undefined)
+
   class MockTerminal {
     static instances: MockTerminal[] = []
 
@@ -46,7 +48,7 @@ const mocks = vi.hoisted(() => {
     proposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }))
   }
 
-  return { MockTerminal, MockFitAddon }
+  return { MockTerminal, MockFitAddon, resizeSession }
 })
 
 vi.mock('@xterm/xterm', () => ({
@@ -69,7 +71,7 @@ vi.mock('@xterm/addon-webgl', () => ({
 }))
 
 vi.mock('@/lib/daemonApi', () => ({
-  resizeSession: vi.fn().mockResolvedValue(undefined),
+  resizeSession: mocks.resizeSession,
 }))
 
 vi.mock('@/lib/terminalRenderer', () => ({
@@ -120,7 +122,7 @@ describe('terminalManager', () => {
     })
     document.body.appendChild(container)
 
-    manager.attach(20000, container, { propagate: true })
+    await manager.attach(20000, container, { propagate: true })
 
     await Promise.resolve()
 
@@ -131,7 +133,7 @@ describe('terminalManager', () => {
     expect(session.terminalDisposed).toBe(true)
     expect(originalTerminal.dispose).toHaveBeenCalled()
 
-    manager.attach(20000, container, { propagate: true })
+    await manager.attach(20000, container, { propagate: true })
 
     await Promise.resolve()
     await Promise.resolve()
@@ -141,6 +143,38 @@ describe('terminalManager', () => {
     expect(session.terminalDisposed).toBe(false)
     expect(session.isRestoring).toBe(true)
     expect(session.terminal.write).not.toHaveBeenCalled()
+
+    container.remove()
+  })
+
+  it('forces a backend resize when an interactive attach claims control', async () => {
+    const manager = useTerminalManager()
+    const session = manager.createSession(20000, 'session-1', 'bash')
+    const container = document.createElement('div')
+
+    Object.defineProperty(container, 'getBoundingClientRect', {
+      value: () => ({
+        width: 800,
+        height: 600,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        left: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    })
+    document.body.appendChild(container)
+
+    session.lastSize = { rows: 24, cols: 80 }
+    session.lastMeasuredSize = { width: 800, height: 600, dpr: 1 }
+
+    await manager.attach(20000, container, { propagate: false })
+    await manager.applyMeasuredFit(20000, { propagate: true, force: true, reason: 'test-force-resize' })
+
+    expect(session.terminal.resize).toHaveBeenCalledWith(80, 24)
+    expect(mocks.resizeSession).toHaveBeenCalledWith(20000, 24, 80)
 
     container.remove()
   })

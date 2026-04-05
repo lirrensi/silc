@@ -360,7 +360,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     if (session.terminal.element) {
       setupBrowserEventHandlers(session)
-      scheduleFit(port, { immediate: true, reason: 'reattach-existing-open' })
+      scheduleFit(port, {
+        immediate: true,
+        reason: 'reattach-existing-open',
+        force: options?.propagate === true,
+      })
       return
     }
 
@@ -413,7 +417,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     setupBrowserEventHandlers(currentSession)
 
     await enableRenderer(currentSession)
-    scheduleFit(port, { immediate: true, reason: 'initial-open' })
+    scheduleFit(port, {
+      immediate: true,
+      reason: 'initial-open',
+      force: options?.propagate === true,
+    })
   }
 
   function removeSession(port: number): void {
@@ -449,10 +457,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     port: number,
     container: HTMLElement,
     options?: { propagate?: boolean },
-  ): void {
+  ): Promise<void> {
     const session = sessions.value.get(port)
     if (!session) {
-      return
+      return Promise.resolve()
     }
 
     session.fitPropagationEnabled = options?.propagate ?? true
@@ -465,8 +473,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const element = session.terminal.element
 
     if (!element) {
-      void openWhenRenderable(port, container, options)
-      return
+      return openWhenRenderable(port, container, options)
     }
 
     if (element.parentElement !== container) {
@@ -475,7 +482,13 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
 
     setupBrowserEventHandlers(session)
-    scheduleFit(port, { immediate: true, reason: 'attach' })
+    scheduleFit(port, {
+      immediate: true,
+      reason: 'attach',
+      force: options?.propagate === true,
+    })
+
+    return Promise.resolve()
   }
 
   function setupBrowserEventHandlers(session: Session): void {
@@ -571,7 +584,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
   async function applyMeasuredFit(
     port: number,
-    options?: { propagate?: boolean; reason?: string },
+    options?: { propagate?: boolean; reason?: string; force?: boolean },
   ): Promise<void> {
     const session = sessions.value.get(port)
     const terminalElement = session?.terminal.element
@@ -593,10 +606,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const rowsChanged = session.lastSize?.rows !== geometry.rows
     const colsChanged = session.lastSize?.cols !== geometry.cols
     const payloadChanged = rowsChanged || colsChanged
+    const shouldResizeTerminal = options?.force === true || payloadChanged
     const measuredChanged = hasGeometryChanged(previousGeometry, geometry)
     const previousRenderer = lastAppliedRendererType.get(port)
 
-    if (payloadChanged) {
+    if (shouldResizeTerminal) {
       session.terminal.resize(geometry.cols, geometry.rows)
     }
 
@@ -609,7 +623,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     const shouldPropagate = options?.propagate ?? session.fitPropagationEnabled
 
-    if (shouldPropagate && payloadChanged) {
+    if (shouldPropagate && shouldResizeTerminal) {
       try {
         await resizeSession(port, geometry.rows, geometry.cols)
       } catch (err) {
@@ -634,7 +648,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
   function scheduleFit(
     port: number,
-    options?: { propagate?: boolean; immediate?: boolean; reason?: string },
+    options?: { propagate?: boolean; immediate?: boolean; reason?: string; force?: boolean },
   ): void {
     const session = sessions.value.get(port)
     if (!session) {
@@ -647,6 +661,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       void applyMeasuredFit(port, {
         propagate: options?.propagate,
         reason: options?.reason,
+        force: options?.force,
       })
     }
 

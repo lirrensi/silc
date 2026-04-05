@@ -61,7 +61,7 @@ onMounted(() => {
     return
   }
 
-  attachAndConnect()
+  void attachAndConnect()
   scheduleViewportFit(true, 'mounted')
 })
 
@@ -76,7 +76,7 @@ watch(() => props.port, (newPort, oldPort) => {
   if (oldPort) {
     manager.detach(oldPort)
   }
-  attachAndConnect()
+  void attachAndConnect()
   manager.scheduleFit(newPort, {
     immediate: true,
     propagate: props.interactive === true,
@@ -91,7 +91,7 @@ async function fetchAndCreateSession(): Promise<void> {
     const daemonSession = sessions.find((s) => s.port === props.port)
 
     if (daemonSession) {
-      attachAndConnect()
+      void attachAndConnect()
       scheduleViewportFit(true, 'mounted')
     }
   } catch (err) {
@@ -99,17 +99,17 @@ async function fetchAndCreateSession(): Promise<void> {
   }
 }
 
-function attachAndConnect(): void {
+async function attachAndConnect(): Promise<void> {
   if (!containerRef.value) return
 
   const currentSession = manager.getSession(props.port)
   if (!currentSession) return
 
-  manager.attach(props.port, containerRef.value, {
+  await manager.attach(props.port, containerRef.value, {
     propagate: props.interactive === true,
   })
 
-  const ws = connectWebSocket(props.port)
+  const ws = connectWebSocket(props.port, { force: true })
   if (ws && ws.readyState === WebSocket.OPEN) {
     requestHistoryFrame(ws)
   }

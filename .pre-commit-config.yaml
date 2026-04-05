@@ -77,3 +77,11 @@ repos:
           - rich
           - platformdirs
         stages: [manual]
+
+  - repo: local
+    hooks:
+      - id: codemap
+        name: Update codebase index
+        entry: codemap
+        language: system
+        pass_filenames: false

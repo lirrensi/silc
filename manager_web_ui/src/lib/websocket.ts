@@ -66,7 +66,7 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
   manager.setWs(port, ws)
   manager.setStatus(port, 'connecting')
 
-  ws.onopen = () => {
+  ws.onopen = async () => {
     if (manager.getSession(port)?.ws !== ws) {
       ws.close()
       return
@@ -74,6 +74,13 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
     console.log(`[WebSocket] Connected to port ${port}`)
     manager.setDisconnectReason(port, null)
     manager.setStatus(port, 'active')
+
+    await manager.applyMeasuredFit(port, {
+      propagate: true,
+      force: true,
+      reason: 'ws-open',
+    })
+
     requestHistoryFrame(ws)
     manager.updateSessionTitle(port, session.title || '', session.titleUpdatedAt)
     manager.scheduleFit(port, { immediate: true, reason: 'ws-open' })

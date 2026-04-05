@@ -30,6 +30,7 @@ const manager = {
   setStatus: vi.fn(),
   setDisconnectReason: vi.fn(),
   scheduleFit: vi.fn(),
+  applyMeasuredFit: vi.fn().mockResolvedValue(undefined),
   flushWrites: vi.fn().mockResolvedValue(undefined),
   safeWrite: vi.fn(),
   refreshTerminalSurface: vi.fn(),
@@ -93,8 +94,13 @@ describe('connectWebSocket', () => {
     const ws = connectWebSocket(20000)
     expect(ws).toBeTruthy()
 
-    ws?.onopen?.(new Event('open'))
+    await ws?.onopen?.(new Event('open'))
     expect(manager.setStatus).toHaveBeenCalledWith(20000, 'active')
+    expect(manager.applyMeasuredFit).toHaveBeenCalledWith(20000, {
+      propagate: true,
+      force: true,
+      reason: 'ws-open',
+    })
 
     ws?.onmessage?.(
       new MessageEvent('message', {
@@ -120,7 +126,7 @@ describe('connectWebSocket', () => {
     const ws = connectWebSocket(20000)
     expect(ws).toBeTruthy()
 
-    ws?.onopen?.(new Event('open'))
+    await ws?.onopen?.(new Event('open'))
 
     ws?.onmessage?.(
       new MessageEvent('message', {
@@ -136,7 +142,7 @@ describe('connectWebSocket', () => {
     const ws = connectWebSocket(20000)
     expect(ws).toBeTruthy()
 
-    ws?.onopen?.(new Event('open'))
+    await ws?.onopen?.(new Event('open'))
 
     await ws?.onmessage?.(
       new MessageEvent('message', {
@@ -172,7 +178,11 @@ describe('connectWebSocket', () => {
     const ws = connectWebSocket(20000) as MockWebSocket | null
     expect(ws).toBeTruthy()
 
-    ws?.onopen?.(new Event('open'))
+    if (ws) {
+      Object.defineProperty(ws, 'readyState', { value: MockWebSocket.OPEN })
+    }
+
+    void ws?.onopen?.(new Event('open'))
 
     const onData = session.terminal.onData.mock.calls[0]?.[0] as ((data: string) => void) | undefined
     expect(onData).toBeTruthy()
