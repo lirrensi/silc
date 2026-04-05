@@ -27,6 +27,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 ### Core Capabilities
 
 - **One-command setup** — Start daemon and create sessions instantly
+- **Native shell startup** — Preserve shell profiles/init files when launching sessions
 - **HTTP API** — Full REST API for all shell operations
 - **WebSocket Streaming** — Real-time terminal output
 - **Native TUI** — Terminal UI for interactive sessions

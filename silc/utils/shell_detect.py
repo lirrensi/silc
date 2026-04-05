@@ -53,7 +53,6 @@ class ShellInfo:
                 argv=[
                     self.path,
                     "-NoLogo",
-                    "-NoProfile",
                     "-NoExit",
                     "-ExecutionPolicy",
                     "Bypass",
@@ -64,18 +63,41 @@ class ShellInfo:
 
         if self.type == "bash":
             return ShellLaunchSpec(
-                argv=[self.path, "--noprofile", "--rcfile", str(bootstrap), "-i"]
+                argv=[self.path, "--login", "--rcfile", str(bootstrap), "-i"]
             )
 
         if self.type == "zsh":
             wrapper_dir = Path(tempfile.mkdtemp(prefix="silc-zsh-"))
+            user_rc = Path.home() / ".zshrc"
+
+            def _write_zsh_startup_file(filename: str, target: Path | None) -> None:
+                rcfile = wrapper_dir / filename
+                lines: list[str] = []
+                system_targets = {
+                    ".zshenv": Path("/etc/zshenv"),
+                    ".zprofile": Path("/etc/zprofile"),
+                    ".zshrc": Path("/etc/zshrc"),
+                    ".zlogin": Path("/etc/zlogin"),
+                }
+                system_target = system_targets.get(filename)
+                if system_target is not None and system_target.exists():
+                    lines.append(f"source {shlex.quote(str(system_target))}")
+                if target is not None and target.exists():
+                    lines.append(f"source {shlex.quote(str(target))}")
+                rcfile.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            _write_zsh_startup_file(".zshenv", Path.home() / ".zshenv")
+            _write_zsh_startup_file(".zprofile", Path.home() / ".zprofile")
+            _write_zsh_startup_file(".zlogin", Path.home() / ".zlogin")
+            _write_zsh_startup_file(".zshrc", user_rc)
             rcfile = wrapper_dir / ".zshrc"
             rcfile.write_text(
-                f"source {shlex.quote(str(bootstrap))}\n",
+                rcfile.read_text(encoding="utf-8")
+                + f"source {shlex.quote(str(bootstrap))}\n",
                 encoding="utf-8",
             )
             return ShellLaunchSpec(
-                argv=[self.path, "-i"], env={"ZDOTDIR": str(wrapper_dir)}
+                argv=[self.path, "-l", "-i"], env={"ZDOTDIR": str(wrapper_dir)}
             )
 
         if self.type == "cmd":

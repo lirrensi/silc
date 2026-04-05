@@ -20,6 +20,7 @@ SILC manages shell sessions through a daemon, per-session HTTP APIs, and multipl
 ## Session Lifecycle
 
 - Creating a session writes a desired-state record and realizes a live PTY plus per-session HTTP server.
+- Shell startup preserves native profiles/init files; SILC bootstraps after the shell's normal startup behavior.
 - If the PTY dies, the daemon recreates it while preserving the record.
 - If the per-session HTTP server dies, the daemon recreates it while preserving the record.
 - `close` removes the desired record and stops reconciling the session.

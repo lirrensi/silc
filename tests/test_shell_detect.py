@@ -47,6 +47,13 @@ def test_build_launch_spec_points_at_bootstrap_scripts(
 
     argv_text = " ".join(spec.argv)
     assert argv_text
+    if shell_type == "bash":
+        assert "--login" in argv_text
+        assert "--noprofile" not in argv_text
+    if shell_type == "zsh":
+        assert "-l" in argv_text
+    if shell_type in {"pwsh", "powershell"}:
+        assert "-NoProfile" not in argv_text
     for snippet in expected_snippets:
         assert snippet in argv_text or snippet in _bootstrap_text(info)
 
@@ -87,6 +94,43 @@ def test_cmd_launch_spec_uses_direct_bootstrap_path() -> None:
 
     assert spec.argv[1] == "/k"
     assert spec.argv[2] == str(info.get_bootstrap_script_path())
+
+
+def test_bash_bootstrap_sources_user_bashrc() -> None:
+    info = ShellInfo("bash", "/bin/bash", re.compile(r".*$"))
+    bootstrap = _bootstrap_text(info)
+
+    assert "/etc/profile" in bootstrap
+    assert ".bash_profile" in bootstrap
+    assert ".bash_login" in bootstrap
+    assert ".profile" in bootstrap
+    assert "/etc/bash.bashrc" in bootstrap or "/etc/bashrc" in bootstrap
+    assert ".bashrc" in bootstrap
+    assert "PROMPT_COMMAND" in bootstrap
+
+
+def test_zsh_launch_spec_sources_user_rc_before_bootstrap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("silc.utils.shell_detect.Path.home", lambda: tmp_path)
+    user_rc = tmp_path / ".zshrc"
+    user_rc.write_text("export SILC_TEST=1\n", encoding="utf-8")
+
+    info = ShellInfo("zsh", "/bin/zsh", re.compile(r".*$"))
+    spec = info.build_launch_spec()
+
+    assert "-l" in " ".join(spec.argv)
+    wrapper_dir = Path(spec.env["ZDOTDIR"])
+    assert (wrapper_dir / ".zshenv").exists()
+    assert (wrapper_dir / ".zprofile").exists()
+    assert (wrapper_dir / ".zlogin").exists()
+    rcfile = wrapper_dir / ".zshrc"
+    content = rcfile.read_text(encoding="utf-8")
+
+    if Path("/etc/zshrc").exists():
+        assert "/etc/zshrc" in content
+    assert str(user_rc) in content
+    assert content.index(str(user_rc)) < content.index("bootstrap.zsh")
 
 
 def _bootstrap_text(info: ShellInfo) -> str:

@@ -7,6 +7,7 @@ This document describes `silc/core/`.
 The core layer owns the PTY-backed session runtime:
 
 - shell process creation and PTY I/O
+- shell startup that preserves native profiles/init files
 - output buffering and rendering
 - command execution with sentinel capture
 - title/cwd extraction from PTY output
@@ -134,6 +135,7 @@ The daemon uses these listeners to persist updates back into the registry.
 ## PTY Creation
 
 PTY selection is delegated to `create_pty()` in `pty_manager.py` based on platform.
+Shell launch specs layer SILC helpers on top of the shell's normal startup files.
 
 ## Error Handling
 
