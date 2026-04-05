@@ -1,3 +1,9 @@
+# FILE: silc/utils/shell_detect.py
+# PURPOSE: Detect shells and generate helper text for sentinel-driven session runs.
+# OWNS: Shell identification, helper generation, and helper invocation quoting.
+# EXPORTS: ShellInfo, detect_shell, get_shell_info_by_type, get_available_shell_choices.
+# DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
+
 """Tiny helpers to detect the active shell and generate sentinel commands."""
 
 from __future__ import annotations
@@ -24,6 +30,11 @@ class ShellInfo:
 
         if self.type in {"pwsh", "powershell"}:
             return (
+                "function prompt { "
+                "$cwd = [System.Uri]::EscapeDataString((Get-Location).Path); "
+                "[Console]::Write([char]0x1b + ']633;cwd=' + $cwd + [char]0x07); "
+                '"PS $($PWD.Path)> " '
+                "}; "
                 "function __silc_exec($cmd, $token) { "
                 '$prompt = "PS $($PWD.Path)> "; '  # Build prompt string
                 "Write-Host -NoNewline $prompt; "  # Print prompt

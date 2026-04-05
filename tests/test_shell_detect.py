@@ -1,3 +1,10 @@
+# FILE: tests/test_shell_detect.py
+# PURPOSE: Verify shell helper text includes marker emission and quoting behavior.
+# OWNS: Shell helper generation coverage.
+# DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
+
+"""Tests for shell helper generation and invocation quoting."""
+
 import re
 from pathlib import Path
 
@@ -25,6 +32,9 @@ from silc.utils.shell_detect import ShellInfo
         (
             "pwsh",
             [
+                "function prompt {",
+                "633;cwd=",
+                "[System.Uri]::EscapeDataString",
                 "function __silc_exec($cmd, $token) {",
                 "__SILC_BEGIN_${token}__",
                 "__SILC_END_${token}__",
@@ -33,6 +43,9 @@ from silc.utils.shell_detect import ShellInfo
         (
             "powershell",
             [
+                "function prompt {",
+                "633;cwd=",
+                "[System.Uri]::EscapeDataString",
                 "function __silc_exec($cmd, $token) {",
                 "__SILC_BEGIN_${token}__",
                 "__SILC_END_${token}__",

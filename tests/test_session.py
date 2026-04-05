@@ -1,3 +1,8 @@
+# FILE: tests/test_session.py
+# PURPOSE: Exercise the session lifecycle and live prompt metadata updates.
+# OWNS: PTY-backed session lifecycle coverage and status behavior.
+# DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
+
 """Tests that exercise the SILC shell lifecycle."""
 
 import asyncio

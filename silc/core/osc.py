@@ -1,8 +1,15 @@
+# FILE: silc/core/osc.py
+# PURPOSE: Parse OSC title and hidden cwd markers from PTY output.
+# OWNS: OSC payload framing, title extraction, and hidden cwd decoding.
+# EXPORTS: OscTitleParser - extract OSC 0/2 titles; OscHiddenCwdParser - extract OSC 633 cwd markers.
+# DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
+
 """OSC control-sequence parsers used by the PTY read loop."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from urllib.parse import unquote
 
 OSC_ESCAPE = 0x1B
 OSC_BELL = 0x07
@@ -10,14 +17,12 @@ OSC_ST = ord("\\")
 
 
 @dataclass
-class OscTitleParser:
-    """Extract terminal titles from OSC 0/2 sequences."""
-
+class _OscSequenceParser:
     _state: str = "idle"
     _buffer: bytearray = field(default_factory=bytearray)
 
     def feed(self, data: bytes) -> list[str]:
-        titles: list[str] = []
+        items: list[str] = []
 
         for byte in data:
             if self._state == "idle":
@@ -35,9 +40,9 @@ class OscTitleParser:
 
             if self._state == "osc":
                 if byte == OSC_BELL:
-                    title = self._finalize()
-                    if title is not None:
-                        titles.append(title)
+                    item = self._finalize()
+                    if item is not None:
+                        items.append(item)
                     continue
 
                 if byte == OSC_ESCAPE:
@@ -49,26 +54,36 @@ class OscTitleParser:
 
             if self._state == "osc_escape":
                 if byte == OSC_ST:
-                    title = self._finalize()
-                    if title is not None:
-                        titles.append(title)
+                    item = self._finalize()
+                    if item is not None:
+                        items.append(item)
                 else:
                     self._buffer.append(OSC_ESCAPE)
                     if byte == OSC_BELL:
-                        title = self._finalize()
-                        if title is not None:
-                            titles.append(title)
+                        item = self._finalize()
+                        if item is not None:
+                            items.append(item)
                     else:
                         self._buffer.append(byte)
                         self._state = "osc"
 
-        return titles
+        return items
 
     def _finalize(self) -> str | None:
         payload = self._buffer.decode("utf-8", errors="replace")
         self._buffer.clear()
         self._state = "idle"
+        return self._parse_payload(payload)
 
+    def _parse_payload(self, payload: str) -> str | None:
+        raise NotImplementedError
+
+
+@dataclass
+class OscTitleParser(_OscSequenceParser):
+    """Extract terminal titles from OSC 0/2 sequences."""
+
+    def _parse_payload(self, payload: str) -> str | None:
         if ";" not in payload:
             return None
 
@@ -79,4 +94,19 @@ class OscTitleParser:
         return title
 
 
-__all__ = ["OscTitleParser"]
+@dataclass
+class OscHiddenCwdParser(_OscSequenceParser):
+    """Extract hidden cwd markers from OSC 633;cwd payloads."""
+
+    def _parse_payload(self, payload: str) -> str | None:
+        if not payload.startswith("633;cwd="):
+            return None
+
+        encoded_path = payload.removeprefix("633;cwd=")
+        if not encoded_path:
+            return None
+
+        return unquote(encoded_path)
+
+
+__all__ = ["OscTitleParser", "OscHiddenCwdParser"]

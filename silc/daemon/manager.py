@@ -425,6 +425,11 @@ class SilcDaemon:
                     runtime = self.runtime_by_port.get(entry.port)
                     session = runtime.session if runtime else None
                     status = session.get_status() if session else None
+                    cwd = (
+                        status["cwd"]
+                        if status and status.get("cwd") is not None
+                        else entry.cwd
+                    )
                     sessions.append(
                         {
                             "port": entry.port,
@@ -432,7 +437,7 @@ class SilcDaemon:
                             "title": entry.title,
                             "session_id": entry.session_id,
                             "shell": entry.shell_type,
-                            "cwd": entry.cwd,
+                            "cwd": cwd,
                             "title_updated_at": entry.title_updated_at.isoformat()
                             + "Z",
                             "idle_seconds": status["idle_seconds"] if status else None,
@@ -487,12 +492,18 @@ class SilcDaemon:
                 runtime = self.runtime_by_port.get(entry.port)
                 session = runtime.session if runtime else None
                 status = session.get_status() if session else None
+                cwd = (
+                    status["cwd"]
+                    if status and status.get("cwd") is not None
+                    else entry.cwd
+                )
                 return {
                     "port": entry.port,
                     "name": entry.name,
                     "title": entry.title,
                     "session_id": entry.session_id,
                     "shell": entry.shell_type,
+                    "cwd": cwd,
                     "title_updated_at": entry.title_updated_at.isoformat() + "Z",
                     "idle_seconds": status["idle_seconds"] if status else None,
                     "alive": bool(status and status["alive"]),
@@ -1081,6 +1092,17 @@ class SilcDaemon:
 
         append_session_to_json(entry.to_json())
 
+    def _handle_session_cwd_change(self, session: SilcSession) -> None:
+        """Persist a live cwd change from a running session."""
+        entry = self.registry.update_cwd(session.port, session.cwd)
+        runtime = self.runtime_by_port.get(session.port)
+        if runtime is not None:
+            runtime.cwd = session.cwd
+        if not entry:
+            return
+
+        append_session_to_json(entry.to_json())
+
     def _attach_session_task(
         self, port: int, generation: int, task: asyncio.Task[None]
     ) -> None:
@@ -1108,6 +1130,7 @@ class SilcDaemon:
                 cwd,
                 title,
                 self._handle_session_title_change,
+                self._handle_session_cwd_change,
             ),
             timeout=SESSION_START_TIMEOUT_SECONDS,
         )

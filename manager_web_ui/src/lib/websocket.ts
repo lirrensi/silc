@@ -79,6 +79,8 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
           header.title,
           typeof header.title_updated_at === 'string' ? header.title_updated_at : null,
         )
+      } else if (header.type === 'cwd' && typeof header.cwd === 'string') {
+        manager.updateSessionCwd(port, header.cwd)
       } else {
         throw new Error(`Unsupported websocket frame type: ${String(header.type)}`)
       }

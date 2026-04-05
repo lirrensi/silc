@@ -1,3 +1,9 @@
+# FILE: silc/daemon/registry.py
+# PURPOSE: Persist daemon-visible session metadata and support live record updates.
+# OWNS: In-memory session entries, lookups, and serialized record shapes.
+# EXPORTS: SessionEntry, SessionRegistry.
+# DOCS: docs/arch_daemon.md, agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
+
 """Session registry for tracking active sessions."""
 
 from __future__ import annotations
@@ -30,6 +36,10 @@ class SessionEntry:
         """Update the persisted window title."""
         self.title = title
         self.title_updated_at = updated_at or datetime.utcnow()
+
+    def update_cwd(self, cwd: str | None) -> None:
+        """Update the persisted working directory."""
+        self.cwd = cwd
 
     def to_json(self) -> dict:
         """Serialize session entry for persistence."""
@@ -94,6 +104,15 @@ class SessionRegistry:
             return None
 
         entry.update_title(title, updated_at=updated_at)
+        return entry
+
+    def update_cwd(self, port: int, cwd: str | None) -> SessionEntry | None:
+        """Update the stored cwd for a session."""
+        entry = self._sessions.get(port)
+        if not entry:
+            return None
+
+        entry.update_cwd(cwd)
         return entry
 
     def remove(self, port: int) -> SessionEntry | None:

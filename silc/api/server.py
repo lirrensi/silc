@@ -314,7 +314,22 @@ def create_app(session: SilcSession) -> FastAPI:
 
             asyncio.create_task(_send_title())
 
+        def cwd_listener(updated_session: SilcSession) -> None:
+            if updated_session is not session:
+                return
+
+            async def _send_cwd() -> None:
+                if active_websocket is not websocket:
+                    return
+                try:
+                    await safe_send_frame({"type": "cwd", "cwd": updated_session.cwd})
+                except Exception:
+                    pass
+
+            asyncio.create_task(_send_cwd())
+
         session.add_title_listener(title_listener)
+        session.add_cwd_listener(cwd_listener)
 
         async def send_updates() -> None:
             cursor = session.buffer.cursor
@@ -367,6 +382,7 @@ def create_app(session: SilcSession) -> FastAPI:
             pass
         finally:
             session.remove_title_listener(title_listener)
+            session.remove_cwd_listener(cwd_listener)
             async with active_websocket_lock:
                 if active_websocket is websocket:
                     active_websocket = None

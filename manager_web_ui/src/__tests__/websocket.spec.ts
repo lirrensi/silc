@@ -1,3 +1,8 @@
+// FILE: manager_web_ui/src/__tests__/websocket.spec.ts
+// PURPOSE: Verify websocket frames update title and hidden cwd state in the store.
+// OWNS: Websocket client coverage for terminal metadata frames.
+// DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { connectWebSocket } from '../lib/websocket'
 import { encodeWsFrame } from '../lib/websocketFrame'
@@ -5,6 +10,7 @@ import { encodeWsFrame } from '../lib/websocketFrame'
 const session = {
   ws: null as WebSocket | null,
   title: '',
+  cwd: null as string | null,
   titleUpdatedAt: null as string | null,
   terminal: { onData: vi.fn().mockReturnValue({ dispose: vi.fn() }), clear: vi.fn() },
 }
@@ -24,6 +30,9 @@ const manager = {
   updateSessionTitle: vi.fn((_, title, updatedAt) => {
     session.title = title
     session.titleUpdatedAt = updatedAt
+  }),
+  updateSessionCwd: vi.fn((_, cwd) => {
+    session.cwd = cwd
   }),
 }
 
@@ -59,6 +68,7 @@ describe('connectWebSocket', () => {
     vi.clearAllMocks()
     session.ws = null
     session.title = ''
+    session.cwd = null
     session.titleUpdatedAt = null
     MockWebSocket.instances = []
     vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket)
@@ -89,5 +99,21 @@ describe('connectWebSocket', () => {
       '2026-04-05T00:00:00Z',
     )
     expect(session.title).toBe('PowerShell - npm run dev')
+  })
+
+  it('updates the session cwd immediately from websocket events', async () => {
+    const ws = connectWebSocket(20000)
+    expect(ws).toBeTruthy()
+
+    ws?.onopen?.(new Event('open'))
+
+    ws?.onmessage?.(
+      new MessageEvent('message', {
+        data: encodeWsFrame({ type: 'cwd', cwd: 'C:/Temp/Project' }).buffer,
+      }),
+    )
+
+    expect(manager.updateSessionCwd).toHaveBeenCalledWith(20000, 'C:/Temp/Project')
+    expect(session.cwd).toBe('C:/Temp/Project')
   })
 })

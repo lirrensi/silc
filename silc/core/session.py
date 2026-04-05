@@ -1,3 +1,9 @@
+# FILE: silc/core/session.py
+# PURPOSE: Orchestrate PTY reads, prompt parsing, and live session state updates.
+# OWNS: Session lifecycle, prompt-driven metadata updates, and output retrieval.
+# EXPORTS: SilcSession - runtime shell session controller.
+# DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md, docs/arch_api.md
+
 """Session orchestration that ties the PTY, buffer, and API surface together."""
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ else:
 
 from ..core.cleaner import clean_output
 from ..core.constants import DEFAULT_SCREEN_COLUMNS, DEFAULT_SCREEN_ROWS
-from ..core.osc import OscTitleParser
+from ..core.osc import OscHiddenCwdParser, OscTitleParser
 from ..core.pty_manager import PTYBase, create_pty
 from ..core.raw_buffer import RawByteBuffer
 from ..utils.persistence import rotate_session_log, write_session_log
@@ -71,6 +77,7 @@ class SilcSession:
         cwd: str | None = None,
         title: str | None = None,
         on_title_change: Callable[["SilcSession"], None] | None = None,
+        on_cwd_change: Callable[["SilcSession"], None] | None = None,
     ):
         self.port = port
         self.name = name
@@ -83,6 +90,9 @@ class SilcSession:
         self._title_listeners: list[Callable[["SilcSession"], None]] = []
         if on_title_change:
             self._title_listeners.append(on_title_change)
+        self._cwd_listeners: list[Callable[["SilcSession"], None]] = []
+        if on_cwd_change:
+            self._cwd_listeners.append(on_cwd_change)
         self.pty: PTYBase = create_pty(shell_info.path, os.environ.copy(), cwd=cwd)
 
         self.buffer = RawByteBuffer(maxlen=DEFAULT_BUFFER_SIZE)
@@ -105,6 +115,7 @@ class SilcSession:
         self.tui_active = False
         self._helper_injected = False
         self._osc_title_parser = OscTitleParser()
+        self._osc_cwd_parser = OscHiddenCwdParser()
 
     async def start(self) -> None:
         if self._read_task is not None:
@@ -123,6 +134,8 @@ class SilcSession:
                     consecutive_empty_reads = 0
                     for title in self._osc_title_parser.feed(data):
                         self._apply_title(title)
+                    for cwd in self._osc_cwd_parser.feed(data):
+                        self._apply_cwd(cwd)
                     self.buffer.append(data)
                     self.last_output = datetime.utcnow()
                     write_session_log(
@@ -294,14 +307,37 @@ class SilcSession:
             except Exception as exc:
                 write_session_log(self.port, f"Title update callback error: {exc}")
 
+    def _apply_cwd(self, cwd: str) -> None:
+        if cwd == self.cwd:
+            return
+
+        self.cwd = cwd
+
+        for listener in list(self._cwd_listeners):
+            try:
+                listener(self)
+            except Exception as exc:
+                write_session_log(self.port, f"Cwd update callback error: {exc}")
+
     def add_title_listener(self, listener: Callable[["SilcSession"], None]) -> None:
         """Register a callback for live title updates."""
         self._title_listeners.append(listener)
+
+    def add_cwd_listener(self, listener: Callable[["SilcSession"], None]) -> None:
+        """Register a callback for live cwd updates."""
+        self._cwd_listeners.append(listener)
 
     def remove_title_listener(self, listener: Callable[["SilcSession"], None]) -> None:
         """Unregister a live title update callback."""
         try:
             self._title_listeners.remove(listener)
+        except ValueError:
+            pass
+
+    def remove_cwd_listener(self, listener: Callable[["SilcSession"], None]) -> None:
+        """Unregister a live cwd update callback."""
+        try:
+            self._cwd_listeners.remove(listener)
         except ValueError:
             pass
 
@@ -456,6 +492,7 @@ class SilcSession:
             "port": self.port,
             "name": self.name,
             "title": self.title,
+            "cwd": self.cwd,
             "title_updated_at": self.title_updated_at.isoformat() + "Z",
             "alive": self._read_task is not None and not self._read_task.done(),
             "idle_seconds": (datetime.utcnow() - self.last_output).seconds,
