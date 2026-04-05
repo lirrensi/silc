@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use std::{
     io::{self, Write},
     sync::Arc,
-    time::Duration,
+    thread,
 };
 use tokio::sync::{mpsc, watch};
 use tokio::task;
@@ -260,7 +260,7 @@ async fn main() -> DynResult<()> {
         }
     };
 
-    let (status_tx, status_rx) = watch::channel(ConnectionState::Connected);
+    let (status_tx, mut status_rx) = watch::channel(ConnectionState::Connected);
 
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
@@ -272,6 +272,15 @@ async fn main() -> DynResult<()> {
 
     let (tx_input, mut rx_input) = mpsc::unbounded_channel::<String>();
     let (tx_output, mut rx_output) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (tx_term, mut rx_term) = mpsc::unbounded_channel::<Event>();
+
+    let _input_handle = thread::spawn(move || {
+        while let Ok(evt) = event::read() {
+            if tx_term.send(evt).is_err() {
+                break;
+            }
+        }
+    });
 
     // WebSocket reader: terminal output
     let reader_handle = {
@@ -332,61 +341,72 @@ async fn main() -> DynResult<()> {
     let mut should_quit = false;
 
     while !should_quit {
-        // Render any new remote output.
-        while let Ok(data) = rx_output.try_recv() {
-            let mut stdout = io::stdout();
-            stdout.write_all(&data)?;
-            stdout.flush()?;
-        }
+        tokio::select! {
+            maybe_data = rx_output.recv() => {
+                match maybe_data {
+                    Some(data) => {
+                        let mut stdout = io::stdout();
+                        stdout.write_all(&data)?;
+                        stdout.flush()?;
 
-        if *status_rx.borrow() == ConnectionState::Disconnected {
-            break;
-        }
-
-        // Keyboard + resize + paste handling.
-        if event::poll(Duration::from_millis(25))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if key.kind == KeyEventKind::Release {
-                        continue;
+                        while let Ok(extra) = rx_output.try_recv() {
+                            stdout.write_all(&extra)?;
+                            stdout.flush()?;
+                        }
                     }
+                    None => break,
+                }
+            }
+            maybe_evt = rx_term.recv() => {
+                match maybe_evt {
+                    Some(Event::Key(key)) => {
+                        if key.kind == KeyEventKind::Release {
+                            continue;
+                        }
 
-                    if key.code == KeyCode::Char('q')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                    {
-                        should_quit = true;
-                        continue;
+                        if key.code == KeyCode::Char('q')
+                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            should_quit = true;
+                            continue;
+                        }
+
+                        let is_clear_combo = key.modifiers.contains(KeyModifiers::CONTROL)
+                            && matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L'));
+                        if is_clear_combo {
+                            tokio::spawn(request_clear(
+                                Arc::clone(&http_agent),
+                                clear_url.to_string(),
+                            ));
+                            let _ = clear_local_screen();
+                            continue;
+                        }
+
+                        if let Some(sequence) = map_key_to_sequence(key) {
+                            let _ = tx_input.send(sequence);
+                        }
                     }
-
-                    let is_clear_combo = key.modifiers.contains(KeyModifiers::CONTROL)
-                        && matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L'));
-                    if is_clear_combo {
-                        tokio::spawn(request_clear(
+                    Some(Event::Paste(text)) => {
+                        if !text.is_empty() {
+                            let _ = tx_input.send(text);
+                        }
+                    }
+                    Some(Event::Resize(cols, rows)) => {
+                        tokio::spawn(request_resize(
                             Arc::clone(&http_agent),
-                            clear_url.to_string(),
+                            resize_url.to_string(),
+                            rows,
+                            cols,
                         ));
-                        let _ = clear_local_screen();
-                        continue;
                     }
-
-                    if let Some(sequence) = map_key_to_sequence(key) {
-                        let _ = tx_input.send(sequence);
-                    }
+                    Some(_) => {}
+                    None => break,
                 }
-                Event::Paste(text) => {
-                    if !text.is_empty() {
-                        let _ = tx_input.send(text);
-                    }
+            }
+            changed = status_rx.changed() => {
+                if changed.is_err() || *status_rx.borrow() == ConnectionState::Disconnected {
+                    break;
                 }
-                Event::Resize(cols, rows) => {
-                    tokio::spawn(request_resize(
-                        Arc::clone(&http_agent),
-                        resize_url.to_string(),
-                        rows,
-                        cols,
-                    ));
-                }
-                _ => {}
             }
         }
     }
