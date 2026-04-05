@@ -136,6 +136,7 @@ The daemon uses these listeners to persist updates back into the registry.
 
 PTY selection is delegated to `create_pty()` in `pty_manager.py` based on platform.
 Shell launch specs layer SILC helpers on top of the shell's normal startup files.
+Launch cwd is normalized before spawn; invalid or unusable cwd values fall back to the user's home directory or the shell default so launch/restart stays resilient.
 
 ## Error Handling
 

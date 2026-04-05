@@ -9,6 +9,7 @@ import subprocess
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from silc.core.constants import DEFAULT_SCREEN_COLUMNS, DEFAULT_SCREEN_ROWS
@@ -52,6 +53,27 @@ class PTYBase(ABC):
     def send_sigkill(self) -> None:
         """Send SIGKILL to foreground process group (force)."""
         ...
+
+
+def _resolve_launch_cwd(cwd: str | None) -> str | None:
+    """Return a usable cwd for PTY launch, or a safe fallback."""
+
+    def _is_usable(directory: Path) -> bool:
+        return directory.is_dir() and os.access(directory, os.R_OK | os.X_OK)
+
+    if cwd:
+        requested = Path(cwd).expanduser()
+        if _is_usable(requested):
+            return str(requested)
+
+    try:
+        home = Path.home()
+    except Exception:
+        return None
+
+    if _is_usable(home):
+        return str(home)
+    return None
 
 
 class StubPTY(PTYBase):
@@ -440,11 +462,12 @@ def create_pty(
     """Factory that returns the best available PTY implementation."""
 
     env = dict(env or os.environ.copy())
+    launch_cwd = _resolve_launch_cwd(cwd)
     if sys.platform == "win32":
-        return WindowsPTY(shell_cmd, env, cwd)
+        return WindowsPTY(shell_cmd, env, launch_cwd)
     if sys.platform.startswith("linux") or sys.platform == "darwin":
-        return UnixPTY(shell_cmd, env, cwd)
-    return StubPTY(shell_cmd, env, cwd)
+        return UnixPTY(shell_cmd, env, launch_cwd)
+    return StubPTY(shell_cmd, env, launch_cwd)
 
 
 __all__ = ["PTYBase", "StubPTY", "create_pty"]

@@ -26,6 +26,7 @@ SILC manages shell sessions through a daemon, per-session HTTP APIs, and multipl
 - `close` removes the desired record and stops reconciling the session.
 - `kill` forcefully destroys the session and removes the record.
 - `restart` replaces the PTY/server but preserves the record, port, name, cwd, and shell.
+- If a stored launch cwd is invalid, the new runtime falls back to the user's home directory or the shell default instead of failing the restart.
 - `shutdown` stops live runtime but preserves records.
 - `killall` destroys live sessions and exits the daemon.
 - `resurrect` reloads persisted records and reconciles them.

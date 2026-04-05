@@ -31,8 +31,8 @@ OS: linux
   Test 1: Fetching Latest Release
 ============================================================
 ✓ Release fetched successfully
-  Tag: v0.1.0
-  Name: SILC TUI v0.1.0
+  Tag: v0.4.1
+  Name: SILC TUI v0.4.1
   Published: 2024-01-27T00:00:00Z
   Draft: false
   Pre-release: false
