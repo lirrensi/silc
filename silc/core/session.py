@@ -14,7 +14,7 @@ import re
 import sys
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
     try:
@@ -54,7 +54,6 @@ DEFAULT_BUFFER_SIZE = 65536  # 64KB buffer for PTY output
 DEFAULT_READ_SIZE = 4096  # Default read chunk size from PTY
 
 # Timing constants (in seconds)
-HELPER_INJECTION_DELAY = 0.5  # Delay after injecting helper function
 POLL_INTERVAL = 0.05  # Default poll interval for async operations
 READ_POLL_INTERVAL = 0.1  # Poll interval when no data available
 INTERRUPT_DELAY = 0.5  # Delay after sending interrupt signal
@@ -93,7 +92,10 @@ class SilcSession:
         self._cwd_listeners: list[Callable[["SilcSession"], None]] = []
         if on_cwd_change:
             self._cwd_listeners.append(on_cwd_change)
-        self.pty: PTYBase = create_pty(shell_info.path, os.environ.copy(), cwd=cwd)
+        launch_spec = shell_info.build_launch_spec()
+        pty_env = os.environ.copy()
+        pty_env.update(launch_spec.env)
+        self.pty: PTYBase = create_pty(launch_spec.argv, pty_env, cwd=cwd)
 
         self.buffer = RawByteBuffer(maxlen=DEFAULT_BUFFER_SIZE)
         self.created_at = datetime.utcnow()
@@ -113,7 +115,6 @@ class SilcSession:
         self._gc_task: Optional[asyncio.Task[None]] = None
         self._closed = False
         self.tui_active = False
-        self._helper_injected = False
         self._osc_title_parser = OscTitleParser()
         self._osc_cwd_parser = OscHiddenCwdParser()
 
@@ -122,7 +123,6 @@ class SilcSession:
             return
         self._read_task = asyncio.create_task(self._read_loop())
         await asyncio.sleep(0.5)
-        await self._inject_helper()
         self._gc_task = asyncio.create_task(self._garbage_collect())
 
     async def _read_loop(self) -> None:
@@ -166,22 +166,6 @@ class SilcSession:
         while not self._closed:
             await asyncio.sleep(60)
             self.rotate_logs()
-
-    async def _ensure_helper_ready(self) -> None:
-        if not self._helper_injected:
-            await self._inject_helper()
-
-    async def _inject_helper(self) -> None:
-        if self._helper_injected:
-            return
-        helper = self.shell_info.get_helper_function()
-        if helper:
-            helper_text = helper if helper.endswith("\n") else helper + "\n"
-            await self.pty.write(helper_text.encode("utf-8", errors="replace"))
-            await self._wait_for_prompt()
-            await asyncio.sleep(0.1)
-            self.buffer.clear()
-        self._helper_injected = True
 
     async def _wait_for_prompt(self, timeout: float = 2.0) -> None:
         loop = asyncio.get_running_loop()
@@ -359,7 +343,6 @@ class SilcSession:
 
         async with self.run_lock:
             self.current_run_cmd = cmd
-            await self._ensure_helper_ready()
             run_token = str(uuid.uuid4())[:8]
             cursor = self.buffer.cursor
             newline = "\r\n" if sys.platform == "win32" else "\n"

@@ -16,8 +16,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import toml
-
 
 @dataclass
 class PortConfig:
@@ -135,6 +133,11 @@ def _get_env_path(key: str, default: Path | None) -> Path | None:
 
 def _load_config_file() -> dict[str, Any]:
     """Load configuration from silc.toml file."""
+    try:
+        import toml
+    except ImportError:
+        return {}
+
     # Resolve data directory directly (avoiding circular import)
     if sys.platform == "win32":
         data_dir = Path(os.environ.get("APPDATA", "")) / "silc"
@@ -148,7 +151,7 @@ def _load_config_file() -> dict[str, Any]:
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             return toml.load(f)
-    except (OSError, toml.TomlDecodeError):
+    except (OSError, Exception):
         return {}
 
 

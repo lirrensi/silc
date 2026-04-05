@@ -1,88 +1,61 @@
-# FILE: tests/test_shell_detect.py
-# PURPOSE: Verify shell helper text includes marker emission and quoting behavior.
-# OWNS: Shell helper generation coverage.
-# DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
+"""Tests for shell bootstrap loading and invocation quoting."""
 
-"""Tests for shell helper generation and invocation quoting."""
+from __future__ import annotations
 
 import re
 from pathlib import Path
 
 import pytest
 
-from silc.utils import shell_detect
 from silc.utils.shell_detect import ShellInfo
 
 
 @pytest.mark.parametrize(
     ("shell_type", "expected_snippets"),
     [
-        (
-            "bash",
-            ["__silc_exec() {", "__SILC_BEGIN_$2__", "__SILC_END_$2__"],
-        ),
-        (
-            "zsh",
-            ["__silc_exec() {", "__SILC_BEGIN_$2__", "__SILC_END_$2__"],
-        ),
-        (
-            "sh",
-            ["__silc_exec() {", "__SILC_BEGIN_$2__", "__SILC_END_$2__"],
-        ),
+        ("bash", ["bootstrap.sh", "--rcfile", "__silc_exec() {", "PROMPT_COMMAND"]),
+        ("zsh", ["precmd", "__silc_exec() {"]),
+        ("sh", ["__silc_exec() {"]),
         (
             "pwsh",
             [
-                "function prompt {",
+                "bootstrap.ps1",
+                "-NoExit",
+                "function global:prompt {",
+                "function global:__silc_exec($cmd, $token) {",
                 "633;cwd=",
-                "[System.Uri]::EscapeDataString",
-                "function __silc_exec($cmd, $token) {",
-                "__SILC_BEGIN_${token}__",
-                "__SILC_END_${token}__",
             ],
         ),
         (
             "powershell",
             [
-                "function prompt {",
+                "bootstrap.ps1",
+                "-NoExit",
+                "function global:prompt {",
+                "function global:__silc_exec($cmd, $token) {",
                 "633;cwd=",
-                "[System.Uri]::EscapeDataString",
-                "function __silc_exec($cmd, $token) {",
-                "__SILC_BEGIN_${token}__",
-                "__SILC_END_${token}__",
             ],
         ),
-        (
-            "cmd",
-            ["doskey __silc_exec", "__silc_exec.bat"],
-        ),
+        ("cmd", ["bootstrap.cmd", "doskey __silc_exec", "__silc_exec.bat", "/k"]),
     ],
 )
-def test_get_helper_function_contains_markers(
-    shell_type: str,
-    expected_snippets: list[str],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    tmp_dir = tmp_path / "shell"
-    tmp_dir.mkdir()
-
-    if shell_type == "cmd":
-        monkeypatch.setattr(
-            shell_detect.tempfile,
-            "gettempdir",
-            lambda: str(tmp_dir),
-        )
-
+def test_build_launch_spec_points_at_bootstrap_scripts(
+    shell_type: str, expected_snippets: list[str]
+) -> None:
     info = ShellInfo(shell_type, "/bin/shell", re.compile(r".*$"))
-    helper = info.get_helper_function()
-    assert helper is not None
-    assert "\n" not in helper
-    for snippet in expected_snippets:
-        assert snippet in helper
+    spec = info.build_launch_spec()
 
-    if shell_type == "cmd":
-        helper_file = tmp_dir / "__silc_exec.bat"
-        assert helper_file.exists()
+    argv_text = " ".join(spec.argv)
+    assert argv_text
+    for snippet in expected_snippets:
+        assert snippet in argv_text or snippet in _bootstrap_text(info)
+
+    if shell_type == "zsh":
+        assert "ZDOTDIR" in spec.env
+        wrapper_dir = Path(spec.env["ZDOTDIR"])
+        rcfile = wrapper_dir / ".zshrc"
+        assert rcfile.exists()
+        assert "bootstrap.zsh" in rcfile.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -102,7 +75,12 @@ def test_get_helper_function_contains_markers(
 )
 def test_build_helper_invocation(
     shell_type: str, command: str, token: str, expected_fragment: str
-):
+) -> None:
     info = ShellInfo(shell_type, "/bin/shell", re.compile(r".*$"))
     invocation = info.build_helper_invocation(command, token)
     assert expected_fragment in invocation
+
+
+def _bootstrap_text(info: ShellInfo) -> str:
+    path = info.get_bootstrap_script_path()
+    return path.read_text(encoding="utf-8")

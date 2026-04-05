@@ -1,10 +1,4 @@
-# FILE: silc/utils/shell_detect.py
-# PURPOSE: Detect shells and generate helper text for sentinel-driven session runs.
-# OWNS: Shell identification, helper generation, and helper invocation quoting.
-# EXPORTS: ShellInfo, detect_shell, get_shell_info_by_type, get_available_shell_choices.
-# DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
-
-"""Tiny helpers to detect the active shell and generate sentinel commands."""
+"""Tiny helpers to detect the active shell and load SILC bootstrap scripts."""
 
 from __future__ import annotations
 
@@ -14,9 +8,19 @@ import shlex
 import shutil
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Pattern
+
+
+def _static_scripts_root() -> Path:
+    return Path(__file__).resolve().parents[2] / "static" / "scripts"
+
+
+@dataclass(frozen=True)
+class ShellLaunchSpec:
+    argv: list[str]
+    env: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -25,49 +29,59 @@ class ShellInfo:
     path: str
     prompt_pattern: Pattern[str]
 
-    def get_helper_function(self) -> str | None:
-        """Return a shell-specific helper definition that prints SILC markers."""
+    def get_bootstrap_script_path(self) -> Path:
+        scripts_root = _static_scripts_root()
 
         if self.type in {"pwsh", "powershell"}:
-            return (
-                "function prompt { "
-                "$cwd = [System.Uri]::EscapeDataString((Get-Location).Path); "
-                "[Console]::Write([char]0x1b + ']633;cwd=' + $cwd + [char]0x07); "
-                '"PS $($PWD.Path)> " '
-                "}; "
-                "function __silc_exec($cmd, $token) { "
-                '$prompt = "PS $($PWD.Path)> "; '  # Build prompt string
-                "Write-Host -NoNewline $prompt; "  # Print prompt
-                "Write-Host $cmd; "  # Print command
-                'Write-Host "__SILC_BEGIN_${token}__"; '
-                "Invoke-Expression $cmd; "
-                "$exitCode = $LASTEXITCODE; "
-                "if ($null -eq $exitCode) { $exitCode = 0 }; "
-                'Write-Host "__SILC_END_${token}__:${exitCode}" '
-                "}"
+            return scripts_root / "powershell" / "bootstrap.ps1"
+        if self.type == "bash":
+            return scripts_root / "bash" / "bootstrap.sh"
+        if self.type == "zsh":
+            return scripts_root / "zsh" / "bootstrap.zsh"
+        if self.type == "cmd":
+            return scripts_root / "cmd" / "bootstrap.cmd"
+
+        return scripts_root / "bash" / "bootstrap.sh"
+
+    def build_launch_spec(self) -> ShellLaunchSpec:
+        bootstrap = self.get_bootstrap_script_path()
+        if not bootstrap.exists():
+            raise FileNotFoundError(f"Missing shell bootstrap script: {bootstrap}")
+
+        if self.type in {"pwsh", "powershell"}:
+            return ShellLaunchSpec(
+                argv=[
+                    self.path,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NoExit",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(bootstrap),
+                ]
             )
 
-        if self.type in {"bash", "zsh", "sh"}:
-            return (
-                "__silc_exec() { "
-                'printf "__SILC_BEGIN_$2__\\n"; '
-                'eval "$1"; '
-                'printf "__SILC_END_$2__:%d\\n" $?; '
-                "}"
+        if self.type == "bash":
+            return ShellLaunchSpec(
+                argv=[self.path, "--noprofile", "--rcfile", str(bootstrap), "-i"]
+            )
+
+        if self.type == "zsh":
+            wrapper_dir = Path(tempfile.mkdtemp(prefix="silc-zsh-"))
+            rcfile = wrapper_dir / ".zshrc"
+            rcfile.write_text(
+                f"source {shlex.quote(str(bootstrap))}\n",
+                encoding="utf-8",
+            )
+            return ShellLaunchSpec(
+                argv=[self.path, "-i"], env={"ZDOTDIR": str(wrapper_dir)}
             )
 
         if self.type == "cmd":
-            helper_path = self._ensure_cmd_helper()
-            return f'doskey __silc_exec=call "{helper_path}" $1 $2'
+            return ShellLaunchSpec(argv=[self.path, "/k", f'call "{bootstrap}"'])
 
-        # Default to POSIX helper for any other shell type.
-        return (
-            "__silc_exec() { "
-            'printf "__SILC_BEGIN_$2__\\n"; '
-            'eval "$1"; '
-            'printf "__SILC_END_$2__:%d\\n" $?; '
-            "}"
-        )
+        return ShellLaunchSpec(argv=[self.path])
 
     def build_helper_invocation(self, command: str, token: str) -> str:
         """Construct the single-line invocation that calls the helper."""
@@ -84,20 +98,6 @@ class ShellInfo:
             return f'__silc_exec "{escaped}" {token}'
 
         return f"__silc_exec {shlex.quote(command)} {shlex.quote(token)}"
-
-    def _ensure_cmd_helper(self) -> str:
-        script_path = Path(tempfile.gettempdir()) / "__silc_exec.bat"
-        if script_path.exists():
-            return str(script_path)
-
-        script_content = (
-            "@echo off\r\n"
-            "echo __SILC_BEGIN_%2__\r\n"
-            "call %1\r\n"
-            "echo __SILC_END_%2__:%ERRORLEVEL%\r\n"
-        )
-        script_path.write_text(script_content, encoding="utf-8")
-        return str(script_path)
 
 
 def detect_shell() -> ShellInfo:
@@ -236,6 +236,7 @@ def get_available_shell_choices() -> list[ShellChoice]:
 
 __all__ = [
     "ShellChoice",
+    "ShellLaunchSpec",
     "ShellInfo",
     "detect_shell",
     "get_available_shell_choices",

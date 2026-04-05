@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any, Mapping, Optional
 
 from silc.core.constants import DEFAULT_SCREEN_COLUMNS, DEFAULT_SCREEN_ROWS
@@ -17,7 +18,10 @@ class PTYBase(ABC):
     """Abstract PTY interface used by SILC session logic."""
 
     def __init__(
-        self, shell_cmd: Optional[str], env: Mapping[str, str], cwd: str | None = None
+        self,
+        shell_cmd: Sequence[str] | str | None,
+        env: Mapping[str, str],
+        cwd: str | None = None,
     ):
         self.shell_cmd = shell_cmd
         self.env = dict(env)
@@ -54,7 +58,10 @@ class StubPTY(PTYBase):
     """Fallback PTY used when a platform-specific backend cannot be loaded."""
 
     def __init__(
-        self, shell_cmd: Optional[str], env: Mapping[str, str], cwd: str | None = None
+        self,
+        shell_cmd: Sequence[str] | str | None,
+        env: Mapping[str, str],
+        cwd: str | None = None,
     ):
         super().__init__(shell_cmd, env, cwd)
 
@@ -87,7 +94,10 @@ class UnixPTY(PTYBase):
     """Unix PTY backed by the standard library `pty` module."""
 
     def __init__(
-        self, shell_cmd: Optional[str], env: Mapping[str, str], cwd: str | None = None
+        self,
+        shell_cmd: Sequence[str] | str | None,
+        env: Mapping[str, str],
+        cwd: str | None = None,
     ):
         super().__init__(shell_cmd, env, cwd)
         import fcntl
@@ -418,7 +428,7 @@ class WindowsPTY(PTYBase):
 
 
 def create_pty(
-    shell_cmd: Optional[str] = None,
+    shell_cmd: Sequence[str] | str | None = None,
     env: Optional[Mapping[str, str]] = None,
     cwd: str | None = None,
 ) -> PTYBase:

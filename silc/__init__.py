@@ -1,5 +1,10 @@
 """Top-level package for the SILC shared shell project."""
 
-from .__main__ import main  # expose CLI entry point for console scripts
+
+def main() -> None:
+    from .__main__ import main as _main
+
+    _main()
+
 
 __all__ = ["main"]
