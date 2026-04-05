@@ -28,8 +28,17 @@ def test_install_and_uninstall_linux_integration(tmp_path, monkeypatch):
     created = install_os_integration()
 
     helper = tmp_path / ".silc" / "os-integration" / "silc-start-here.py"
+    helper_text = helper.read_text(encoding="utf-8")
     nautilus = (
         tmp_path / ".local" / "share" / "nautilus" / "scripts" / "SILC Start Here"
+    )
+    nautilus_enter = (
+        tmp_path
+        / ".local"
+        / "share"
+        / "nautilus"
+        / "scripts"
+        / "SILC Start and Enter Here"
     )
     dolphin = (
         tmp_path
@@ -39,22 +48,36 @@ def test_install_and_uninstall_linux_integration(tmp_path, monkeypatch):
         / "servicemenus"
         / "silc-start-here.desktop"
     )
+    dolphin_enter = (
+        tmp_path
+        / ".local"
+        / "share"
+        / "kio"
+        / "servicemenus"
+        / "silc-start-enter-here.desktop"
+    )
     thunar = tmp_path / ".config" / "Thunar" / "uca.xml"
 
     assert str(helper) in created
     assert nautilus.exists()
+    assert nautilus_enter.exists()
     assert dolphin.exists()
+    assert dolphin_enter.exists()
     assert thunar.exists()
     assert "SILC Start Here" in thunar.read_text(encoding="utf-8")
+    assert "SILC Start and Enter Here" in thunar.read_text(encoding="utf-8")
     assert str(helper) in dolphin.read_text(encoding="utf-8")
-    assert helper.read_text(encoding="utf-8").startswith("#!/usr/bin/env python3")
+    assert "start-enter" in helper_text
+    assert helper_text.startswith("#!/usr/bin/env python3")
 
     removed = uninstall_os_integration()
 
     assert str(helper) in removed
     assert not helper.exists()
     assert not nautilus.exists()
+    assert not nautilus_enter.exists()
     assert not dolphin.exists()
+    assert not dolphin_enter.exists()
     assert not thunar.exists()
 
 
@@ -66,21 +89,31 @@ def test_install_and_uninstall_macos_integration(tmp_path, monkeypatch):
 
     helper = tmp_path / ".silc" / "os-integration" / "silc-start-here.py"
     workflow = tmp_path / "Library" / "Services" / "SILC Start.workflow"
+    workflow_enter = tmp_path / "Library" / "Services" / "SILC Start and Enter.workflow"
     info_plist = workflow / "Contents" / "Info.plist"
     document_wflow = workflow / "Contents" / "document.wflow"
+    info_plist_enter = workflow_enter / "Contents" / "Info.plist"
+    document_wflow_enter = workflow_enter / "Contents" / "document.wflow"
 
     assert str(helper) in created
     assert workflow.exists()
+    assert workflow_enter.exists()
     assert info_plist.exists()
     assert document_wflow.exists()
     assert "SILC Start Here" in info_plist.read_text(encoding="utf-8")
     assert str(helper) in document_wflow.read_text(encoding="utf-8")
+    assert info_plist_enter.exists()
+    assert document_wflow_enter.exists()
+    assert "SILC Start and Enter Here" in info_plist_enter.read_text(encoding="utf-8")
+    assert "--enter" in document_wflow_enter.read_text(encoding="utf-8")
 
     removed = uninstall_os_integration()
 
     assert str(workflow) in removed
+    assert str(workflow_enter) in removed
     assert not helper.exists()
     assert not workflow.exists()
+    assert not workflow_enter.exists()
 
 
 def test_install_and_uninstall_windows_integration(tmp_path, monkeypatch):
@@ -130,7 +163,11 @@ def test_install_and_uninstall_windows_integration(tmp_path, monkeypatch):
     helper = tmp_path / ".silc" / "os-integration" / "silc-start-here.py"
     assert str(helper) in created
     assert any(path.endswith("SilcStartHere") for path in registry_calls["created"])
+    assert any(
+        path.endswith("SilcStartEnterHere") for path in registry_calls["created"]
+    )
     assert helper.exists()
+    assert any("--enter" in value for value in registry_calls.get("values", []))
 
     removed = uninstall_os_integration()
 

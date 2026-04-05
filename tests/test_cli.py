@@ -102,6 +102,7 @@ class TestCLIHelp:
         output = result.stdout or result.stderr
         assert "Usage:" in output
         assert "Commands:" in output or "start" in output.lower()
+        assert "start-enter" in output
 
     def test_version_not_crash(self):
         """CLI should not crash when invoked."""
@@ -932,6 +933,19 @@ class TestCLIStartOptions:
         output = result.stdout
 
         # Check for expected options
+        assert "--port" in output
+        assert "--global" in output
+        assert "--no-detach" in output
+        assert "--token" in output
+        assert "--shell" in output
+        assert "--cwd" in output
+
+    def test_start_enter_help_shows_options(self):
+        """`silc start-enter --help` should show the same options."""
+        result = run_cli(["start-enter", "--help"])
+        assert result.returncode == 0
+        output = result.stdout
+
         assert "--port" in output
         assert "--global" in output
         assert "--no-detach" in output

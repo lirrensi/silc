@@ -31,6 +31,7 @@ Does not own:
 ```text
 silc
 ├── start [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]
+├── start-enter [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]
 ├── manager [--share]
 ├── desktop [--share]
 ├── mcp
@@ -90,6 +91,18 @@ Notes:
 - Folder-derived names are sanitized and collision-safe (`name`, `name-2`, ...).
 - `--no-detach` starts the daemon in-process instead of detaching.
 - `--global` is a session-level network exposure mode, distinct from daemon `--share`.
+
+## `silc start-enter`
+
+Behavior:
+
+1. Runs the same start flow as `silc start`.
+2. Launches the native TUI immediately against the created session port.
+
+Notes:
+
+- It uses the same session options as `silc start`.
+- `--no-detach` is rejected because the daemon must be running in the background before the TUI can open.
 
 ## Manager / Desktop
 

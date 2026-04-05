@@ -18,13 +18,19 @@ class OsIntegrationError(RuntimeError):
 
 HELPER_SCRIPT_NAME = "silc-start-here.py"
 MACOS_WORKFLOW_NAME = "SILC Start.workflow"
+MACOS_WORKFLOW_ENTER_NAME = "SILC Start and Enter.workflow"
 NAUTILUS_SCRIPT_NAME = "SILC Start Here"
+DOLPHIN_ENTER_SERVICE_NAME = "silc-start-enter-here.desktop"
 DOLPHIN_SERVICE_NAME = "silc-start-here.desktop"
 THUNAR_ACTION_NAME = "SILC Start Here"
+THUNAR_ENTER_ACTION_NAME = "SILC Start and Enter Here"
 THUNAR_ACTION_ICON = "utilities-terminal"
 DEFAULT_MENU_NAME = "SILC Start Here"
+DEFAULT_ENTER_MENU_NAME = "SILC Start and Enter Here"
 WINDOWS_MENU_NAME = "Open SILC Here"
+WINDOWS_ENTER_MENU_NAME = "Open SILC and Enter Here"
 WINDOWS_REGISTRY_SUBKEY = "SilcStartHere"
+WINDOWS_ENTER_REGISTRY_SUBKEY = "SilcStartEnterHere"
 
 
 def install_os_integration() -> list[str]:
@@ -36,7 +42,8 @@ def install_os_integration() -> list[str]:
     created: list[str] = [str(helper_script)]
 
     if sys.platform == "darwin":
-        created.extend(_install_macos_quick_action(helper_script))
+        created.extend(_install_macos_quick_action(helper_script, enter=False))
+        created.extend(_install_macos_quick_action(helper_script, enter=True))
     elif sys.platform == "win32":
         created.extend(_install_windows_integrations(helper_script))
     else:
@@ -58,22 +65,28 @@ def uninstall_os_integration() -> list[str]:
         removed.append(str(helper_script))
 
     if sys.platform == "darwin":
-        workflow_dir = _workflow_dir()
-        if workflow_dir.exists():
-            shutil.rmtree(workflow_dir)
-            removed.append(str(workflow_dir))
+        for workflow_dir in (_workflow_dir(False), _workflow_dir(True)):
+            if workflow_dir.exists():
+                shutil.rmtree(workflow_dir)
+                removed.append(str(workflow_dir))
     elif sys.platform == "win32":
         removed.extend(_uninstall_windows_integrations())
     else:
-        nautilus_script = _nautilus_script_path()
-        if nautilus_script.exists():
-            nautilus_script.unlink()
-            removed.append(str(nautilus_script))
+        for nautilus_script in (
+            _nautilus_script_path(False),
+            _nautilus_script_path(True),
+        ):
+            if nautilus_script.exists():
+                nautilus_script.unlink()
+                removed.append(str(nautilus_script))
 
-        dolphin_service = _dolphin_service_path()
-        if dolphin_service.exists():
-            dolphin_service.unlink()
-            removed.append(str(dolphin_service))
+        for dolphin_service in (
+            _dolphin_service_path(False),
+            _dolphin_service_path(True),
+        ):
+            if dolphin_service.exists():
+                dolphin_service.unlink()
+                removed.append(str(dolphin_service))
 
         thunar_actions = _thunar_actions_path()
         if thunar_actions.exists() and _remove_thunar_action(thunar_actions):
@@ -126,13 +139,20 @@ def _build_helper_script() -> str:
         from urllib.parse import unquote, urlparse
 
 
-        def _pick_target(argv: list[str]) -> str:
-            if argv:
-                return argv[0]
+        def _pick_mode_and_target(argv: list[str]) -> tuple[bool, str]:
+            enter = False
+            args = list(argv)
+
+            if args and args[0] == "--enter":
+                enter = True
+                args = args[1:]
+
+            if args:
+                return enter, args[0]
             nautilus_uri = os.environ.get("NAUTILUS_SCRIPT_CURRENT_URI")
             if nautilus_uri:
-                return nautilus_uri
-            return os.getcwd()
+                return enter, nautilus_uri
+            return enter, os.getcwd()
 
 
         def _normalize_target(raw: str) -> str:
@@ -145,10 +165,12 @@ def _build_helper_script() -> str:
 
 
         def main() -> None:
-            target = _normalize_target(_pick_target(sys.argv[1:]))
+            enter, target = _pick_mode_and_target(sys.argv[1:])
+            target = _normalize_target(target)
+            command = "start-enter" if enter else "start"
             os.execv(
                 sys.executable,
-                [sys.executable, "-m", "silc", "start", "--cwd", target],
+                [sys.executable, "-m", "silc", command, "--cwd", target],
             )
 
 
@@ -159,36 +181,55 @@ def _build_helper_script() -> str:
 
 
 def _python_exec() -> str:
-    return str(Path(sys.executable).resolve())
+    python = Path(sys.executable).resolve()
+    if sys.platform == "win32":
+        pythonw = python.with_name("pythonw.exe")
+        if pythonw.exists():
+            return str(pythonw)
+    return str(python)
 
 
-def _install_macos_quick_action(helper_script: Path) -> list[str]:
-    workflow_dir = _workflow_dir()
+def _build_launcher_script(helper_script: Path, *, enter: bool) -> str:
+    mode_arg = " --enter" if enter else ""
+    return textwrap.dedent(
+        f"""\
+        #!/bin/sh
+        exec {shlex.quote(_python_exec())} {shlex.quote(str(helper_script))}{mode_arg} "$@"
+        """
+    )
+
+
+def _install_macos_quick_action(helper_script: Path, *, enter: bool) -> list[str]:
+    workflow_dir = _workflow_dir(enter)
     contents_dir = workflow_dir / "Contents"
     contents_dir.mkdir(parents=True, exist_ok=True)
 
     info_plist = contents_dir / "Info.plist"
     document_wflow = contents_dir / "document.wflow"
 
-    info_plist.write_bytes(plistlib.dumps(_workflow_info_plist()))
+    info_plist.write_bytes(plistlib.dumps(_workflow_info_plist(enter)))
     document_wflow.write_bytes(
-        plistlib.dumps(_workflow_document(helper_script, python_exec=_python_exec()))
+        plistlib.dumps(
+            _workflow_document(helper_script, python_exec=_python_exec(), enter=enter)
+        )
     )
 
     return [str(workflow_dir), str(info_plist), str(document_wflow)]
 
 
-def _workflow_dir() -> Path:
-    return Path.home() / "Library" / "Services" / MACOS_WORKFLOW_NAME
+def _workflow_dir(enter: bool) -> Path:
+    workflow_name = MACOS_WORKFLOW_ENTER_NAME if enter else MACOS_WORKFLOW_NAME
+    return Path.home() / "Library" / "Services" / workflow_name
 
 
-def _workflow_info_plist() -> dict[str, object]:
+def _workflow_info_plist(enter: bool) -> dict[str, object]:
+    menu_name = DEFAULT_ENTER_MENU_NAME if enter else DEFAULT_MENU_NAME
     return {
         "NSServices": [
             {
                 "NSBackgroundColorName": "background",
                 "NSIconName": "NSActionTemplate",
-                "NSMenuItem": {"default": DEFAULT_MENU_NAME},
+                "NSMenuItem": {"default": menu_name},
                 "NSMessage": "runWorkflowAsService",
                 "NSRequiredContext": {"NSApplicationIdentifier": "com.apple.finder"},
                 "NSSendFileTypes": ["public.item"],
@@ -197,12 +238,15 @@ def _workflow_info_plist() -> dict[str, object]:
     }
 
 
-def _workflow_document(helper_script: Path, python_exec: str) -> dict[str, object]:
+def _workflow_document(
+    helper_script: Path, python_exec: str, *, enter: bool
+) -> dict[str, object]:
+    mode_arg = " --enter" if enter else ""
     command = textwrap.dedent(
         f"""\
         #!/bin/sh
         set -eu
-        exec {shlex.quote(python_exec)} {shlex.quote(str(helper_script))} "$@"
+        exec {shlex.quote(python_exec)} {shlex.quote(str(helper_script))}{mode_arg} "$@"
         """
     )
     action_uuid = str(uuid.uuid4()).upper()
@@ -324,44 +368,41 @@ def _workflow_document(helper_script: Path, python_exec: str) -> dict[str, objec
 
 def _install_linux_integrations(helper_script: Path) -> list[str]:
     created = [
-        _install_nautilus_script(helper_script),
-        _install_dolphin_service(helper_script),
+        _install_nautilus_script(helper_script, enter=False),
+        _install_nautilus_script(helper_script, enter=True),
+        _install_dolphin_service(helper_script, enter=False),
+        _install_dolphin_service(helper_script, enter=True),
     ]
     created.extend(_install_thunar_action(helper_script))
     return created
 
 
-def _nautilus_script_path() -> Path:
-    return (
-        Path.home() / ".local" / "share" / "nautilus" / "scripts" / NAUTILUS_SCRIPT_NAME
-    )
+def _nautilus_script_path(enter: bool) -> Path:
+    script_name = DEFAULT_ENTER_MENU_NAME if enter else NAUTILUS_SCRIPT_NAME
+    return Path.home() / ".local" / "share" / "nautilus" / "scripts" / script_name
 
 
-def _install_nautilus_script(helper_script: Path) -> str:
-    script_path = _nautilus_script_path()
+def _install_nautilus_script(helper_script: Path, *, enter: bool) -> str:
+    script_path = _nautilus_script_path(enter)
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(
-        textwrap.dedent(
-            f"""\
-            #!/bin/sh
-            exec {shlex.quote(_python_exec())} {shlex.quote(str(helper_script))} "$@"
-            """
-        ),
+        _build_launcher_script(helper_script, enter=enter),
         encoding="utf-8",
     )
     script_path.chmod(0o755)
     return str(script_path)
 
 
-def _dolphin_service_path() -> Path:
-    return (
-        Path.home() / ".local" / "share" / "kio" / "servicemenus" / DOLPHIN_SERVICE_NAME
-    )
+def _dolphin_service_path(enter: bool) -> Path:
+    service_name = DOLPHIN_ENTER_SERVICE_NAME if enter else DOLPHIN_SERVICE_NAME
+    return Path.home() / ".local" / "share" / "kio" / "servicemenus" / service_name
 
 
-def _install_dolphin_service(helper_script: Path) -> str:
-    service_path = _dolphin_service_path()
+def _install_dolphin_service(helper_script: Path, *, enter: bool) -> str:
+    service_path = _dolphin_service_path(enter)
     service_path.parent.mkdir(parents=True, exist_ok=True)
+    menu_name = DEFAULT_ENTER_MENU_NAME if enter else DEFAULT_MENU_NAME
+    mode_arg = " --enter" if enter else ""
     service_path.write_text(
         textwrap.dedent(
             f"""\
@@ -369,13 +410,13 @@ def _install_dolphin_service(helper_script: Path) -> str:
             Type=Service
             X-KDE-ServiceTypes=KonqPopupMenu/Plugin
             MimeType=inode/directory;
-            Actions=SilcStartHere
+            Actions={"SilcStartEnterHere" if enter else "SilcStartHere"}
             Icon=utilities-terminal
 
-            [Desktop Action SilcStartHere]
-            Name={DEFAULT_MENU_NAME}
+            [Desktop Action {"SilcStartEnterHere" if enter else "SilcStartHere"}]
+            Name={menu_name}
             Icon=utilities-terminal
-            Exec={_python_exec()} {str(helper_script)} %f
+            Exec={_python_exec()} {str(helper_script)}{mode_arg} %f
             """
         ).lstrip(),
         encoding="utf-8",
@@ -399,29 +440,40 @@ def _install_thunar_action(helper_script: Path) -> list[str]:
     else:
         root = ET.Element("actions")
 
-    if _thunar_action_exists(root, helper_script):
-        _write_xml_tree(root, uca_path)
-        return [str(uca_path)]
-
-    action = ET.SubElement(root, "action")
-    ET.SubElement(action, "icon").text = THUNAR_ACTION_ICON
-    ET.SubElement(action, "name").text = THUNAR_ACTION_NAME
-    ET.SubElement(action, "unique-id").text = str(uuid.uuid4())
-    ET.SubElement(action, "command").text = f"{_python_exec()} {str(helper_script)} %f"
-    ET.SubElement(action, "description").text = "Open the selected folder in SILC"
-    ET.SubElement(action, "patterns").text = "*"
-    ET.SubElement(action, "directories")
+    for enter in (False, True):
+        if _thunar_action_exists(root, helper_script, enter=enter):
+            continue
+        action_name = THUNAR_ENTER_ACTION_NAME if enter else THUNAR_ACTION_NAME
+        mode_arg = " --enter" if enter else ""
+        action = ET.SubElement(root, "action")
+        ET.SubElement(action, "icon").text = THUNAR_ACTION_ICON
+        ET.SubElement(action, "name").text = action_name
+        ET.SubElement(action, "unique-id").text = str(uuid.uuid4())
+        ET.SubElement(action, "command").text = (
+            f"{_python_exec()} {str(helper_script)}{mode_arg} %f"
+        )
+        ET.SubElement(action, "description").text = (
+            "Open the selected folder in SILC"
+            if not enter
+            else "Open the selected folder in SILC and enter"
+        )
+        ET.SubElement(action, "patterns").text = "*"
+        ET.SubElement(action, "directories")
 
     _write_xml_tree(root, uca_path)
     return [str(uca_path)]
 
 
-def _thunar_action_exists(root: ET.Element, helper_script: Path) -> bool:
-    expected_command = f"{_python_exec()} {str(helper_script)} %f"
+def _thunar_action_exists(
+    root: ET.Element, helper_script: Path, *, enter: bool
+) -> bool:
+    mode_arg = " --enter" if enter else ""
+    expected_command = f"{_python_exec()} {str(helper_script)}{mode_arg} %f"
+    expected_name = THUNAR_ENTER_ACTION_NAME if enter else THUNAR_ACTION_NAME
     for action in root.findall("action"):
         name = (action.findtext("name") or "").strip()
         command = (action.findtext("command") or "").strip()
-        if name == THUNAR_ACTION_NAME or command == expected_command:
+        if name == expected_name or command == expected_command:
             return True
     return False
 
@@ -432,12 +484,18 @@ def _remove_thunar_action(uca_path: Path) -> bool:
     except ET.ParseError:
         return False
 
-    helper_command = f"{_python_exec()} {str(_helper_script_path())} %f"
+    helper_commands = {
+        f"{_python_exec()} {str(_helper_script_path())} %f",
+        f"{_python_exec()} {str(_helper_script_path())} --enter %f",
+    }
     removed = False
     for action in list(root.findall("action")):
         name = (action.findtext("name") or "").strip()
         command = (action.findtext("command") or "").strip()
-        if name == THUNAR_ACTION_NAME or command == helper_command:
+        if (
+            name in {THUNAR_ACTION_NAME, THUNAR_ENTER_ACTION_NAME}
+            or command in helper_commands
+        ):
             root.remove(action)
             removed = True
 
@@ -461,12 +519,46 @@ def _write_xml_tree(root: ET.Element, path: Path) -> None:
     tree.write(path, encoding="utf-8", xml_declaration=True)
 
 
-def _windows_registry_paths() -> list[tuple[str, str]]:
+def _windows_registry_entries() -> list[tuple[str, str, str, bool]]:
     return [
-        (r"Software\Classes\Directory\shell\SilcStartHere", "%1"),
-        (r"Software\Classes\Directory\Background\shell\SilcStartHere", "%V"),
-        (r"Software\Classes\Drive\shell\SilcStartHere", "%1"),
-        (r"Software\Classes\*\shell\SilcStartHere", "%1"),
+        (
+            r"Software\Classes\Directory\shell\SilcStartHere",
+            WINDOWS_MENU_NAME,
+            "%1",
+            False,
+        ),
+        (
+            r"Software\Classes\Directory\shell\SilcStartEnterHere",
+            WINDOWS_ENTER_MENU_NAME,
+            "%1",
+            True,
+        ),
+        (
+            r"Software\Classes\Directory\Background\shell\SilcStartHere",
+            WINDOWS_MENU_NAME,
+            "%V",
+            False,
+        ),
+        (
+            r"Software\Classes\Directory\Background\shell\SilcStartEnterHere",
+            WINDOWS_ENTER_MENU_NAME,
+            "%V",
+            True,
+        ),
+        (r"Software\Classes\Drive\shell\SilcStartHere", WINDOWS_MENU_NAME, "%1", False),
+        (
+            r"Software\Classes\Drive\shell\SilcStartEnterHere",
+            WINDOWS_ENTER_MENU_NAME,
+            "%1",
+            True,
+        ),
+        (r"Software\Classes\*\shell\SilcStartHere", WINDOWS_MENU_NAME, "%1", False),
+        (
+            r"Software\Classes\*\shell\SilcStartEnterHere",
+            WINDOWS_ENTER_MENU_NAME,
+            "%1",
+            True,
+        ),
     ]
 
 
@@ -479,17 +571,18 @@ def _install_windows_integrations(helper_script: Path) -> list[str]:
     created = [str(helper_script)]
     python_exec = _python_exec()
 
-    for registry_path, placeholder in _windows_registry_paths():
+    for registry_path, menu_name, placeholder, enter in _windows_registry_entries():
         with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, registry_path) as key:
-            winreg.SetValueEx(key, "MUIVerb", 0, winreg.REG_SZ, WINDOWS_MENU_NAME)
+            winreg.SetValueEx(key, "MUIVerb", 0, winreg.REG_SZ, menu_name)
             winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, python_exec)
             with winreg.CreateKeyEx(key, "command") as command_key:
+                mode_arg = " --enter" if enter else ""
                 winreg.SetValueEx(
                     command_key,
                     None,
                     0,
                     winreg.REG_SZ,
-                    f'"{python_exec}" "{str(helper_script)}" {placeholder}',
+                    f'"{python_exec}" "{str(helper_script)}"{mode_arg} {placeholder}',
                 )
         created.append(rf"HKCU\{registry_path}")
 
@@ -503,7 +596,7 @@ def _uninstall_windows_integrations() -> list[str]:
         raise OsIntegrationError("Windows registry support is unavailable.") from exc
 
     removed: list[str] = []
-    for registry_path, _placeholder in _windows_registry_paths():
+    for registry_path, _menu_name, _placeholder, _enter in _windows_registry_entries():
         if _delete_registry_tree(winreg.HKEY_CURRENT_USER, registry_path):
             removed.append(rf"HKCU\{registry_path}")
     return removed

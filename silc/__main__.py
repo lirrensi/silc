@@ -422,6 +422,7 @@ def start(
     token: Optional[str],
     shell: Optional[str],
     cwd: Optional[str],
+    launch_native_tui: bool = False,
 ) -> None:
     """Start a new SILC session (creates daemon if needed)."""
     # Validate name format if provided
@@ -435,6 +436,11 @@ def start(
                 err=True,
             )
             return
+
+    if launch_native_tui and no_detach:
+        raise click.ClickException(
+            "start-enter requires a detached daemon; omit --no-detach."
+        )
 
     normalized_token = token.strip() if token else None
     session_token: str | None = normalized_token
@@ -580,6 +586,7 @@ def start(
             name = f"{folder_name}-{suffix}"
 
     click.echo("Creating new session...", err=False)
+    session: dict[str, object] | None = None
     try:
         payload: dict[str, object] = {}
         if name is not None:
@@ -612,6 +619,59 @@ def start(
         click.echo(f"❌ Failed to create session: {detail}", err=True)
     except requests.RequestException as e:
         click.echo(f"❌ Failed to create session: {e}", err=True)
+
+    if launch_native_tui and session is not None:
+        _launch_native_tui_client(int(session["port"]))
+
+
+@cli.command(name="start-enter")
+@click.argument("name", required=False, default=None)
+@click.option("--port", type=int, default=None, help="Port for session")
+@click.option(
+    "--global", "is_global", is_flag=True, help="Bind to 0.0.0.0 (for legacy mode)."
+)
+@click.option(
+    "--no-detach", is_flag=True, help="Run daemon in foreground (not detached)."
+)
+@click.option(
+    "--token",
+    type=str,
+    default=None,
+    help="Custom token for remote session API (hex string).",
+)
+@click.option(
+    "--shell",
+    type=str,
+    default=None,
+    help="Shell to use (bash, zsh, sh, pwsh, powershell, cmd).",
+)
+@click.option(
+    "--cwd",
+    type=str,
+    default=None,
+    help="Working directory for session.",
+)
+def start_enter(
+    name: Optional[str],
+    port: Optional[int],
+    is_global: bool,
+    no_detach: bool,
+    token: Optional[str],
+    shell: Optional[str],
+    cwd: Optional[str],
+) -> None:
+    """Start a session and immediately open the native TUI."""
+
+    start.callback(
+        name,
+        port,
+        is_global,
+        no_detach,
+        token,
+        shell,
+        cwd,
+        launch_native_tui=True,
+    )
 
 
 def _get_daemon_python_executable() -> str:

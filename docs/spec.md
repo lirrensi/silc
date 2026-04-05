@@ -118,6 +118,7 @@ Includes: `session_id`, `port`, `name`, `title`, `cwd`, `title_updated_at`, `ali
 ## CLI Behavior
 
 - `silc start` starts the daemon if needed and creates a session.
+- `silc start-enter` starts the daemon if needed, creates a session, and opens the native TUI.
 - `silc manager` opens the manager UI in a browser.
 - `silc desktop` opens the manager UI in a native webview.
 - `silc list`, `shutdown`, `killall`, `restart-server`, `resurrect`, and `restart` operate on the daemon.
