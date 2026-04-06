@@ -27,10 +27,21 @@ SILC manages shell sessions through a daemon, per-session HTTP APIs, and multipl
 - `kill` forcefully destroys the session and removes the record.
 - `restart` replaces the PTY/server but preserves the record, port, name, cwd, and shell.
 - If a stored launch cwd is invalid, the new runtime falls back to the user's home directory or the shell default instead of failing the restart.
-- `shutdown` stops live runtime but preserves records.
+- `shutdown` MUST persist a frozen raw terminal snapshot for each live session before stopping runtime when shutdown is graceful.
+- `shutdown` stops live runtime but preserves records as dormant sessions.
 - `killall` destroys live sessions and exits the daemon.
-- `resurrect` reloads persisted records and reconciles them.
+- Daemon startup MUST load persisted records without materializing live runtime.
+- Persisted sessions loaded at daemon startup are in a dormant state until explicitly materialized.
+- `resurrect` MUST load persisted records and materialize all desired sessions.
 - Sessions do not auto-expire; idle tracking is informational only.
+
+## Session States
+
+- **Running**: desired record exists and a live PTY plus per-session server are active.
+- **Dormant**: desired record exists but no PTY, no per-session HTTP server, and no session-port listener are active.
+- **Removed**: desired record no longer exists and the daemon no longer reconciles the session.
+
+Dormant sessions MAY have a frozen raw terminal snapshot persisted from a prior graceful shutdown or restart.
 
 ## Daemon API
 
@@ -54,6 +65,8 @@ The daemon listens on `19999` and exposes:
 ## Session API
 
 Each session has its own HTTP server on the session port.
+
+- Dormant sessions do not expose the session API because they have no live per-session server.
 
 ### Auth
 
@@ -115,6 +128,8 @@ Includes: `session_id`, `port`, `name`, `title`, `cwd`, `title_updated_at`, `ali
 
 `mode=interactive` claims the live terminal; `mode=preview` is read-only.
 
+Dormant sessions do not expose a live websocket endpoint.
+
 ## CLI Behavior
 
 - `silc start` starts the daemon if needed and creates a session.
@@ -122,9 +137,23 @@ Includes: `session_id`, `port`, `name`, `title`, `cwd`, `title_updated_at`, `ali
 - `silc manager` opens the manager UI in a browser.
 - `silc desktop` opens the manager UI in a native webview.
 - `silc list`, `shutdown`, `killall`, `restart-server`, `resurrect`, and `restart` operate on the daemon.
+- Normal daemon startup loads persisted sessions as dormant records.
+- `silc resurrect` materializes all persisted sessions.
+- `silc restart` performs a graceful shutdown, captures frozen raw snapshots, and starts again with dormant sessions loaded.
 - Session-targeted commands accept either a port or a resolved name.
 - `silc tui` launches the native TUI binary and asks before taking over an active interactive client.
 - `silc open` is deprecated and launches the legacy Textual TUI.
+
+## Snapshot Persistence
+
+- Graceful shutdown and restart MUST persist a frozen raw PTY snapshot for each live session.
+- The persisted snapshot is raw PTY bytes suitable for later replay or preview rendering.
+- Persisted snapshots MUST NOT be interpreted as live process continuation.
+- Persisted snapshots SHOULD be stored separately from the main session registry metadata.
+- Persisted snapshots MUST be keyed by stable `session_id`, not by port or mutable session name.
+- A conforming implementation MUST NOT preload all dormant snapshots into memory during daemon startup.
+- Snapshot bytes MAY remain on disk until a caller explicitly requests them or a session is materialized.
+- During daemon startup restoration, the implementation SHOULD garbage-collect snapshot files whose `session_id` is not present in the restored desired session registry.
 
 ## Stream-to-File
 
@@ -157,3 +186,4 @@ The MCP server exposes:
 - Daemon route failures are contained as JSON errors.
 - WebSocket disconnects clear interactive ownership.
 - Idle sessions are never auto-closed.
+- Dormant sessions do not allocate PTYs, per-session servers, or in-memory terminal snapshots until explicitly activated.

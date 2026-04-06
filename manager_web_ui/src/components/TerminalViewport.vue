@@ -18,6 +18,7 @@ const props = defineProps<{
 const manager = useTerminalManager()
 const containerRef = ref<HTMLElement | null>(null)
 const session = computed(() => manager.getSession(props.port) ?? null)
+const isDormant = computed(() => session.value?.status === 'dormant')
 const viewportClass = computed(() => {
   return props.interactive
     ? 'terminal-shell terminal-shell--interactive h-full w-full bg-[var(--color-bg-secondary)] box-border'
@@ -25,10 +26,11 @@ const viewportClass = computed(() => {
 })
 const hostClass = computed(() => {
   const restoringClass = session.value?.isRestoring === true ? ' terminal-host--restoring' : ''
+  const dormantClass = isDormant.value ? ' terminal-host--dormant' : ''
 
   return props.interactive
-    ? `terminal-host terminal-host--interactive min-h-0 flex-1${restoringClass}`
-    : `terminal-host terminal-host--preview min-h-0 h-full w-full${restoringClass}`
+    ? `terminal-host terminal-host--interactive min-h-0 flex-1${restoringClass}${dormantClass}`
+    : `terminal-host terminal-host--preview min-h-0 h-full w-full${restoringClass}${dormantClass}`
 })
 
 let resizeObserver: ResizeObserver | null = null
@@ -45,6 +47,21 @@ function handleWindowResize(): void {
   scheduleViewportFit(true, 'window-resize')
 }
 
+watch(
+  () => session.value?.status,
+  (next, previous) => {
+    if (next === 'dormant') {
+      manager.detach(props.port)
+      return
+    }
+
+    if (previous === 'dormant' && next && next !== 'dormant') {
+      void attachAndConnect()
+      scheduleViewportFit(true, 'resurrected')
+    }
+  },
+)
+
 onMounted(() => {
   if (containerRef.value) {
     resizeObserver = new ResizeObserver(() => {
@@ -58,6 +75,10 @@ onMounted(() => {
   const session = manager.getSession(props.port)
   if (!session) {
     void fetchAndCreateSession()
+    return
+  }
+
+  if (session.status === 'dormant') {
     return
   }
 
@@ -76,6 +97,12 @@ watch(() => props.port, (newPort, oldPort) => {
   if (oldPort) {
     manager.detach(oldPort)
   }
+
+  const currentSession = manager.getSession(newPort)
+  if (currentSession?.status === 'dormant') {
+    return
+  }
+
   void attachAndConnect()
   manager.scheduleFit(newPort, {
     immediate: true,
@@ -90,7 +117,7 @@ async function fetchAndCreateSession(): Promise<void> {
     manager.reconcileSessions(sessions)
     const daemonSession = sessions.find((s) => s.port === props.port)
 
-    if (daemonSession) {
+    if (daemonSession && !daemonSession.dormant) {
       void attachAndConnect()
       scheduleViewportFit(true, 'mounted')
     }
@@ -104,6 +131,8 @@ async function attachAndConnect(): Promise<void> {
 
   const currentSession = manager.getSession(props.port)
   if (!currentSession) return
+
+  if (currentSession.status === 'dormant') return
 
   await manager.attach(props.port, containerRef.value, {
     propagate: props.interactive === true,
@@ -129,6 +158,15 @@ async function attachAndConnect(): Promise<void> {
 <template>
   <div :class="viewportClass">
     <div ref="containerRef" :class="hostClass"></div>
+    <div
+      v-if="isDormant"
+      class="terminal-dormant-overlay pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center"
+    >
+      <div class="glass-panel flex max-w-sm flex-col gap-2 p-4">
+        <p class="text-sm font-medium text-[var(--color-text-primary)]">Sleeping session</p>
+        <p class="text-xs text-[var(--color-text-secondary)]">This session stays dormant until resurrected.</p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -136,6 +174,7 @@ async function attachAndConnect(): Promise<void> {
 .terminal-shell {
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .terminal-shell--interactive {
@@ -156,6 +195,15 @@ async function attachAndConnect(): Promise<void> {
 .terminal-host--restoring {
   opacity: 0;
   pointer-events: none;
+}
+
+.terminal-host--dormant {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+
+.terminal-dormant-overlay {
+  background: color-mix(in srgb, var(--color-bg-primary) 78%, transparent);
 }
 
 .terminal-shell :deep(.xterm),

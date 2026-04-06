@@ -67,6 +67,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function attachSessionKeyHandlers(session: Session): void {
+    if (!session.terminal) {
+      return
+    }
+
     session.terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true
 
@@ -84,9 +88,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         return false
       }
 
-      if (event.ctrlKey && event.key === 'c' && session.terminal.hasSelection()) {
-        navigator.clipboard.writeText(session.terminal.getSelection())
-        session.terminal.clearSelection()
+      const terminal = session.terminal
+      if (event.ctrlKey && event.key === 'c' && terminal && terminal.hasSelection()) {
+        navigator.clipboard.writeText(terminal.getSelection())
+        terminal.clearSelection()
         return false
       }
 
@@ -99,12 +104,17 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     })
   }
 
-  function initializeSessionTerminal(session: Session): void {
+  function initializeSessionTerminal(session: Session): Terminal | null {
+    if (session.terminal && !session.terminalDisposed) {
+      return session.terminal
+    }
+
     const { terminal, fitAddon } = createManagedTerminal(currentTheme.value)
     session.terminal = terminal
     session.fitAddon = fitAddon
     session.terminalDisposed = false
     attachSessionKeyHandlers(session)
+    return terminal
   }
 
   const sessionList = computed(() => {
@@ -144,6 +154,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     cwd: string | null = null,
     title: string = '',
     titleUpdatedAt: string | null = null,
+    status: SessionStatus = 'idle',
   ): Session {
     const session: Session = {
       port,
@@ -153,11 +164,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       shell,
       cwd,
       titleUpdatedAt,
-      terminal: null as unknown as Terminal,
-      fitAddon: null as unknown as FitAddon,
+      terminal: null,
+      fitAddon: null,
       ws: null,
       onDataDisposable: null,
-      status: 'idle',
+      status,
       lastActivity: Date.now(),
       writeQueue: [],
       writePending: false,
@@ -168,7 +179,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       webglAddon: null as WebglAddon | null,
       rendererType: 'dom',
       rendererFailed: false,
-      terminalDisposed: false,
+      terminalDisposed: true,
       isRestoring: false,
       attachEpoch: 0,
       fitPropagationEnabled: true,
@@ -177,8 +188,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       pendingAnimationFrame: null,
       disconnectReason: null,
     }
-
-    initializeSessionTerminal(session)
 
     sessions.value.set(port, session)
     return session
@@ -198,12 +207,18 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     session.shell = daemonSession.shell
     session.cwd = daemonSession.cwd
     session.titleUpdatedAt = daemonSession.title_updated_at
+
+    if (daemonSession.dormant) {
+      session.status = 'dormant'
+    } else if (session.status === 'dormant') {
+      session.status = daemonSession.alive ? 'idle' : 'dead'
+    }
   }
 
   function upsertDaemonSession(daemonSession: DaemonSession): Session {
     const existingSession = sessions.value.get(daemonSession.port)
     if (!existingSession) {
-      return createSession(
+      const session = createSession(
         daemonSession.port,
         daemonSession.session_id,
         daemonSession.shell,
@@ -211,7 +226,9 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         daemonSession.cwd,
         daemonSession.title,
         daemonSession.title_updated_at,
+        daemonSession.dormant ? 'dormant' : 'idle',
       )
+      return session
     }
 
     updateSessionMetadata(daemonSession)
@@ -246,7 +263,12 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function cleanupBrowserEventHandlers(session: Session): void {
-    const element = session.terminal.element as HTMLElement & {
+    const terminal = session.terminal
+    if (!terminal) {
+      return
+    }
+
+    const element = terminal.element as HTMLElement & {
       _silcBrowserEventTarget?: EventTarget | null
       _silcDocumentContextMenuHandler?: (e: MouseEvent) => void
       _silcDocumentMouseDownHandler?: (e: MouseEvent) => void
@@ -285,6 +307,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function disposeSessionTerminal(session: Session): void {
+    const terminal = session.terminal
+
     try {
       clearPendingLayoutWork(session)
     } catch {
@@ -323,12 +347,17 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       // best-effort
     }
 
-    try {
-      session.terminal.dispose()
-    } catch {
-      // best-effort
+    if (terminal) {
+      try {
+        terminal.dispose()
+      } catch {
+        // best-effort
+      }
     }
 
+    session.terminal = null
+    session.fitAddon = null
+    session.webglAddon = null
     session.terminalDisposed = true
   }
 
@@ -353,12 +382,17 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       return
     }
 
+    const terminal = session.terminal
+    if (!terminal) {
+      return
+    }
+
     session.fitPropagationEnabled = options?.propagate ?? session.fitPropagationEnabled
 
     session.attachEpoch += 1
     const epoch = session.attachEpoch
 
-    if (session.terminal.element) {
+    if (terminal.element) {
       setupBrowserEventHandlers(session)
       scheduleFit(port, {
         immediate: true,
@@ -379,7 +413,8 @@ export const useTerminalManager = defineStore('terminalManager', () => {
           return
         }
 
-        if (currentSession.terminal.element || isElementRenderable(container)) {
+        const currentTerminal = currentSession.terminal
+        if (currentTerminal?.element || isElementRenderable(container)) {
           clearPendingLayoutWork(currentSession)
           resolve()
           return
@@ -409,11 +444,12 @@ export const useTerminalManager = defineStore('terminalManager', () => {
 
     currentSession.pendingOpen = false
 
-    if (currentSession.terminal.element || !isElementRenderable(container)) {
+    const currentTerminal = currentSession.terminal
+    if (!currentTerminal || currentTerminal.element || !isElementRenderable(container)) {
       return
     }
 
-    currentSession.terminal.open(container)
+    currentTerminal.open(container)
     setupBrowserEventHandlers(currentSession)
 
     await enableRenderer(currentSession)
@@ -463,14 +499,23 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       return Promise.resolve()
     }
 
+    if (session.status === 'dormant') {
+      return Promise.resolve()
+    }
+
     session.fitPropagationEnabled = options?.propagate ?? true
 
-    if (session.terminalDisposed) {
+    if (session.terminalDisposed || !session.terminal || !session.fitAddon) {
       initializeSessionTerminal(session)
       session.isRestoring = true
     }
 
-    const element = session.terminal.element
+    const terminal = session.terminal
+    if (!terminal) {
+      return Promise.resolve()
+    }
+
+    const element = terminal.element
 
     if (!element) {
       return openWhenRenderable(port, container, options)
@@ -492,7 +537,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   }
 
   function setupBrowserEventHandlers(session: Session): void {
-    const element = session.terminal.element
+    const terminal = session.terminal
+    if (!terminal) return
+
+    const element = terminal.element
     if (!element) return
 
     const typedElement = element as HTMLElement & {
@@ -587,14 +635,16 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     options?: { propagate?: boolean; reason?: string; force?: boolean },
   ): Promise<void> {
     const session = sessions.value.get(port)
-    const terminalElement = session?.terminal.element
+    const terminal = session?.terminal
+    const fitAddon = session?.fitAddon
+    const terminalElement = terminal?.element
     const container = terminalElement?.parentElement
 
-    if (!session || !terminalElement || !container || !isElementRenderable(container)) {
+    if (!session || !terminal || !fitAddon || !terminalElement || !container || !isElementRenderable(container)) {
       return
     }
 
-    const geometry = proposeTerminalGeometry(session.terminal, session.fitAddon, container, {
+    const geometry = proposeTerminalGeometry(terminal, fitAddon, container, {
       maxCols: MAX_COLS,
       maxRows: MAX_ROWS,
     })
@@ -611,7 +661,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const previousRenderer = lastAppliedRendererType.get(port)
 
     if (shouldResizeTerminal) {
-      session.terminal.resize(geometry.cols, geometry.rows)
+      terminal.resize(geometry.cols, geometry.rows)
     }
 
     session.lastSize = { rows: geometry.rows, cols: geometry.cols }
@@ -695,7 +745,9 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const session = sessions.value.get(port)
     if (session) {
       session.status = status
-      session.terminal.options.disableStdin = status !== 'active'
+      if (session.terminal) {
+        session.terminal.options.disableStdin = status !== 'active'
+      }
       if (status === 'active' || status === 'connecting' || status === 'restarting') {
         session.disconnectReason = null
       }
@@ -756,7 +808,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const terminalTheme = getTerminalTheme(theme)
 
     for (const session of sessions.value.values()) {
-      if (session.terminalDisposed) {
+      if (session.terminalDisposed || !session.terminal) {
         continue
       }
 
@@ -770,6 +822,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     if (!session) return
 
     if (session.terminalDisposed) {
+      return
+    }
+
+    if (!session.terminal) {
       return
     }
 
@@ -808,7 +864,14 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       return
     }
 
-    session.terminal.write(chunk, () => {
+    if (!session.terminal) {
+      session.writePending = false
+      session.writeInFlight = false
+      resolveFlushWaiters(session)
+      return
+    }
+
+    session.terminal?.write(chunk, () => {
       session.writeInFlight = false
 
       if (session.writeQueue.length > 0) {
@@ -823,6 +886,10 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   async function flushWrites(port: number): Promise<void> {
     const session = sessions.value.get(port)
     if (!session) {
+      return
+    }
+
+    if (!session.terminal) {
       return
     }
 

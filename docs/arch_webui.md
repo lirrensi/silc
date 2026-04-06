@@ -157,7 +157,7 @@ interface Session {
   fitAddon: FitAddon           // xterm fit addon
   ws: WebSocket | null         // WebSocket connection
   onDataDisposable: IDisposable | null  // Terminal input handler
-  status: SessionStatus        // 'active' | 'idle' | 'dead'
+  status: SessionStatus        // 'active' | 'idle' | 'dormant' | 'dead'
   lastActivity: number         // Timestamp for idle tracking
    writeQueue: Uint8Array[]     // Buffered binary writes
   writePending: boolean        // Write in progress flag
@@ -231,6 +231,7 @@ interface DaemonSession {
   cwd: string | null
   idle_seconds: number
   alive: boolean
+  dormant?: boolean
 }
 
 interface CreateSessionResponse {
@@ -293,6 +294,8 @@ disconnectWebSocket(port: number): void
 6. On close: set status 'idle'
 7. On error: set status 'dead'
 
+Dormant sessions skip this lifecycle because no session websocket exists.
+
 ### Frozen Terminal Preview
 
 Home/session cards render from a plain HTTP snapshot endpoint, not a websocket.
@@ -304,6 +307,7 @@ Home/session cards render from a plain HTTP snapshot endpoint, not a websocket.
 - Cache snapshots briefly on the client
 - Feed bytes directly into a throwaway xterm instance for color-safe rendering
 - Never claim the interactive websocket or interfere with live typing
+- Dormant sessions do not show a preview and instead render as sleeping/gray cards until explicitly materialized
 
 ---
 
@@ -346,6 +350,7 @@ Grid view of all sessions with preview terminals.
 - Display 2-column grid of session cards with 16px gap (gap-4)
 - Container has 16px padding (p-4)
 - Non-interactive terminal previews (scaled 2x)
+- Dormant sessions render as sleeping cards with no preview surface
 - Click card → navigate to session view
 
 **State:**
@@ -429,6 +434,7 @@ Session list navigation.
 **Status Colors:**
 - `active` → Green (`#4ade80`)
 - `idle` → Gray (`#6b7280`)
+- `dormant` → Muted gray / desaturated sleeping indicator
 - `dead` → Red (`#f87171`)
 
 ### SessionCard
@@ -438,9 +444,10 @@ Preview card for a session in the grid view.
 **Size:** 50vw × 50vh
 
 **Features:**
-- Scaled terminal preview (2x) with padding
+- Scaled terminal preview (2x) with padding for live sessions only
 - Status indicator
 - Session name, port, shell
+- Dormant card state uses gray/desaturated styling and omits preview content
 - Click to open session view
 
 **Layout:**
@@ -462,6 +469,7 @@ interactive?: boolean  // Enable input and resize
 - `interactive=false`: Static preview
 - Auto-connect WebSocket if not connected
 - Debounced resize (100ms)
+- Dormant sessions must not auto-connect or assume a listening session port exists
 
 **Styling:**
 - Container has 8px padding (p-2)
@@ -600,6 +608,7 @@ pnpm test:e2e
 | Idle cleanup | 10+ sessions trigger idle disconnection after 10 minutes |
 | Resize sync | Terminal resize triggers daemon resize API call |
 | Hash routing | Uses hash history for static file compatibility |
+| Dormant UI contract | Dormant sessions render as sleeping/gray and do not imply live preview availability |
 
 ---
 

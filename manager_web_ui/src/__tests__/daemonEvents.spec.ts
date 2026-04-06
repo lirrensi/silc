@@ -59,7 +59,7 @@ describe('daemonEvents', () => {
       new MessageEvent('message', {
         data: encodeWsFrame({
           type: 'session/snapshot',
-          sessions: [{ port: 20000, name: 'alpha', title: '', session_id: 'sess-1', shell: 'bash', cwd: null, title_updated_at: null, idle_seconds: 0, alive: true, runtime_state: 'running' }],
+          sessions: [{ port: 20000, name: 'alpha', title: '', session_id: 'sess-1', shell: 'bash', cwd: null, title_updated_at: null, idle_seconds: 0, alive: true, runtime_state: 'running', dormant: false }],
         }).buffer,
       }),
     )
@@ -77,8 +77,8 @@ describe('daemonEvents', () => {
         data: encodeWsFrame({
           type: 'session/reordered',
           sessions: [
-            { port: 20002, name: 'beta', title: '', session_id: 'sess-2', shell: 'bash', cwd: null, title_updated_at: null, idle_seconds: 0, alive: true, runtime_state: 'running' },
-            { port: 20001, name: 'alpha', title: '', session_id: 'sess-1', shell: 'bash', cwd: null, title_updated_at: null, idle_seconds: 0, alive: true, runtime_state: 'running' },
+            { port: 20002, name: 'beta', title: '', session_id: 'sess-2', shell: 'bash', cwd: null, title_updated_at: null, idle_seconds: 0, alive: true, runtime_state: 'running', dormant: false },
+            { port: 20001, name: 'alpha', title: '', session_id: 'sess-1', shell: 'bash', cwd: null, title_updated_at: null, idle_seconds: 0, alive: true, runtime_state: 'running', dormant: false },
           ],
         }).buffer,
       }),
@@ -97,7 +97,7 @@ describe('daemonEvents', () => {
       new MessageEvent('message', {
         data: encodeWsFrame({
           type: 'session/updated',
-          session: { port: 20001, name: 'beta', title: 'shell', session_id: 'sess-2', shell: 'bash', cwd: '/tmp', title_updated_at: null, idle_seconds: 0, alive: true, runtime_state: 'running' },
+          session: { port: 20001, name: 'beta', title: 'shell', session_id: 'sess-2', shell: 'bash', cwd: '/tmp', title_updated_at: null, idle_seconds: 0, alive: true, runtime_state: 'running', dormant: false },
         }).buffer,
       }),
     )
@@ -114,7 +114,7 @@ describe('daemonEvents', () => {
       new MessageEvent('message', {
         data: encodeWsFrame({
           type: 'session/removed',
-          session: { port: 20002, name: 'gamma', title: '', session_id: 'sess-3', shell: 'bash', cwd: null, title_updated_at: null, idle_seconds: 0, alive: false, runtime_state: 'stopped' },
+          session: { port: 20002, name: 'gamma', title: '', session_id: 'sess-3', shell: 'bash', cwd: null, title_updated_at: null, idle_seconds: 0, alive: false, runtime_state: 'stopped', dormant: false },
         }).buffer,
       }),
     )

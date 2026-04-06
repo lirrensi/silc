@@ -12,6 +12,7 @@ let session: {
   terminal: { element: HTMLElement }
   ws: WebSocket | null
   isRestoring: boolean
+  status: 'active' | 'dormant' | 'idle'
 }
 
 const mocks = vi.hoisted(() => {
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => {
   const manager = {
     getSession: vi.fn(() => session),
     attach: vi.fn(),
+    applyMeasuredFit: vi.fn().mockResolvedValue(undefined),
     detach: vi.fn(),
     setFocused: vi.fn(),
     scheduleFit: vi.fn(),
@@ -48,6 +50,7 @@ describe('TerminalViewport', () => {
     mocks.connectWebSocket.mockClear()
     mocks.manager.getSession.mockClear()
     mocks.manager.attach.mockClear()
+    mocks.manager.applyMeasuredFit.mockClear()
     mocks.manager.detach.mockClear()
     mocks.manager.setFocused.mockClear()
     mocks.manager.scheduleFit.mockClear()
@@ -58,6 +61,7 @@ describe('TerminalViewport', () => {
       },
       ws: { readyState: 1 } as WebSocket,
       isRestoring: true,
+      status: 'active',
     })
     mocks.connectWebSocket.mockReturnValue(session.ws as WebSocket)
     vi.stubGlobal(
@@ -85,13 +89,20 @@ describe('TerminalViewport', () => {
     })
 
     await wrapper.vm.$nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
 
     expect(mocks.manager.attach).toHaveBeenCalledWith(
       20000,
       expect.any(HTMLElement),
       { propagate: true },
     )
-    expect(mocks.connectWebSocket).toHaveBeenCalledWith(20000)
+    expect(mocks.manager.applyMeasuredFit).toHaveBeenCalledWith(20000, {
+      propagate: true,
+      force: true,
+      reason: 'takeover-preconnect',
+    })
+    expect(mocks.connectWebSocket).toHaveBeenCalledWith(20000, { force: true })
     expect(mocks.requestHistoryFrame).toHaveBeenCalledWith(session.ws)
     expect(wrapper.find('.terminal-host').classes()).toContain('terminal-host--restoring')
 
@@ -99,5 +110,26 @@ describe('TerminalViewport', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('.terminal-host').classes()).not.toContain('terminal-host--restoring')
+  })
+
+  it('shows a dormant placeholder without connecting websockets', async () => {
+    session.status = 'dormant'
+    session.isRestoring = false
+
+    const wrapper = mount(TerminalViewport, {
+      global: {
+        plugins: [createPinia()],
+      },
+      props: {
+        port: 20000,
+        interactive: true,
+      },
+    })
+
+    await wrapper.vm.$nextTick()
+
+    expect(mocks.manager.attach).not.toHaveBeenCalled()
+    expect(mocks.connectWebSocket).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Sleeping session')
   })
 })

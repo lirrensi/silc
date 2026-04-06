@@ -233,6 +233,34 @@ class TestDesktopLauncher:
         }
 
 
+class TestResurrectCommand:
+    def test_resurrect_reads_restored_and_failed_payload_keys(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        class _Resp:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "restored": [{"name": "sleepy", "port": 20001}],
+                    "failed": [{"name": "broken", "reason": "oops"}],
+                }
+
+        monkeypatch.setattr(main_mod.requests, "post", lambda *args, **kwargs: _Resp())
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["resurrect"])
+
+        assert result.exit_code == 0
+        assert "Materialized/restored 1 session" in result.output
+        assert "sleepy → port 20001" in result.output
+        assert "Failed to restore 1 session" in result.output
+        assert "broken: oops" in result.output
+
+
 # ============================================================================
 # Integration tests (daemon needed)
 # ============================================================================

@@ -1,15 +1,17 @@
 """Tests for session persistence and resurrect feature."""
 
-import json
-from pathlib import Path
-
 import pytest
 
 from silc.utils.persistence import (
     SESSIONS_FILE,
     append_session_to_json,
+    garbage_collect_session_snapshots,
+    list_session_snapshot_ids,
+    read_session_snapshot,
     read_sessions_json,
     remove_session_from_json,
+    remove_session_snapshot,
+    write_session_snapshot,
     write_sessions_json,
 )
 
@@ -95,3 +97,23 @@ def test_remove_session_from_json(tmp_path):
     result = read_sessions_json()
     assert len(result) == 1
     assert result[0]["port"] == 20001
+
+
+def test_session_snapshot_helpers(tmp_path, monkeypatch):
+    from silc.utils import persistence
+
+    monkeypatch.setattr(persistence, "SNAPSHOTS_DIR", tmp_path / "snapshots")
+    persistence.SNAPSHOTS_DIR = tmp_path / "snapshots"
+
+    write_session_snapshot("abc123", b"hello world")
+    assert read_session_snapshot("abc123") == b"hello world"
+    assert list_session_snapshot_ids() == {"abc123"}
+
+    write_session_snapshot("orphan", b"bye")
+    removed = garbage_collect_session_snapshots({"abc123"})
+
+    assert removed == ["orphan"]
+    assert read_session_snapshot("orphan") == b""
+
+    remove_session_snapshot("abc123")
+    assert read_session_snapshot("abc123") == b""

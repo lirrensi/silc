@@ -37,6 +37,9 @@ class _FakeSession:
     def get_status(self) -> dict:
         return {"alive": True, "idle_seconds": 0}
 
+    def get_snapshot_bytes(self) -> bytes:
+        return f"snapshot:{self.session_id}".encode("utf-8")
+
     async def close(self) -> None:
         self.closed = True
 
@@ -156,9 +159,13 @@ async def test_restart_preserves_record_and_bumps_generation(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["close", "kill"])
 async def test_close_and_kill_remove_records(
-    monkeypatch: pytest.MonkeyPatch, action: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path, action: str
 ) -> None:
+    from silc.utils import persistence
+
     daemon = SilcDaemon(enable_hard_exit=False)
+    monkeypatch.setattr(persistence, "SNAPSHOTS_DIR", tmp_path / "snapshots")
+    persistence.SNAPSHOTS_DIR = tmp_path / "snapshots"
     entry = daemon.registry.add(
         20004 if action == "close" else 20005,
         f"{action}-session",
@@ -171,6 +178,7 @@ async def test_close_and_kill_remove_records(
     daemon.runtime_by_port[entry.port] = runtime
     daemon.sessions[entry.port] = runtime.session
     daemon.servers[entry.port] = runtime.server
+    persistence.write_session_snapshot(entry.session_id, b"snapshot-bytes")
 
     port = entry.port
     resp = await _post_json(daemon, f"/sessions/{port}/{action}", {})
@@ -178,6 +186,46 @@ async def test_close_and_kill_remove_records(
     assert resp.status_code == 200
     assert daemon.registry.get(port) is None
     assert port not in daemon.runtime_by_port
+    assert persistence.read_session_snapshot(entry.session_id) == b""
+
+
+@pytest.mark.asyncio
+async def test_restart_writes_snapshot_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from silc.utils import persistence
+
+    monkeypatch.setattr(persistence, "SNAPSHOTS_DIR", tmp_path / "snapshots")
+    persistence.SNAPSHOTS_DIR = tmp_path / "snapshots"
+
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry = daemon.registry.add(20008, "restart-me", "sess-restart", "bash")
+    runtime = create_runtime_for_record(entry)
+    runtime.session = _FakeSession(entry.port, entry.name, session_id=entry.session_id)
+    runtime.server = SimpleNamespace(should_exit=False)
+    daemon.runtime_by_port[entry.port] = runtime
+    daemon.sessions[entry.port] = runtime.session
+    daemon.servers[entry.port] = runtime.server
+
+    async def fake_realize(entry, runtime, preserve_session_id=None):
+        runtime.session = _FakeSession(
+            entry.port, entry.name, session_id=preserve_session_id or entry.session_id
+        )
+        runtime.server = SimpleNamespace(should_exit=False)
+        runtime.state = SessionState.RUNNING
+        daemon.runtime_by_port[entry.port] = runtime
+        daemon.sessions[entry.port] = runtime.session
+        daemon.servers[entry.port] = runtime.server
+        return runtime
+
+    monkeypatch.setattr(daemon, "_realize_runtime", fake_realize)
+
+    resp = await _post_json(daemon, f"/sessions/{entry.port}/restart", {})
+
+    assert resp.status_code == 200
+    assert (
+        persistence.read_session_snapshot(entry.session_id) == b"snapshot:sess-restart"
+    )
 
 
 @pytest.mark.asyncio
@@ -200,6 +248,25 @@ async def test_stale_generation_callback_is_ignored() -> None:
 
     assert daemon.runtime_by_port[20006].generation == 7
     assert daemon.runtime_by_port[20006].state == SessionState.STARTING
+
+
+@pytest.mark.asyncio
+async def test_lazy_reconcile_does_not_materialize_missing_runtime() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    daemon.registry.add(20009, "lazy-session", "sess-lazy", "bash")
+
+    called = {"realize": False}
+
+    async def fake_realize(*args, **kwargs):
+        called["realize"] = True
+        raise AssertionError("should not materialize missing runtime on lazy reconcile")
+
+    daemon._realize_runtime = fake_realize  # type: ignore[method-assign]
+
+    await daemon._reconcile_desired_sessions_once(materialize_missing=False)
+
+    assert called["realize"] is False
+    assert 20009 not in daemon.runtime_by_port
 
 
 @pytest.mark.asyncio

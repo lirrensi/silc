@@ -39,7 +39,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 
 - **Token-based Auth** — Secure remote access
 - **Named Sessions** — Docker-style names for easy session identification (e.g., `happy-fox-42`)
-- **Session Management** — Multiple concurrent sessions
+- **Session Management** — Multiple concurrent sessions with dormant restore mode
 - **Output Buffering** — Configurable output history
 - **Command History** — Track executed commands
 - **Logging** — Comprehensive session and daemon logs
@@ -89,8 +89,8 @@ Unlike tmux, screen, or SSH, SILC provides:
 ```
 
 **Components:**
-- **Daemon** — Background process that owns session records and reconciles live runtime (port 19999)
-- **Session** — Persistent session identity whose live PTY can be restarted without losing the session record (ports 20000+)
+- **Daemon** — Background process that owns session records, frozen snapshots, and on-demand runtime materialization (port 19999)
+- **Session** — Persistent session identity that may be running or dormant; dormant sessions have no live PTY until materialized (ports 20000+ when live)
 - **CLI** — Command-line interface for human interaction
 - **API** — FastAPI server for programmatic access
 - **TUI/Web UI** — Interactive interfaces
@@ -166,10 +166,10 @@ silc 20000 run "htop"         # Use TUI apps remotely
 | `silc os-integration install` | Install OS context-menu integration |
 | `silc os-integration uninstall` | Remove OS context-menu integration |
 | `silc list` | List all active sessions |
-| `silc shutdown` | Gracefully shut down daemon, close live sessions, and preserve records |
+| `silc shutdown` | Gracefully shut down daemon, save frozen snapshots, close live sessions, and preserve dormant records |
 | `silc killall` | Force kill daemon and all sessions |
-| `silc resurrect` | Restore sessions from previous state |
-| `silc restart` | Shutdown and immediately start (resurrects sessions) |
+| `silc resurrect` | Materialize all persisted sessions from previous state |
+| `silc restart` | Save frozen snapshots, shut down, and immediately start with dormant sessions loaded |
 | `silc restart-server` | Restart daemon HTTP server (sessions survive) |
 | `silc logs [--tail N]` | Show daemon logs |
 
@@ -740,7 +740,7 @@ Configuration is loaded from (highest to lowest priority):
 | **Auto-create session** | `silc start` creates first session automatically |
 | **No expiration** | Sessions stay alive indefinitely until explicitly closed |
 | **Shell exit detection** | Sessions automatically close when shell process exits |
-| **Graceful shutdown** | `silc shutdown` closes live sessions cleanly while preserving records |
+| **Graceful shutdown** | `silc shutdown` saves frozen snapshots, closes live sessions cleanly, and preserves dormant records |
 | **Force kill** | `silc killall` terminates everything immediately |
 
 ### Command Execution
@@ -833,7 +833,7 @@ Configuration is loaded from (highest to lowest priority):
 SILC deliberately does NOT:
 
 - **Provide encryption by default** — TLS is opt-in, requires certificates
-- **Persist shell state** — Only session metadata (name, port, cwd, shell) survives restart; running commands and output are lost
+- **Persist live process state** — Running commands and interactive programs do not survive restart
 - **Support multi-user authentication** — Single token per session
 - **Replace tmux/screen** — Different use case (API access vs. multiplexing)
 - **Provide shell isolation** — Commands run in user's shell environment
@@ -863,10 +863,10 @@ SILC deliberately does NOT:
 | `silc <port-or-name> kill` | Force kill session |
 | `silc <port-or-name> restart` | Restart session (same port/name/cwd/shell) |
 | `silc list` | List all sessions |
-| `silc shutdown` | Stop daemon (records preserved) |
+| `silc shutdown` | Stop daemon, save frozen snapshots, preserve dormant records |
 | `silc killall` | Force kill everything |
-| `silc resurrect` | Restore sessions from previous state |
-| `silc restart` | Shutdown and immediately start |
+| `silc resurrect` | Materialize all persisted sessions from previous state |
+| `silc restart` | Save frozen snapshots, shutdown, and immediately start with dormant sessions |
 
 | Port | Purpose |
 |------|---------|
@@ -877,5 +877,17 @@ SILC deliberately does NOT:
 |------|---------|
 | `~/.silc/silc.toml` | Configuration file |
 | `~/.silc/sessions.json` | Persistent session registry |
+| `~/.silc/snapshots/session_<session_id>.bin` | Frozen raw terminal snapshot for graceful restore |
 | `~/.silc/logs/daemon.log` | Daemon log |
 | `~/.silc/logs/session_<port>.log` | Session log |
+
+---
+
+## Restore Model
+
+- **Daemon boot is lazy** — On startup, SILC restores persisted session identities as dormant records instead of materializing every shell immediately.
+- **Explicit resurrect is eager** — `silc resurrect` materializes all persisted sessions.
+- **Graceful stop captures memory** — `silc shutdown`, `silc restart`, and other graceful daemon exits save one frozen raw terminal snapshot per live session.
+- **Snapshots follow session identity** — Frozen snapshot files are keyed by stable `session_id`, not by port or mutable name.
+- **Dormant means sleeping** — Dormant sessions remain visible in the manager UI but have no live PTY, no live per-session port, and no preview expectation until explicitly activated.
+- **Frozen session memory** — SILC may preserve the latest raw terminal snapshot from a graceful stop, but that snapshot is not a live process continuation.

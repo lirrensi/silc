@@ -1103,7 +1103,9 @@ def resurrect() -> None:
         failed = result.get("failed", [])
 
         if restored:
-            click.echo(f"✨ Restored {len(restored)} session(s):")
+            click.echo(
+                f"✨ Materialized/restored {len(restored)} session(s) and brought them live:"
+            )
             for s in restored:
                 if s.get("status") == "relocated":
                     click.echo(

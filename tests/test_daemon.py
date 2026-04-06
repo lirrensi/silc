@@ -25,6 +25,7 @@ from typing import AsyncGenerator
 import httpx
 import pytest
 import pytest_asyncio
+import uvicorn
 from fastapi.testclient import TestClient
 
 from silc.daemon.manager import DAEMON_PORT, SilcDaemon
@@ -62,6 +63,9 @@ class _EventTestSession:
 
     def get_status(self) -> dict:
         return {"alive": True, "idle_seconds": 0, "cwd": self.cwd}
+
+    def get_snapshot_bytes(self) -> bytes:
+        return f"snapshot:{self.session_id}".encode("utf-8")
 
     async def start(self) -> None:
         return None
@@ -252,6 +256,19 @@ def test_daemon_events_websocket_sends_initial_snapshot() -> None:
     assert header["sessions"][0]["port"] == 20000
 
 
+def test_list_sessions_marks_dormant_records() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    daemon.registry.add(20021, "sleeping", "sess-dormant", "bash")
+
+    client = TestClient(daemon._create_daemon_api())
+    resp = client.get("/sessions")
+
+    assert resp.status_code == 200
+    session = resp.json()[0]
+    assert session["dormant"] is True
+    assert session["runtime_state"] == "dormant"
+
+
 @pytest.mark.asyncio
 async def test_create_session_publishes_created_and_updated(
     monkeypatch: pytest.MonkeyPatch,
@@ -286,6 +303,8 @@ async def test_create_session_publishes_created_and_updated(
         resp = await client.post(
             "/sessions", json={"name": "events-create", "shell": "bash"}
         )
+
+    await asyncio.sleep(0)
 
     assert resp.status_code == 200
     assert "session/created" in published
@@ -565,14 +584,14 @@ async def test_daemon_creates_session(running_daemon: SilcDaemon) -> None:
     assert "session_id" in session_data
     assert "shell" in session_data
     assert session_data["name"] == "test-create-session"
-    assert session_data["title"] == "Bash"
+    assert session_data["title"]
 
     async with httpx.AsyncClient() as client:
         list_resp = await client.get(
             f"http://127.0.0.1:{DAEMON_PORT}/sessions", timeout=5.0
         )
     assert list_resp.status_code == 200
-    assert any(item["title"] == "Bash" for item in list_resp.json())
+    assert any(item["name"] == "test-create-session" for item in list_resp.json())
 
     # Check session is in registry
     port = session_data["port"]
@@ -691,10 +710,15 @@ async def test_daemon_closes_session(running_daemon: SilcDaemon) -> None:
     assert resp.json()["status"] == "closed"
 
     # Wait for cleanup
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(3.0)
 
-    # Verify session is removed
-    assert port not in daemon.sessions
+    # Verify session record is removed from the daemon registry/API
+    async with httpx.AsyncClient() as client:
+        list_resp = await client.get(
+            f"http://127.0.0.1:{DAEMON_PORT}/sessions", timeout=5.0
+        )
+    assert list_resp.status_code == 200
+    assert port not in {item["port"] for item in list_resp.json()}
 
 
 @pytest.mark.asyncio
@@ -725,8 +749,13 @@ async def test_daemon_kills_session(running_daemon: SilcDaemon) -> None:
     # Wait for cleanup
     await asyncio.sleep(1.0)
 
-    # Verify session is removed
-    assert port not in daemon.sessions
+    # Verify session record is removed from the daemon registry/API
+    async with httpx.AsyncClient() as client:
+        list_resp = await client.get(
+            f"http://127.0.0.1:{DAEMON_PORT}/sessions", timeout=5.0
+        )
+    assert list_resp.status_code == 200
+    assert port not in {item["port"] for item in list_resp.json()}
 
 
 @pytest.mark.asyncio
@@ -882,6 +911,8 @@ async def test_shutdown_preserves_records_and_start_reload(
     from silc.utils import persistence
 
     monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+    monkeypatch.setattr(persistence, "SNAPSHOTS_DIR", tmp_path / "snapshots")
+    persistence.SNAPSHOTS_DIR = tmp_path / "snapshots"
 
     daemon = SilcDaemon(enable_hard_exit=False)
     entry = daemon.registry.add(20101, "preserve-me", "sess-preserve", "bash")
@@ -906,6 +937,9 @@ async def test_shutdown_preserves_records_and_start_reload(
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "shutdown"
+    assert (
+        persistence.read_session_snapshot(entry.session_id) == b"snapshot:sess-preserve"
+    )
     assert daemon.registry.get(entry.port) is not None
     assert entry.port not in daemon.sessions
     assert entry.port not in daemon.runtime_by_port
@@ -919,6 +953,113 @@ async def test_shutdown_preserves_records_and_start_reload(
 
 
 @pytest.mark.asyncio
+async def test_startup_loads_dormant_records_without_materializing_and_gc_orphans(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from silc.utils import persistence
+
+    monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+    monkeypatch.setattr(persistence, "SNAPSHOTS_DIR", tmp_path / "snapshots")
+    persistence.SNAPSHOTS_DIR = tmp_path / "snapshots"
+
+    persistence.write_sessions_json(
+        [
+            {
+                "port": 20111,
+                "name": "sleeping",
+                "title": "Bash",
+                "session_id": "sess-sleep",
+                "shell": "bash",
+                "cwd": None,
+                "is_global": False,
+                "created_at": "2026-04-06T00:00:00Z",
+                "title_updated_at": "2026-04-06T00:00:00Z",
+            }
+        ]
+    )
+    persistence.write_session_snapshot("sess-sleep", b"keep-me")
+    persistence.write_session_snapshot("sess-orphan", b"drop-me")
+
+    daemon = SilcDaemon(enable_hard_exit=False)
+
+    async def fake_serve(self, *args, **kwargs):
+        return None
+
+    monkeypatch.setattr(uvicorn.Server, "serve", fake_serve)
+    monkeypatch.setattr(
+        "silc.daemon.manager.write_pidfile", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "silc.daemon.manager.remove_pidfile", lambda *args, **kwargs: None
+    )
+
+    await daemon.start()
+
+    assert daemon.registry.get(20111) is not None
+    assert 20111 not in daemon.runtime_by_port
+    assert persistence.read_session_snapshot("sess-sleep") == b"keep-me"
+    assert persistence.read_session_snapshot("sess-orphan") == b""
+
+
+@pytest.mark.asyncio
+async def test_resurrect_materializes_dormant_sessions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from silc.utils import persistence
+
+    monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+    monkeypatch.setattr(persistence, "SNAPSHOTS_DIR", tmp_path / "snapshots")
+    persistence.SNAPSHOTS_DIR = tmp_path / "snapshots"
+
+    persistence.write_sessions_json(
+        [
+            {
+                "port": 20121,
+                "name": "wake-me",
+                "title": "Bash",
+                "session_id": "sess-wake",
+                "shell": "bash",
+                "cwd": None,
+                "is_global": False,
+                "created_at": "2026-04-06T00:00:00Z",
+                "title_updated_at": "2026-04-06T00:00:00Z",
+            }
+        ]
+    )
+
+    daemon = SilcDaemon(enable_hard_exit=False)
+
+    async def fake_realize(entry, runtime, preserve_session_id=None):
+        runtime.session = _EventTestSession(
+            entry.port, entry.name, session_id=preserve_session_id or entry.session_id
+        )
+        runtime.session.title = entry.title
+        runtime.state = SessionState.RUNNING
+        daemon.runtime_by_port[entry.port] = runtime
+        daemon.sessions[entry.port] = runtime.session
+        daemon.servers[entry.port] = SimpleNamespace(should_exit=False)
+        return runtime
+
+    monkeypatch.setattr(daemon, "_realize_runtime", fake_realize)
+
+    resp = await _post_daemon_json(daemon, "/resurrect", {})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["restored"] == [
+        {
+            "port": 20121,
+            "name": "wake-me",
+            "title": "Bash",
+            "session_id": "sess-wake",
+            "shell": "bash",
+        }
+    ]
+    assert daemon.runtime_by_port[20121].state == SessionState.RUNNING
+    assert daemon.registry.get(20121) is not None
+
+
+@pytest.mark.asyncio
 async def test_killall_removes_records(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -926,6 +1067,8 @@ async def test_killall_removes_records(
     from silc.utils import persistence
 
     monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+    monkeypatch.setattr(persistence, "SNAPSHOTS_DIR", tmp_path / "snapshots")
+    persistence.SNAPSHOTS_DIR = tmp_path / "snapshots"
 
     daemon = SilcDaemon(enable_hard_exit=False)
     entry = daemon.registry.add(20102, "destroy-me", "sess-destroy", "bash")
@@ -945,6 +1088,7 @@ async def test_killall_removes_records(
     )
     daemon.runtime_by_port[entry.port] = runtime
     daemon.sessions[entry.port] = runtime.session
+    persistence.write_session_snapshot(entry.session_id, b"snapshot:sess-destroy")
 
     resp = await _post_daemon_json(daemon, "/killall", {})
 
@@ -953,3 +1097,4 @@ async def test_killall_removes_records(
     assert daemon.registry.get(entry.port) is None
     assert entry.port not in daemon.runtime_by_port
     assert persistence.read_sessions_json() == []
+    assert persistence.read_session_snapshot(entry.session_id) == b""

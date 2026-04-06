@@ -31,6 +31,7 @@ export interface DaemonSession {
   idle_seconds: number
   alive: boolean
   runtime_state: string | null
+  dormant: boolean
 }
 
 export interface CreateSessionResponse {

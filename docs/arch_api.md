@@ -12,7 +12,9 @@ The API server exposes session operations via:
 - **WebSocket** — Real-time terminal output streaming
 - **Static files** — Web UI serving
 
-Each session gets its own FastAPI app instance bound to its port.
+Each running session gets its own FastAPI app instance bound to its port.
+
+Dormant sessions do not have a per-session FastAPI app until they are materialized.
 
 The daemon management API in `silc/daemon/manager.py` is a separate FastAPI app
 that owns daemon-wide failure containment for manager operations such as session
@@ -174,6 +176,8 @@ Returns raw terminal output (no rendering).
 Returns a cached raw PTY byte snapshot for preview rendering.
 
 **Response:** `application/octet-stream`
+
+This endpoint exists only for live sessions because dormant sessions have no session-port server. Any future frozen dormant preview must be served by the daemon, not by a dormant session port.
 
 ### `GET /logs`
 
@@ -350,6 +354,7 @@ The JSON header uses `type`, not `event`.
 - PTY bytes are forwarded without UTF-8 decoding on output/history paths.
 - Malformed or unsupported frames close the socket with a protocol error.
 - The websocket is for interactive sessions; frozen previews use `GET /snapshot`.
+- Dormant sessions do not expose websocket or snapshot endpoints because they do not have a live per-session server.
 
 ---
 

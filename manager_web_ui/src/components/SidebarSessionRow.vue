@@ -46,9 +46,12 @@ const statusClass = computed(() => {
     case 'idle': return 'bg-[#6b7280]'
     case 'dead': return 'bg-[#f87171]'
     case 'restarting': return 'bg-[#0ea5e9]'
+    case 'dormant': return 'bg-[#94a3b8] ring-1 ring-[#cbd5e1]/30'
     default: return 'bg-[#6b7280]'
   }
 })
+
+const statusLabel = computed(() => (props.session.status === 'dormant' ? 'sleeping' : props.session.status))
 
 const shellLabel = computed(() => props.session.shell || 'shell')
 const sessionName = computed(() => props.session.name || 'unnamed')
@@ -80,6 +83,7 @@ function handleRename(): void {
     :aria-label="compact ? sessionTooltip : undefined"
     :class="[
       'transition-colors',
+      props.session.status === 'dormant' ? 'opacity-70 grayscale' : '',
       compact ? 'mx-auto flex h-9 w-9 items-center justify-center border border-[var(--color-border)] text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-primary)]' : '',
       isDragging ? 'opacity-60' : '',
       isDropTarget ? 'ring-1 ring-[var(--color-accent)]/40' : '',
@@ -112,6 +116,7 @@ function handleRename(): void {
           <span class="shrink-0 uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{{ shellLabel }}</span>
         </div>
         <div class="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">{{ sessionTitle }}</div>
+        <div class="mt-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">{{ statusLabel }}</div>
       </div>
       <div class="mt-1 h-2.5 w-2.5 justify-self-end" :class="statusClass"></div>
     </div>
@@ -129,7 +134,7 @@ function handleRename(): void {
         @click.stop
       >
         <span class="h-2.5 w-2.5 rounded-full" :class="statusClass"></span>
-        <span class="absolute -bottom-2 text-[9px] leading-none text-[var(--color-text-muted)]">{{ sessionName.slice(0, 1).toUpperCase() }}</span>
+        <span class="absolute -bottom-2 text-[9px] leading-none text-[var(--color-text-muted)]">{{ props.session.status === 'dormant' ? '☾' : sessionName.slice(0, 1).toUpperCase() }}</span>
       </button>
     </div>
   </div>

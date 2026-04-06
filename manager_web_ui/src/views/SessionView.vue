@@ -33,10 +33,11 @@ const activeOperation = ref<{
 
 const port = computed(() => parseInt(route.params.port as string, 10))
 const session = computed(() => manager.getSession(port.value))
+const isDormant = computed(() => session.value?.status === 'dormant')
 const isActive = computed(() => session.value?.status === 'active' && session.value?.ws?.readyState === WebSocket.OPEN)
 const isRestarting = computed(() => session.value?.status === 'restarting')
-const hasConnectionProblem = computed(() => !isActive.value)
-const controlsDisabled = computed(() => !isActive.value || activeOperation.value !== null)
+const hasConnectionProblem = computed(() => !isActive.value && !isDormant.value)
+const controlsDisabled = computed(() => !isActive.value || activeOperation.value !== null || isDormant.value)
 const disconnectReason = computed(() => session.value?.disconnectReason ?? '')
 const sessionBootstrapped = ref(false)
 
@@ -73,6 +74,11 @@ async function bootstrapSession(): Promise<void> {
 
   const isVisible = await ensureCurrentSessionVisible()
   if (!isVisible) {
+    return
+  }
+
+  if (session.value?.status === 'dormant') {
+    sessionBootstrapped.value = true
     return
   }
 
@@ -140,6 +146,10 @@ async function runOperation(
   }
 }
 const connectionLabel = computed(() => {
+  if (isDormant.value) {
+    return 'This session is sleeping on disk until resurrected.'
+  }
+
   if (disconnectReason.value === 'Session claimed by another client') {
     return 'This shell is now controlled from another client.'
   }
@@ -181,6 +191,10 @@ watch(port, () => {
 })
 
 async function refreshTerminal(): Promise<void> {
+  if (isDormant.value) {
+    return
+  }
+
   const s = manager.getSession(port.value)
   if (s?.ws && s.ws.readyState === WebSocket.OPEN) {
     await manager.flushWrites(port.value)
@@ -304,6 +318,10 @@ async function handleKill(): Promise<void> {
 }
 
 async function handleRestart(): Promise<void> {
+  if (isDormant.value) {
+    return
+  }
+
   if (isRestarting.value) {
     return
   }
@@ -356,6 +374,10 @@ async function waitForSession(portToFind: number, timeoutMs: number = 5000): Pro
 
 async function reconnectSession(targetPort: number, waitForFreshSession: boolean = false): Promise<void> {
   if (reconnecting.value) {
+    return
+  }
+
+  if (isDormant.value) {
     return
   }
 
@@ -510,6 +532,7 @@ function sendArrowKey(sequence: string): void {
           @click="handleRestart"
           class="bar-button bar-button-tight bar-button-info text-xs"
           :title="tip('Restart the session', 'Recreates the shell and reconnects the browser to it.')"
+          :disabled="isDormant"
         >
           Restart
         </button>
@@ -531,6 +554,15 @@ function sendArrowKey(sequence: string): void {
     </div>
 
     <div class="relative min-h-0 flex-1 overflow-hidden">
+      <div
+        v-if="isDormant"
+        class="absolute inset-0 z-10 flex items-center justify-center bg-[color-mix(in_srgb,var(--color-bg-primary)_74%,transparent)] px-4"
+      >
+        <div class="glass-panel flex w-full max-w-md flex-col gap-3 p-4 text-center">
+          <p class="text-sm font-medium text-[var(--color-text-primary)]">Sleeping session</p>
+          <p class="text-xs text-[var(--color-text-secondary)]">This session remains dormant until you run resurrect.</p>
+        </div>
+      </div>
       <div :class="hasConnectionProblem ? 'pointer-events-none h-full grayscale opacity-55' : 'h-full'">
         <TerminalViewport :port="port" :interactive="true" />
       </div>

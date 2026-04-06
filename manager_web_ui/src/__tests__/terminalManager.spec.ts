@@ -104,8 +104,9 @@ describe('terminalManager', () => {
   it('disposes on detach and recreates a fresh terminal on reattach', async () => {
     const manager = useTerminalManager()
     const session = manager.createSession(20000, 'session-1', 'bash')
-    const originalTerminal = session.terminal
     const container = document.createElement('div')
+
+    expect(session.terminal).toBeNull()
 
     Object.defineProperty(container, 'getBoundingClientRect', {
       value: () => ({
@@ -126,12 +127,15 @@ describe('terminalManager', () => {
 
     await Promise.resolve()
 
-    expect(originalTerminal.open).toHaveBeenCalledWith(container)
+    const originalTerminal = session.terminal
+    expect(originalTerminal).not.toBeNull()
+
+    expect(originalTerminal?.open).toHaveBeenCalledWith(container)
 
     manager.detach(20000)
 
     expect(session.terminalDisposed).toBe(true)
-    expect(originalTerminal.dispose).toHaveBeenCalled()
+    expect(originalTerminal?.dispose).toHaveBeenCalled()
 
     await manager.attach(20000, container, { propagate: true })
 
@@ -142,7 +146,7 @@ describe('terminalManager', () => {
     expect(session.terminal).not.toBe(originalTerminal)
     expect(session.terminalDisposed).toBe(false)
     expect(session.isRestoring).toBe(true)
-    expect(session.terminal.write).not.toHaveBeenCalled()
+    expect(session.terminal?.write).not.toHaveBeenCalled()
 
     container.remove()
   })
@@ -173,9 +177,34 @@ describe('terminalManager', () => {
     await manager.attach(20000, container, { propagate: false })
     await manager.applyMeasuredFit(20000, { propagate: true, force: true, reason: 'test-force-resize' })
 
-    expect(session.terminal.resize).toHaveBeenCalledWith(80, 24)
+    expect(session.terminal?.resize).toHaveBeenCalledWith(80, 24)
     expect(mocks.resizeSession).toHaveBeenCalledWith(20000, 24, 80)
 
     container.remove()
+  })
+
+  it('does not allocate a terminal while reconciling a dormant daemon session', () => {
+    const manager = useTerminalManager()
+
+    manager.reconcileSessions([
+      {
+        port: 20001,
+        name: 'sleepy',
+        title: 'Bash',
+        session_id: 'session-2',
+        shell: 'bash',
+        cwd: '/work/sleepy',
+        title_updated_at: null,
+        idle_seconds: 0,
+        alive: false,
+        runtime_state: 'dormant',
+        dormant: true,
+      },
+    ])
+
+    const session = manager.getSession(20001)
+    expect(session?.status).toBe('dormant')
+    expect(session?.terminal).toBeNull()
+    expect(mocks.MockTerminal.instances).toHaveLength(0)
   })
 })

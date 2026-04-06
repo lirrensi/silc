@@ -8,9 +8,10 @@ The daemon is the root process for SILC. It:
 
 - serves the manager UI and daemon API on port `19999`
 - owns the desired-state registry for sessions
-- reconciles live runtime against persisted records
+- loads persisted records as dormant desired sessions on boot
+- materializes live runtime against persisted records on explicit activation
 - recreates PTYs and per-session servers when they fail
-- performs bounded cleanup, shutdown, and resurrection
+- performs bounded cleanup, graceful snapshot save, shutdown, and resurrection
 
 There is no separate supervisor process; supervision is an internal daemon concern.
 
@@ -19,6 +20,7 @@ There is no separate supervisor process; supervision is an internal daemon conce
 Owns:
 
 - desired session records and persistence
+- frozen snapshot file ownership and lookup
 - runtime generation/backoff state
 - PTY + session server realization
 - manager UI serving and daemon API routes
@@ -74,6 +76,8 @@ class SessionEntry:
     title_updated_at: datetime
 ```
 
+Persisted snapshot bytes are stored separately from `SessionEntry` metadata and are keyed by `session_id` so dormant sessions can remain disk-backed until requested even if ports change.
+
 ### `SessionRuntime`
 
 Live state that may be recreated repeatedly while the record survives.
@@ -119,13 +123,16 @@ _daemon_api_app: FastAPI
 ## Persistence
 
 - Desired records are persisted to `sessions.json` in the SILC data dir.
+- Frozen raw PTY snapshots from graceful shutdown/restart are persisted as separate per-session files keyed by `session_id`.
 - Writes are atomic when possible.
 - Removing a record is what actually ends a session.
 - Shutdown does **not** delete records.
+- Daemon startup restoration garbage-collects orphaned snapshot files whose `session_id` is not present in the desired registry.
 
 ## Runtime Model
 
 - A record is truth; runtime is disposable.
+- Dormant records have no live PTY, no live server, and no in-memory snapshot payload until explicitly activated.
 - PTY failure triggers PTY recreation.
 - Server failure triggers server recreation.
 - Generation counters prevent stale cleanup from killing newer runtime.
@@ -135,9 +142,11 @@ _daemon_api_app: FastAPI
 
 1. Write/read pidfile and abort if another daemon is alive.
 2. Load persisted desired records.
-3. Reconcile loaded records into live runtime.
-4. Start the daemon API server.
-5. Start periodic log rotation, shutdown watcher, restart watcher, and reconcile loop.
+3. Garbage-collect orphaned snapshot files that do not match any restored `session_id`.
+4. Keep loaded records dormant by default.
+5. Record whether frozen snapshot files exist, without loading snapshot bytes into memory.
+6. Start the daemon API server.
+7. Start periodic log rotation, shutdown watcher, restart watcher, and reconcile loop.
 
 If `share_mode` is enabled, the daemon and session servers bind to LAN-reachable addresses and the manager URL reflects the host IP.
 
@@ -161,7 +170,7 @@ API routes:
 - `POST /sessions/{port}/kill` — force kill and remove record
 - `POST /sessions/{port}/restart` — replace PTY/server, preserve record
 - `POST /restart-server` — restart daemon HTTP server only
-- `POST /resurrect` — reload `sessions.json` and reconcile
+- `POST /resurrect` — reload `sessions.json` and materialize desired sessions
 - `POST /shutdown` — graceful shutdown, preserve records
 - `POST /killall` — force kill everything
 - `GET /events` — manager websocket event stream
@@ -176,6 +185,7 @@ API routes:
 
 ## Reconciliation Rules
 
+- Dormant records stay unloaded until explicit activation or all-session resurrection.
 - Missing PTY -> recreate session.
 - Missing server -> recreate server.
 - Stopping/stopped runtimes are skipped.
@@ -201,7 +211,7 @@ Important event types:
 
 ## Shutdown and Hard Exit
 
-- `shutdown` is bounded and preserves records.
+- `shutdown` is bounded, saves frozen raw snapshots for live sessions during graceful stop, and preserves records as dormant entries.
 - `killall` is bounded and removes live runtime aggressively.
 - On some platforms a delayed hard exit is scheduled so a wedged process does not keep the daemon alive.
 - Signal handlers set the shutdown event and let the normal shutdown path finish.

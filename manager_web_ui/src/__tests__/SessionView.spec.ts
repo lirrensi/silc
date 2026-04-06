@@ -64,7 +64,7 @@ describe('SessionView', () => {
     session.status = 'idle'
     session.ws = null
     mockListSessions.mockResolvedValue([
-      {
+        {
         port: 1234,
         name: 'demo',
         title: 'demo',
@@ -75,6 +75,7 @@ describe('SessionView', () => {
         idle_seconds: 0,
         alive: true,
         runtime_state: 'running',
+        dormant: false,
       },
     ])
     mockSendInputFrame.mockClear()
@@ -213,5 +214,47 @@ describe('SessionView', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(mockRemoveSession).toHaveBeenCalledWith(1234)
+  })
+
+  it('shows a dormant placeholder without trying to reconnect', async () => {
+    session.status = 'dormant'
+    mockListSessions.mockResolvedValueOnce([
+      {
+        port: 1234,
+        name: 'demo',
+        title: 'demo',
+        session_id: 'sess-1',
+        shell: 'bash',
+        cwd: null,
+        title_updated_at: null,
+        idle_seconds: 0,
+        alive: false,
+        runtime_state: 'dormant',
+        dormant: true,
+      },
+    ])
+
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/:port(\\d+)', component: SessionView, props: true }],
+    })
+
+    await router.push('/1234')
+    await router.isReady()
+
+    const wrapper = mount(SessionView, {
+      global: {
+        plugins: [createPinia(), router],
+        stubs: {
+          TerminalViewport: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(wrapper.text()).toContain('Sleeping session')
+    expect(wrapper.text()).not.toContain('Reconnect')
   })
 })

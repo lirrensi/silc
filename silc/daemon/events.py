@@ -54,6 +54,9 @@ def serialize_session_snapshot(
     if status is not None and status.get("cwd") is not None:
         cwd = status["cwd"]
 
+    runtime_state = runtime.state.value if runtime else "dormant"
+    dormant = runtime is None or runtime_state == "dormant"
+
     return {
         "port": entry.port,
         "name": entry.name,
@@ -64,7 +67,8 @@ def serialize_session_snapshot(
         "title_updated_at": _iso8601_z(entry.title_updated_at),
         "idle_seconds": status.get("idle_seconds") if status is not None else None,
         "alive": bool(status and status.get("alive")),
-        "runtime_state": runtime.state.value if runtime else None,
+        "runtime_state": runtime_state,
+        "dormant": dormant,
     }
 
 

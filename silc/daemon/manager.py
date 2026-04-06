@@ -54,9 +54,12 @@ from silc.utils.persistence import (
     DAEMON_LOG,
     LOGS_DIR,
     cleanup_session_log,
+    garbage_collect_session_snapshots,
     get_session_log_path,
+    remove_session_snapshot,
     rotate_daemon_log,
     write_daemon_log,
+    write_session_snapshot,
     write_sessions_json,
 )
 from silc.utils.ports import bind_port
@@ -654,11 +657,15 @@ class SilcDaemon:
                     runtime.state = SessionState.STOPPING
                     session = runtime.session
                     if session:
+                        await self._persist_runtime_snapshot(port)
                         with contextlib.suppress(Exception):
                             await asyncio.wait_for(session.force_kill(), timeout=1.0)
 
                     await self._cleanup_runtime_generation(
-                        port, runtime.generation, remove_record=False
+                        port,
+                        runtime.generation,
+                        remove_record=False,
+                        ignore_generation_mismatch=True,
                     )
 
                     runtime = self._get_or_create_runtime(entry)
@@ -711,6 +718,7 @@ class SilcDaemon:
                     )
                     break
                 try:
+                    await self._persist_runtime_snapshot(port)
                     await asyncio.wait_for(
                         self._ensure_cleanup_task(port, remove_record=False),
                         timeout=remaining,
@@ -929,9 +937,12 @@ class SilcDaemon:
         generation: int,
         *,
         remove_record: bool = False,
+        ignore_generation_mismatch: bool = False,
     ) -> None:
         runtime = self.runtime_by_port.get(port)
-        if not runtime or runtime.generation != generation:
+        if not runtime:
+            return
+        if runtime.generation != generation and not ignore_generation_mismatch:
             return
 
         server = runtime.server or self.servers.pop(port, None)
@@ -941,7 +952,9 @@ class SilcDaemon:
         task = self._session_tasks.pop(port, None) or runtime.server_task
         if task:
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+            with contextlib.suppress(
+                asyncio.CancelledError, asyncio.TimeoutError, OSError
+            ):
                 await asyncio.wait_for(task, timeout=2.0)
             if not task.cancelled():
                 with contextlib.suppress(Exception):
@@ -967,7 +980,9 @@ class SilcDaemon:
             entry = self.registry.get(port)
             if entry is not None:
                 snapshot = serialize_session_snapshot(entry, runtime)
-            self.registry.remove(port)
+            removed_entry = self.registry.remove(port)
+            if removed_entry is not None:
+                remove_session_snapshot(removed_entry.session_id)
             self._persist_desired_sessions()
             cleanup_session_log(port)
             runtime.state = SessionState.STOPPED
@@ -986,7 +1001,9 @@ class SilcDaemon:
 
         snapshot = self._serialize_session_entry(entry)
 
-        self.registry.remove(port)
+        removed_entry = self.registry.remove(port)
+        if removed_entry is not None:
+            remove_session_snapshot(removed_entry.session_id)
         self._persist_desired_sessions()
         self._reconcile_event.set()
 
@@ -994,7 +1011,10 @@ class SilcDaemon:
         if runtime:
             runtime.state = SessionState.STOPPING
             await self._cleanup_runtime_generation(
-                port, runtime.generation, remove_record=False
+                port,
+                runtime.generation,
+                remove_record=False,
+                ignore_generation_mismatch=True,
             )
             self.runtime_by_port.pop(port, None)
         cleanup_session_log(port)
@@ -1027,7 +1047,6 @@ class SilcDaemon:
                     is_global=is_global,
                 )
                 result["loaded"].append({"port": port, "name": name})
-                self._get_or_create_runtime(entry, title=title)
             except Exception as exc:
                 result["failed"].append(
                     {"port": record.get("port"), "reason": _exception_detail(exc)}
@@ -1115,6 +1134,31 @@ class SilcDaemon:
                 raise
             raise
 
+    async def _persist_runtime_snapshot(self, port: int) -> None:
+        entry = self._get_desired_entry_for_port(port)
+        runtime = self.runtime_by_port.get(port)
+        session = runtime.session if runtime else None
+        if not entry or session is None:
+            return
+
+        try:
+            snapshot_bytes = session.get_snapshot_bytes()
+        except Exception as exc:
+            write_daemon_log(
+                f"Failed to capture session snapshot: port={port}, session_id={entry.session_id}, error={exc}"
+            )
+            return
+
+        try:
+            write_session_snapshot(entry.session_id, snapshot_bytes)
+            write_daemon_log(
+                f"Saved session snapshot: port={port}, session_id={entry.session_id}, bytes={len(snapshot_bytes)}"
+            )
+        except Exception as exc:
+            write_daemon_log(
+                f"Failed to write session snapshot: port={port}, session_id={entry.session_id}, error={exc}"
+            )
+
     async def _ensure_runtime_server(
         self, entry, runtime: SessionRuntime
     ) -> SessionRuntime:
@@ -1150,8 +1194,14 @@ class SilcDaemon:
         self._schedule_reconcile()
         return runtime
 
-    async def _reconcile_record(self, entry) -> None:
-        runtime = self._get_or_create_runtime(entry)
+    async def _reconcile_record(
+        self, entry, *, materialize_missing: bool = False
+    ) -> None:
+        runtime = self.runtime_by_port.get(entry.port)
+        if runtime is None:
+            if not materialize_missing:
+                return
+            runtime = self._get_or_create_runtime(entry)
         if runtime.state in {SessionState.STOPPING, SessionState.STOPPED}:
             return
         if runtime.state == SessionState.BACKOFF and not runtime_backoff_expired(
@@ -1177,10 +1227,14 @@ class SilcDaemon:
 
         runtime.state = SessionState.RUNNING
 
-    async def _reconcile_desired_sessions_once(self) -> None:
+    async def _reconcile_desired_sessions_once(
+        self, *, materialize_missing: bool = False
+    ) -> None:
         for entry in self.registry.list_all():
             try:
-                await self._reconcile_record(entry)
+                await self._reconcile_record(
+                    entry, materialize_missing=materialize_missing
+                )
             except Exception as exc:
                 runtime = self._get_or_create_runtime(entry)
                 runtime = record_runtime_failure(
@@ -1196,7 +1250,7 @@ class SilcDaemon:
         while self._running and not self._shutdown_event.is_set():
             self._reconcile_event.clear()
             try:
-                await self._reconcile_desired_sessions_once()
+                await self._reconcile_desired_sessions_once(materialize_missing=False)
             except asyncio.CancelledError:
                 return
             except Exception as exc:
@@ -1351,7 +1405,9 @@ class SilcDaemon:
 
         if remove_record:
             try:
-                self.registry.remove(port)
+                removed_entry = self.registry.remove(port)
+                if removed_entry is not None:
+                    remove_session_snapshot(removed_entry.session_id)
             except Exception as cleanup_exc:
                 _log_daemon_exception(f"{operation}_rollback_registry", cleanup_exc)
             try:
@@ -1565,7 +1621,10 @@ class SilcDaemon:
         if runtime:
             runtime.state = SessionState.STOPPING
             await self._cleanup_runtime_generation(
-                port, runtime.generation, remove_record=remove_record and bool(entry)
+                port,
+                runtime.generation,
+                remove_record=remove_record and bool(entry),
+                ignore_generation_mismatch=True,
             )
             self.runtime_by_port.pop(port, None)
             cleanup_session_log(port)
@@ -1576,7 +1635,9 @@ class SilcDaemon:
                 cleanup_session_log(port)
                 return
             snapshot = serialize_session_snapshot(entry, runtime)
-            self.registry.remove(port)
+            removed_entry = self.registry.remove(port)
+            if removed_entry is not None:
+                remove_session_snapshot(removed_entry.session_id)
             self._persist_desired_sessions()
             cleanup_session_log(port)
             write_daemon_log(f"Session closed: port={port}")
@@ -1586,16 +1647,51 @@ class SilcDaemon:
         """Load desired records from sessions.json and reconcile them."""
 
         result = await self._load_persisted_desired_records()
-        if not result["loaded"]:
+        restored: list[dict[str, object]] = []
+        if not self.registry.list_all():
             write_daemon_log("No sessions to resurrect")
+            result["restored"] = restored
             return result
 
         write_daemon_log(
-            f"Loaded {len(result['loaded'])} desired sessions; reconciling..."
+            f"Loaded {len(self.registry.list_all())} desired sessions; materializing..."
         )
-        self._schedule_reconcile()
-        await self._reconcile_desired_sessions_once()
-        result["reconciled"] = [entry["port"] for entry in result["loaded"]]
+
+        for entry in self.registry.list_all():
+            runtime_before = self.runtime_by_port.get(entry.port)
+            was_live = runtime_before is not None and self._runtime_is_alive(
+                runtime_before
+            )
+            try:
+                await self._reconcile_record(entry, materialize_missing=True)
+            except Exception as exc:
+                result["failed"].append(
+                    {
+                        "port": entry.port,
+                        "name": entry.name,
+                        "reason": _exception_detail(exc),
+                    }
+                )
+                _log_daemon_exception("resurrect_sessions_materialize", exc)
+                continue
+
+            runtime_after = self.runtime_by_port.get(entry.port)
+            if not was_live and runtime_after and self._runtime_is_alive(runtime_after):
+                restored.append(
+                    {
+                        "port": entry.port,
+                        "name": entry.name,
+                        "title": (
+                            runtime_after.session.title
+                            if runtime_after.session
+                            else entry.title
+                        ),
+                        "session_id": entry.session_id,
+                        "shell": entry.shell_type,
+                    }
+                )
+
+        result["restored"] = restored
         return result
 
     async def _garbage_collect(self) -> None:
@@ -1639,6 +1735,7 @@ class SilcDaemon:
                     )
                     break
                 try:
+                    await self._persist_runtime_snapshot(port)
                     await asyncio.wait_for(
                         self._ensure_cleanup_task(port, remove_record=False),
                         timeout=remaining,
@@ -1769,7 +1866,12 @@ class SilcDaemon:
 
         try:
             await self._load_persisted_desired_records()
-            await self._reconcile_desired_sessions_once()
+            valid_session_ids = {entry.session_id for entry in self.registry.list_all()}
+            removed_snapshot_ids = garbage_collect_session_snapshots(valid_session_ids)
+            if removed_snapshot_ids:
+                write_daemon_log(
+                    f"Removed {len(removed_snapshot_ids)} orphan session snapshot(s): {', '.join(sorted(removed_snapshot_ids))}"
+                )
         except Exception as exc:
             _log_daemon_exception("start_resurrect_sessions", exc)
 

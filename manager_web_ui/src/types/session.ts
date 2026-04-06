@@ -8,7 +8,7 @@ import type { WebglAddon } from '@xterm/addon-webgl'
 // EXPORTS: Session - terminal session state shape; DaemonSession - daemon-reported session metadata; SessionStatus - lifecycle status union.
 // DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
-export type SessionStatus = 'active' | 'connecting' | 'idle' | 'dead' | 'restarting'
+export type SessionStatus = 'active' | 'connecting' | 'idle' | 'dead' | 'restarting' | 'dormant'
 
 export interface Session {
   port: number
@@ -18,8 +18,8 @@ export interface Session {
   shell: string
   cwd: string | null
   titleUpdatedAt: string | null
-  terminal: Terminal
-  fitAddon: FitAddon
+  terminal: Terminal | null
+  fitAddon: FitAddon | null
   ws: WebSocket | null
   onDataDisposable: IDisposable | null
   status: SessionStatus
@@ -55,4 +55,5 @@ export interface DaemonSession {
   idle_seconds: number
   alive: boolean
   runtime_state: string | null
+  dormant: boolean
 }

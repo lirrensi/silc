@@ -91,7 +91,7 @@ describe('Sidebar', () => {
         title: 'Shell',
         shell: 'bash',
         cwd: '/work/beta',
-        status: 'idle',
+        status: 'dormant',
       },
       {
         port: 1103,
@@ -229,6 +229,26 @@ describe('Sidebar', () => {
     expect(document.body.textContent).toContain('Default')
   })
 
+  it('renders dormant sessions with a sleeping label', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(Sidebar, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('sleeping')
+  })
+
   it('prompts to rename a session on double click', async () => {
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('delta')
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
@@ -317,6 +337,7 @@ describe('Sidebar', () => {
           idle_seconds: 0,
           alive: true,
           runtime_state: 'running',
+          dormant: false,
         },
         {
           port: 1101,
@@ -329,6 +350,7 @@ describe('Sidebar', () => {
           idle_seconds: 0,
           alive: true,
           runtime_state: 'running',
+          dormant: false,
         },
         {
           port: 1102,
@@ -341,6 +363,7 @@ describe('Sidebar', () => {
           idle_seconds: 0,
           alive: true,
           runtime_state: 'running',
+          dormant: false,
         },
       ],
     })
