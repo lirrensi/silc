@@ -142,7 +142,6 @@ Dormant sessions do not expose a live websocket endpoint.
 - `silc restart` performs a graceful shutdown, captures frozen raw snapshots, and starts again with dormant sessions loaded.
 - Session-targeted commands accept either a port or a resolved name.
 - `silc tui` launches the native TUI binary and asks before taking over an active interactive client.
-- `silc open` is deprecated and launches the legacy Textual TUI.
 
 ## Snapshot Persistence
 

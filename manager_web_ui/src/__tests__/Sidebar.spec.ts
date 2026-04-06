@@ -265,6 +265,7 @@ describe('Sidebar', () => {
       idle_seconds: 0,
       alive: true,
       runtime_state: 'running',
+      dormant: false,
     })
 
     const router = createRouter({

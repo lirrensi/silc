@@ -8,7 +8,8 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import type { Session } from '@/types/session'
 
 export async function enableRenderer(session: Session): Promise<void> {
-  if (!session.terminal.element || session.webglAddon) {
+  const terminal = session.terminal
+  if (!terminal || !terminal.element || session.webglAddon) {
     return
   }
 
@@ -22,7 +23,7 @@ export async function enableRenderer(session: Session): Promise<void> {
       session.rendererFailed = true
       refreshRendererAfterSwap(session)
     })
-    session.terminal.loadAddon(addon)
+    terminal.loadAddon(addon)
     session.webglAddon = addon
     session.rendererType = 'webgl'
     session.rendererFailed = false
@@ -46,8 +47,13 @@ export function disposeRenderer(session: Session): void {
 
 export function refreshRendererAfterSwap(session: Session): void {
   try {
-    if (session.terminal.rows > 0) {
-      session.terminal.refresh(0, session.terminal.rows - 1)
+    const terminal = session.terminal
+    if (!terminal) {
+      return
+    }
+
+    if (terminal.rows > 0) {
+      terminal.refresh(0, terminal.rows - 1)
     }
   } catch {
     // Ignore terminal repaint failures during teardown/recovery.
@@ -56,7 +62,7 @@ export function refreshRendererAfterSwap(session: Session): void {
 
 export function forceTerminalRedraw(session: Session): void {
   try {
-    session.terminal.clearTextureAtlas?.()
+    session.terminal?.clearTextureAtlas?.()
   } catch {
     // Ignore terminal repaint failures during teardown/recovery.
   }

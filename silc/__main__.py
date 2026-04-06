@@ -52,7 +52,6 @@ from silc.stream.cli_commands import (
     stream_status,
     stream_stop,
 )
-from silc.tui.app import launch_tui
 from silc.tui.installer import InstallerError, ensure_native_tui_binary
 from silc.utils.ports import find_available_port
 
@@ -1293,20 +1292,6 @@ def logs(tail: int) -> None:
             click.echo(line)
     except Exception as e:
         click.echo(f"Error reading daemon log: {e}", err=True)
-
-
-@cli.port_subcommands.command()
-@click.pass_context
-def open(ctx: click.Context) -> None:
-    """Open the Textual TUI."""
-    port = ctx.parent.params["port"] if ctx.parent else 0
-    click.echo(
-        "⚠️  'open' is deprecated and can hang for 2 seconds, but it will still "
-        "launch the textual TUI.",
-        err=True,
-    )
-    time.sleep(2)
-    asyncio.run(launch_tui(port))
 
 
 def _tui_dist_dir() -> Path | None:

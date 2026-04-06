@@ -1,1 +1,1 @@
-"""Textual TUI entrypoints for SILC."""
+"""Native TUI helpers for SILC."""

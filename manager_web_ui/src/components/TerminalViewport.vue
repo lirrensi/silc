@@ -9,6 +9,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { listSessions } from '@/lib/daemonApi'
 import { connectWebSocket, requestHistoryFrame } from '@/lib/websocket'
 import { useTerminalManager } from '@/stores/terminalManager'
+import type { SessionStatus } from '@/types/session'
 
 const props = defineProps<{
   port: number
@@ -50,12 +51,15 @@ function handleWindowResize(): void {
 watch(
   () => session.value?.status,
   (next, previous) => {
-    if (next === 'dormant') {
+    const nextStatus = next as SessionStatus | undefined
+    const previousStatus = previous as SessionStatus | undefined
+
+    if (nextStatus === 'dormant') {
       manager.detach(props.port)
       return
     }
 
-    if (previous === 'dormant' && next && next !== 'dormant') {
+    if (String(previousStatus) === 'dormant' && nextStatus) {
       void attachAndConnect()
       scheduleViewportFit(true, 'resurrected')
     }

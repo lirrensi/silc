@@ -1,13 +1,12 @@
 # Architecture: TUI
 
-This document describes `silc/tui/` and the CLI TUI launch flow.
+This document describes the native TUI and the CLI TUI launch flow.
 
 ## Overview
 
-SILC currently has two TUI paths:
+SILC currently has one TUI path:
 
 1. **Native TUI** — the primary path launched by `silc tui`
-2. **Textual TUI** — legacy Python app launched by deprecated `silc open`
 
 ## Scope Boundary
 
@@ -15,7 +14,7 @@ Owns:
 
 - native TUI binary discovery and installation
 - TUI launch wiring from the CLI
-- legacy Textual app implementation
+
 
 Does not own:
 
@@ -68,22 +67,7 @@ Client messages include `input` and `load_history`.
 
 The Rust client ignores websocket ping/pong frames, reports close code/reason on disconnect, and strips terminal device-attribute query noise from rendered output.
 
-## Legacy Textual TUI
-
-`silc open` is deprecated and still launches `launch_tui(port)` from `silc/tui/app.py`.
-
-That app is a legacy websocket client that:
-
-- connects to the per-session websocket
-- renders output in Textual
-- sends keyboard input from the terminal
-
-It still speaks the older JSON websocket shape in `app.py`, so treat it as stale compatibility code relative to the current binary frame protocol.
-
-It remains in the repo for backwards compatibility, but it is not the primary TUI path.
-
 ## Error Handling
 
 - If the native binary cannot be resolved, the CLI prints a manual-install hint.
 - If `pywebview` is missing, desktop launch fails with a clear error.
-- Legacy websocket disconnects simply end the app.

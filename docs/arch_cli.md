@@ -131,7 +131,6 @@ Notes:
 - `web` opens the per-session web UI.
 - `start-enter` starts a session and immediately launches the native TUI.
 - `tui` launches the native TUI binary.
-- `open` is deprecated and launches the legacy Textual TUI.
 
 ## Stream Commands
 

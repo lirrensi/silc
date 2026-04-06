@@ -88,7 +88,6 @@ Connections from localhost (127.0.0.1, ::1) don't require API token validation. 
 
 An interactive terminal interface for viewing and interacting with sessions. SILC provides:
 - Native TUI (Rust binary, recommended)
-- Textual TUI (Python, deprecated)
 
 See [arch_tui.md](arch_tui.md).
 

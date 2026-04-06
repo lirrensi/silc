@@ -196,7 +196,7 @@ async function refreshTerminal(): Promise<void> {
   }
 
   const s = manager.getSession(port.value)
-  if (s?.ws && s.ws.readyState === WebSocket.OPEN) {
+  if (s?.ws && s.ws.readyState === WebSocket.OPEN && s.terminal) {
     await manager.flushWrites(port.value)
     s.terminal.reset()
     const historyLoaded = manager.waitForHistoryRefresh(port.value)
@@ -395,7 +395,7 @@ async function reconnectSession(targetPort: number, waitForFreshSession: boolean
     }
 
     const nextSession = manager.getSession(targetPort)
-    if (!nextSession) {
+    if (!nextSession || !nextSession.terminal) {
       throw new Error(`Session :${targetPort} is not available`)
     }
 

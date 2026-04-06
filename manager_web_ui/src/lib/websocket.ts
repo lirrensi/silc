@@ -24,8 +24,13 @@ function bindTerminalInput(port: number, ws: WebSocket): void {
     return
   }
 
+  const terminal = session.terminal
+  if (!terminal) {
+    return
+  }
+
   session.onDataDisposable?.dispose()
-  session.onDataDisposable = session.terminal.onData((data: string) => {
+  session.onDataDisposable = terminal.onData((data: string) => {
     if (SUPPRESSED_TERMINAL_INPUTS.has(data)) {
       return
     }
@@ -99,8 +104,13 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
           return
         }
 
+        const terminal = session.terminal
+        if (!terminal) {
+          return
+        }
+
         await manager.flushWrites(port)
-        session.terminal.reset()
+        terminal.reset()
         if (payload.byteLength > 0) {
           manager.safeWrite(port, payload)
         }
