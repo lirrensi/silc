@@ -5,7 +5,7 @@ from pathlib import Path
 def main():
     # Add parent directory to path for development (when not frozen)
     if getattr(sys, "frozen", False):
-        # Running in PyInstaller bundle - paths are already set correctly
+        # Running in a compiled bundle - paths are already set correctly
         pass
     else:
         # Development mode - add parent directory to import silc

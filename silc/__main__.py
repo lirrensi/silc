@@ -8,21 +8,21 @@ import pathlib
 import sys
 import sysconfig
 
-script_path = pathlib.Path(sys.argv[0]).resolve()
-repo_root = script_path.parent.parent
+BASE_DIR = pathlib.Path(__file__).resolve().parents[1]
 venv_name = "venv-win" if sys.platform.startswith("win") else "venv"
-venv_path = repo_root / venv_name
-if sys.platform.startswith("win"):
-    site_pkg = venv_path / "Lib" / "site-packages"
-else:
-    site_pkg = (
-        venv_path
-        / "lib"
-        / f"python{sys.version_info.major}.{sys.version_info.minor}"
-        / "site-packages"
-    )
-if site_pkg.is_dir():
-    sys.path.insert(0, str(site_pkg))
+if "__compiled__" not in globals():
+    venv_path = BASE_DIR / venv_name
+    if sys.platform.startswith("win"):
+        site_pkg = venv_path / "Lib" / "site-packages"
+    else:
+        site_pkg = (
+            venv_path
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+        )
+    if site_pkg.is_dir():
+        sys.path.insert(0, str(site_pkg))
 
 
 import asyncio
@@ -1308,13 +1308,12 @@ def open(ctx: click.Context) -> None:
 
 
 def _tui_dist_dir() -> Path | None:
-    potential_roots = (
-        Path(__file__).resolve().parents[1],
-        repo_root,
-        Path.cwd(),
+    potential_dirs = (
+        BASE_DIR / "bin",
+        BASE_DIR / "tui_client" / "dist",
+        Path.cwd() / "tui_client" / "dist",
     )
-    for root in potential_roots:
-        dist_dir = root / "tui_client" / "dist"
+    for dist_dir in potential_dirs:
         if dist_dir.is_dir():
             return dist_dir
     return None
@@ -1322,14 +1321,18 @@ def _tui_dist_dir() -> Path | None:
 
 def _native_tui_binary_path(dist_dir: Path) -> Path | None:
     if sys.platform.startswith("win"):
-        filename = "silc-tui-windows.exe"
+        filenames = ("silc-tui.exe", "silc-tui-windows.exe")
     elif sys.platform.startswith("linux"):
-        filename = "silc-tui-linux"
+        filenames = ("silc-tui", "silc-tui-linux")
     elif sys.platform == "darwin":
-        filename = "silc-tui-macos"
+        filenames = ("silc-tui", "silc-tui-macos")
     else:
         return None
-    return dist_dir / filename
+    for filename in filenames:
+        candidate = dist_dir / filename
+        if candidate.exists():
+            return candidate
+    return dist_dir / filenames[0]
 
 
 def _find_native_tui_binary() -> Path | None:

@@ -27,7 +27,7 @@ Does not own:
 
 ### Installer
 
-`ensure_native_tui_binary()` resolves a cached binary or downloads one from GitHub Releases.
+`ensure_native_tui_binary()` resolves the bundled binary first, then falls back to a cached or downloaded release binary when SILC is running from source.
 
 Environment variables:
 
@@ -42,7 +42,7 @@ Default repo/API:
 - `lirrensi/silc`
 - `https://api.github.com/repos/lirrensi/silc/releases/latest`
 
-The installer selects an asset by platform + architecture keywords, extracts or copies `silc-tui` / `silc-tui.exe`, and marks it executable.
+The fallback installer selects an asset by platform + architecture keywords, extracts or copies `silc-tui` / `silc-tui.exe`, and marks it executable.
 
 ### Launching
 

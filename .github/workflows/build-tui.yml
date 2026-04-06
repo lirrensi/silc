@@ -1,259 +1,113 @@
-name: Build and Release TUI Binary
+name: Release SILC (Nuitka)
 
 on:
   push:
     branches:
-      - main
     tags:
-      - 'v*.*.*'
+      - 'v*'
   workflow_dispatch:
-    inputs:
-      draft_release:
-        description: 'Create as a draft release'
-        required: false
-        default: false
-        type: boolean
-      prerelease:
-        description: 'Mark as pre-release'
-        required: false
-        default: false
-        type: boolean
+
+permissions:
+  contents: write
 
 jobs:
-  detect_version:
-    name: Detect release version
-    runs-on: ubuntu-latest
-    outputs:
-      release_needed: ${{ steps.version.outputs.release_needed }}
-      release_tag: ${{ steps.version.outputs.release_tag }}
-      current_version: ${{ steps.version.outputs.current_version }}
-      previous_version: ${{ steps.version.outputs.previous_version }}
-      released_from_tag: ${{ steps.version.outputs.released_from_tag }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Determine release version
-        id: version
-        env:
-          GITHUB_REF: ${{ github.ref }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_EVENT_BEFORE: ${{ github.event.before || '' }}
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import os
-          import subprocess
-          import tomllib
-
-          cargo_path = Path("tui_client/Cargo.toml")
-          if not cargo_path.exists():
-              raise SystemExit("tui_client/Cargo.toml not found")
-
-          def parse_version(text):
-              data = tomllib.loads(text)
-              return data["package"]["version"]
-
-          current_version = parse_version(cargo_path.read_text())
-          previous_version = ""
-          release_needed = False
-          released_from_tag = False
-
-          ref = os.environ.get("GITHUB_REF", "")
-          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-          before = os.environ.get("GITHUB_EVENT_BEFORE", "").strip()
-
-          if ref.startswith("refs/tags/"):
-              released_from_tag = True
-              release_tag = ref.removeprefix("refs/tags/")
-              release_needed = True
-          else:
-              release_tag = f"v{current_version}"
-              if event_name == "workflow_dispatch":
-                  release_needed = True
-              elif before and not before.startswith("0000000000000000000000000000000000000000"):
-                  git_result = subprocess.run(
-                      ["git", "show", f"{before}:tui_client/Cargo.toml"],
-                      capture_output=True,
-                      text=True,
-                  )
-                  if git_result.returncode == 0:
-                      try:
-                          previous_version = parse_version(git_result.stdout)
-                          release_needed = previous_version != current_version
-                      except Exception:
-                          release_needed = True
-                  else:
-                      release_needed = True
-              else:
-                  release_needed = True
-
-          github_output = os.environ["GITHUB_OUTPUT"]
-          with open(github_output, "a") as fh:
-              print(f"current_version={current_version}", file=fh)
-              print(f"previous_version={previous_version}", file=fh)
-              print(f"release_tag={release_tag}", file=fh)
-              print(f"release_needed={str(release_needed).lower()}", file=fh)
-              print(f"released_from_tag={str(released_from_tag).lower()}", file=fh)
-
-          print(f"Current version: {current_version}")
-          if previous_version:
-              print(f"Previous version: {previous_version}")
-          print(f"Release tag: {release_tag}")
-          print(f"Release needed: {release_needed}, from tag: {released_from_tag}")
-          PY
-
   build:
-    name: Build TUI Binary on ${{ matrix.os }}
-    needs: detect_version
-    if: needs.detect_version.outputs.release_needed == 'true'
+    name: Build packaged binary on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux (x86_64 - most common)
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: silc-tui-linux-x86_64
-            asset_name: silc-tui-linux-x86_64.tar.gz
-
-          # macOS (Intel - most common)
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: silc-tui-darwin-x86_64
-            asset_name: silc-tui-darwin-x86_64.tar.gz
-
-          # macOS (Apple Silicon - native build)
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact_name: silc-tui-darwin-aarch64
-            asset_name: silc-tui-darwin-aarch64.tar.gz
-
-          # Windows
+            rust_target: x86_64-unknown-linux-gnu
+            artifact_name: silc-linux-x86_64
+          - os: macos-13
+            rust_target: x86_64-apple-darwin
+            artifact_name: silc-darwin-x86_64
+          - os: macos-14
+            rust_target: aarch64-apple-darwin
+            artifact_name: silc-darwin-aarch64
           - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: silc-tui-windows-x86_64.exe
-            asset_name: silc-tui-windows-x86_64.zip
+            rust_target: x86_64-pc-windows-msvc
+            artifact_name: silc-windows-x86_64.exe
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install project package
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install nuitka zstandard
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: manager_web_ui/pnpm-lock.yaml
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install web dependencies
+        shell: bash
+        working-directory: manager_web_ui
+        run: pnpm install --frozen-lockfile
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rust_target }}
 
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tui_client/target
+          key: ${{ runner.os }}-cargo-${{ matrix.rust_target }}-${{ hashFiles('tui_client/Cargo.lock') }}
 
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build TUI binary
-        run: |
-          cd tui_client
-          cargo build --release --target ${{ matrix.target }}
-
-      - name: Prepare release assets
-        if: matrix.os != 'windows-latest'
-        run: |
-          cd tui_client/target/${{ matrix.target }}/release
-          tar czf ../${{ matrix.artifact_name }}.tar.gz silc-tui
-          chmod +x ../${{ matrix.artifact_name }}.tar.gz
-
-      - name: Prepare release assets (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          cd tui_client\target\${{ matrix.target }}\release
-          powershell Compress-Archive -Path silc-tui.exe -DestinationPath ..\${{ matrix.artifact_name }}.zip
-
-      - name: Stage release artifact for upload
+      - name: Build Nuitka binary
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import shutil
-
-          target_dir = Path("tui_client") / "target" / "${{ matrix.target }}"
-          pattern = "${{ matrix.artifact_name }}.*"
-          matches = sorted(target_dir.glob(pattern))
-          if not matches:
-              raise SystemExit(f"No artifacts found in {target_dir} matching {pattern}")
-
-          artifacts_dir = Path("tui_client") / "artifacts"
-          artifacts_dir.mkdir(parents=True, exist_ok=True)
-
-          for match in matches:
-              destination = artifacts_dir / match.name
-              shutil.copy2(match, destination)
-              print(f"Copied {match} -> {destination}")
-          PY
+          python scripts/build_nuitka.py --target "${{ matrix.rust_target }}" --output-name "${{ matrix.artifact_name }}"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: tui_client/artifacts/${{ matrix.artifact_name }}.*
+          path: dist/${{ matrix.artifact_name }}
           retention-days: 1
 
   release:
-    name: Create GitHub Release
-    needs: [build, detect_version]
+    name: Publish GitHub Release
+    needs: build
     runs-on: ubuntu-latest
-    if: needs.detect_version.outputs.release_needed == 'true'
-
-    permissions:
-      contents: write
+    if: github.event_name == 'push'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create release tag
-        if: needs.detect_version.outputs.released_from_tag == 'false'
-        env:
-          RELEASE_TAG: ${{ needs.detect_version.outputs.release_tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Tag $RELEASE_TAG already exists, skipping"
-          else
-            git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
-            git push origin "$RELEASE_TAG"
-          fi
-
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.detect_version.outputs.release_tag }}
-          name: ${{ needs.detect_version.outputs.release_tag }}
-          files: artifacts/*/*
-          draft: ${{ github.event.inputs.draft_release || false }}
-          prerelease: ${{ github.event.inputs.prerelease || false }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: artifacts/**
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

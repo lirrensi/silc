@@ -381,14 +381,25 @@ pip install -e .
 
 **Note:** PyPI package coming soon. For production use, install from git (recommended uv or pipx).
 
-### Building the full frozen executable
+### Building the packaged executable
 
 ```bash
-python build.py
-python install_to_path.py
+uv run python scripts/build_nuitka.py
 ```
 
-`build.py` builds the frozen app. `install_to_path.py` copies it into a PATH directory.
+The build script compiles the Python CLI into a onefile binary, bundles `static/web`, `static/manager`, `static/scripts`, and stages the Rust TUI binary into `dist/`.
+
+On Windows, Nuitka uses MinGW64 here, so you do not need MSVC Build Tools.
+
+### Installing from a release asset
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install.sh | sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install.ps1 | iex
+```
 
 ### Building the Web UI
 
