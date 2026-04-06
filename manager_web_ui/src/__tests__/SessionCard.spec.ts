@@ -22,7 +22,7 @@ vi.mock('@/stores/terminalManager', () => ({
 }))
 
 describe('SessionCard', () => {
-  it('renders dormant cards with a sleeping label', async () => {
+  it('renders dormant cards without a status label', async () => {
     const router = createRouter({
       history: createWebHashHistory(),
       routes: [{ path: '/', component: { template: '<div />' } }],
@@ -40,7 +40,7 @@ describe('SessionCard', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('sleeping')
+    expect(wrapper.text()).not.toContain('sleeping')
     expect(wrapper.find('.session-card').classes()).toContain('grayscale')
   })
 })

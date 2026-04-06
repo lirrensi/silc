@@ -131,6 +131,7 @@ Notes:
 - `web` opens the per-session web UI.
 - `start-enter` starts a session and immediately launches the native TUI.
 - `tui` launches the native TUI binary.
+- All session-targeted commands first wake dormant sessions synchronously, except `close`, `kill`, and `restart`.
 
 ## Stream Commands
 
@@ -138,6 +139,7 @@ Notes:
 - `stream-file-append` starts append-mode file streaming with deduplication.
 - `stream-stop` stops streaming for the named file.
 - `stream-status` shows active file streams.
+- Stream commands also wake dormant sessions before calling the session API.
 
 The CLI fetches the session token from `/token` when one is needed for stream calls.
 
@@ -146,6 +148,7 @@ The CLI fetches the session token from `/token` when one is needed for stream ca
 - `silc tui` resolves a cached or downloaded native binary.
 - The binary path is platform-specific and may be installed from GitHub releases.
 - Before launch, the CLI checks session `/status` and confirms takeover if another interactive client is already active.
+- `tui` wakes dormant sessions before checking takeover or launching the binary.
 - The launcher passes the session websocket URL directly to the binary.
 
 ## Hidden/Internal Commands

@@ -42,16 +42,14 @@ const { isDropTarget } = useDroppable({
 const statusClass = computed(() => {
   switch (props.session.status) {
     case 'active': return 'bg-[#4ade80]'
-    case 'connecting': return 'bg-[#fbbf24]'
-    case 'idle': return 'bg-[#6b7280]'
+    case 'connecting': return 'bg-[#86efac] ring-1 ring-[#4ade80]/40'
+    case 'idle': return 'bg-[#4ade80]'
     case 'dead': return 'bg-[#f87171]'
-    case 'restarting': return 'bg-[#0ea5e9]'
+    case 'restarting': return 'bg-[#86efac] ring-1 ring-[#4ade80]/40'
     case 'dormant': return 'bg-[#94a3b8] ring-1 ring-[#cbd5e1]/30'
-    default: return 'bg-[#6b7280]'
+    default: return 'bg-[#4ade80]'
   }
 })
-
-const statusLabel = computed(() => (props.session.status === 'dormant' ? 'sleeping' : props.session.status))
 
 const shellLabel = computed(() => props.session.shell || 'shell')
 const sessionName = computed(() => props.session.name || 'unnamed')
@@ -94,18 +92,21 @@ function handleRename(): void {
   >
     <div
       v-if="!compact"
-      class="grid w-full grid-cols-[1.25rem_minmax(0,1fr)_1.25rem] items-start gap-x-2 gap-y-1 border-t border-[var(--color-border)] px-2 py-1.5 text-left"
+      class="grid w-full grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-x-2 gap-y-1 border-t border-[var(--color-border)] px-2 py-1.5 text-left"
     >
-      <button
-        ref="handleRef"
-        type="button"
-        class="mt-1 flex h-5 w-5 items-center justify-center text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)]"
-        title="Drag to reorder"
-        aria-label="Drag to reorder"
-        @click.stop
-      >
-        ⋮⋮
-      </button>
+      <div class="flex flex-col items-center pt-1">
+        <button
+          ref="handleRef"
+          type="button"
+          class="flex h-5 w-5 items-center justify-center text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)]"
+          title="Move session"
+          aria-label="Move session"
+          @click.stop
+        >
+          ⋮⋮
+        </button>
+        <span class="mt-2 h-2.5 w-2.5 shrink-0" :class="statusClass" aria-hidden="true"></span>
+      </div>
       <div class="min-w-0">
         <div class="flex items-baseline justify-between gap-2 text-sm font-medium text-[var(--color-text-primary)]">
           <span class="min-w-0 truncate">{{ sessionName }}</span>
@@ -116,9 +117,7 @@ function handleRename(): void {
           <span class="shrink-0 uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{{ shellLabel }}</span>
         </div>
         <div class="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">{{ sessionTitle }}</div>
-        <div class="mt-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">{{ statusLabel }}</div>
       </div>
-      <div class="mt-1 h-2.5 w-2.5 justify-self-end" :class="statusClass"></div>
     </div>
 
     <div

@@ -29,33 +29,28 @@ function handleClick(): void {
 function statusColor(status: string): string {
   switch (status) {
     case 'active': return 'bg-[#4ade80]'
-    case 'connecting': return 'bg-[#fbbf24]'
-    case 'idle': return 'bg-[#6b7280]'
+    case 'connecting': return 'bg-[#86efac] ring-1 ring-[#4ade80]/40'
+    case 'idle': return 'bg-[#4ade80]'
     case 'dead': return 'bg-[#f87171]'
-    case 'restarting': return 'bg-[#0ea5e9]'
+    case 'restarting': return 'bg-[#86efac] ring-1 ring-[#4ade80]/40'
     case 'dormant': return 'bg-[#94a3b8] ring-1 ring-[#cbd5e1]/30'
-    default: return 'bg-[#6b7280]'
+    default: return 'bg-[#4ade80]'
   }
-}
-
-function statusLabel(status: string): string {
-  return status === 'dormant' ? 'sleeping' : status
 }
 </script>
 
 <template>
   <div @click="handleClick" class="cursor-pointer">
     <div class="glass-panel p-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] md:hidden" :class="session?.status === 'dormant' ? 'opacity-70 grayscale' : ''">
-      <div class="flex items-start gap-2.5">
-        <div class="mt-1 h-2.5 w-2.5" :class="statusColor(session?.status ?? 'idle')"></div>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2">
-            <span class="truncate text-sm font-medium text-[var(--color-text-primary)]">{{ session?.name || 'unnamed' }}</span>
-            <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">{{ statusLabel(session?.status ?? 'idle') }}</span>
+        <div class="flex items-start gap-2.5">
+          <div class="mt-1 h-2.5 w-2.5" :class="statusColor(session?.status ?? 'idle')"></div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="truncate text-sm font-medium text-[var(--color-text-primary)]">{{ session?.name || 'unnamed' }}</span>
+            </div>
+            <p class="mt-1 text-xs font-mono text-[var(--color-text-muted)]">:{{ port }}</p>
+            <p class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">{{ liveTitle() }}</p>
           </div>
-          <p class="mt-1 text-xs font-mono text-[var(--color-text-muted)]">:{{ port }}</p>
-          <p class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">{{ liveTitle() }}</p>
-        </div>
       </div>
     </div>
 
@@ -65,12 +60,11 @@ function statusLabel(status: string): string {
     >
         <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,var(--color-accent-muted),transparent_36%)]"></div>
         <div class="absolute left-0 right-0 top-0 z-10 flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-3 py-2 backdrop-blur-sm">
-          <div class="min-w-0 flex items-center gap-2">
-            <div class="h-2 w-2" :class="statusColor(session?.status ?? 'idle')"></div>
-            <span class="truncate text-sm font-medium tracking-[0.02em] text-[var(--color-text-primary)]">{{ session?.name || 'unnamed' }}</span>
-            <span class="rounded-full border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">{{ statusLabel(session?.status ?? 'idle') }}</span>
-            <span class="font-mono text-xs text-[var(--color-text-muted)]">:{{ port }}</span>
-          </div>
+        <div class="min-w-0 flex items-center gap-2">
+          <div class="h-2 w-2" :class="statusColor(session?.status ?? 'idle')"></div>
+          <span class="truncate text-sm font-medium tracking-[0.02em] text-[var(--color-text-primary)]">{{ session?.name || 'unnamed' }}</span>
+          <span class="font-mono text-xs text-[var(--color-text-muted)]">:{{ port }}</span>
+        </div>
         </div>
         <div class="absolute left-0 right-0 top-[2.5rem] z-10 px-3 text-[11px] text-[var(--color-text-secondary)]">
           <div class="truncate text-[11px] font-medium text-[var(--color-text-muted)]">{{ liveTitle() }}</div>

@@ -54,6 +54,7 @@ from silc.stream.cli_commands import (
 )
 from silc.tui.installer import InstallerError, ensure_native_tui_binary
 from silc.utils.ports import find_available_port
+from silc.utils.session_wake import wake_session_if_dormant
 
 from .utils.shell_detect import detect_shell
 
@@ -240,6 +241,20 @@ def _fetch_session_status(port: int, timeout: float = 2.0) -> dict[str, object] 
         return payload if isinstance(payload, dict) else None
     except (requests.RequestException, ValueError):
         return None
+
+
+def _ensure_warm_session(port: int) -> bool:
+    try:
+        session = wake_session_if_dormant(port)
+    except requests.RequestException:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
+        return False
+
+    if session is None:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
+        return False
+
+    return True
 
 
 def _get_session_entry(port: int) -> dict | None:
@@ -801,6 +816,8 @@ def port(port: int) -> None:
 def out(ctx: click.Context, lines: int) -> None:
     """Fetch the latest output."""
     port = ctx.parent.params["port"] if ctx.parent else 0 if ctx.parent else 0
+    if not _ensure_warm_session(port):
+        return
     try:
         resp = requests.get(
             f"http://127.0.0.1:{port}/out", params={"lines": lines}, timeout=5
@@ -821,6 +838,8 @@ def in_(ctx: click.Context, text: tuple[str, ...]) -> None:
     """Send raw input to the session."""
     port = ctx.parent.params["port"] if ctx.parent else 0 if ctx.parent else 0
     text_str = " ".join(text)
+    if not _ensure_warm_session(port):
+        return
     try:
         resp = requests.post(
             f"http://127.0.0.1:{port}/in",
@@ -845,6 +864,8 @@ def run(ctx: click.Context, command: tuple[str, ...], timeout: int) -> None:
     """Run a command inside the SILC shell."""
     port = ctx.parent.params["port"] if ctx.parent else 0
     cmd = " ".join(command)
+    if not _ensure_warm_session(port):
+        return
     try:
         resp = requests.post(
             f"http://127.0.0.1:{port}/run",
@@ -868,6 +889,8 @@ def run(ctx: click.Context, command: tuple[str, ...], timeout: int) -> None:
 def status(ctx: click.Context) -> None:
     """Show session status."""
     port = ctx.parent.params["port"] if ctx.parent else 0
+    if not _ensure_warm_session(port):
+        return
     try:
         resp = requests.get(f"http://127.0.0.1:{port}/status", timeout=5)
         if resp.status_code == 410:
@@ -893,6 +916,8 @@ def status(ctx: click.Context) -> None:
 def clear(ctx: click.Context) -> None:
     """Clear the session terminal."""
     port = ctx.parent.params["port"] if ctx.parent else 0
+    if not _ensure_warm_session(port):
+        return
     try:
         resp = requests.post(f"http://127.0.0.1:{port}/clear", timeout=5)
         if resp.status_code == 410:
@@ -909,6 +934,8 @@ def clear(ctx: click.Context) -> None:
 def reset(ctx: click.Context) -> None:
     """Reset the session terminal."""
     port = ctx.parent.params["port"] if ctx.parent else 0
+    if not _ensure_warm_session(port):
+        return
     try:
         resp = requests.post(f"http://127.0.0.1:{port}/reset", timeout=5)
         if resp.status_code == 410:
@@ -925,6 +952,8 @@ def reset(ctx: click.Context) -> None:
 def interrupt(ctx: click.Context) -> None:
     """Send interrupt signal (Ctrl+C) to the session."""
     port = ctx.parent.params["port"] if ctx.parent else 0
+    if not _ensure_warm_session(port):
+        return
     try:
         resp = requests.post(f"http://127.0.0.1:{port}/interrupt", timeout=5)
         if resp.status_code == 410:
@@ -943,6 +972,8 @@ def interrupt(ctx: click.Context) -> None:
 def resize(ctx: click.Context, rows: int, cols: int) -> None:
     """Resize the session terminal."""
     port = ctx.parent.params["port"] if ctx.parent else 0
+    if not _ensure_warm_session(port):
+        return
     try:
         resp = requests.post(
             f"http://127.0.0.1:{port}/resize",
@@ -1337,6 +1368,9 @@ def _find_native_tui_binary() -> Path | None:
 
 
 def _launch_native_tui_client(port: int) -> None:
+    if not _ensure_warm_session(port):
+        return
+
     status = _fetch_session_status(port)
     if status and status.get("tui_active"):
         click.echo("⚠️  Another client is already connected to this session.", err=True)
@@ -1377,6 +1411,8 @@ def tui(ctx: click.Context) -> None:
 def web(ctx: click.Context) -> None:
     """Open the web UI in a browser."""
     port = ctx.parent.params["port"] if ctx.parent else 0
+    if not _ensure_warm_session(port):
+        return
     token = _fetch_session_token(port)
     query = f"?{urlencode({'token': token})}" if token else ""
     web_url = f"http://127.0.0.1:{port}/web{query}"
@@ -1391,6 +1427,8 @@ def web(ctx: click.Context) -> None:
 def logs(ctx: click.Context, tail: int) -> None:
     """Show session logs."""
     port = ctx.parent.params["port"] if ctx.parent else 0
+    if not _ensure_warm_session(port):
+        return
     try:
         resp = requests.get(
             f"http://127.0.0.1:{port}/logs", params={"tail": tail}, timeout=5

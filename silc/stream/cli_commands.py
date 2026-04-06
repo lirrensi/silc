@@ -6,6 +6,7 @@ import click
 import requests
 
 from silc.stream.config import StreamConfig, StreamMode
+from silc.utils.session_wake import wake_session_if_dormant
 
 
 def get_token(port: int) -> Optional[str]:
@@ -24,6 +25,20 @@ def get_token(port: int) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def _ensure_warm_session(port: int) -> bool:
+    try:
+        session = wake_session_if_dormant(port)
+    except requests.RequestException:
+        click.echo(f"Error: Cannot connect to session on port {port}", err=True)
+        return False
+
+    if session is None:
+        click.echo(f"Error: Cannot connect to session on port {port}", err=True)
+        return False
+
+    return True
 
 
 @click.command("stream-file-render")
@@ -48,6 +63,9 @@ def stream_file_render(
     """
     port = ctx.parent.params["port"]
     filename = name or f"silc_{port}.txt"
+
+    if not _ensure_warm_session(port):
+        ctx.exit(1)
 
     config = StreamConfig(
         mode=StreamMode.RENDER,
@@ -119,6 +137,9 @@ def stream_file_append(
     port = ctx.parent.params["port"]
     filename = name or f"silc_{port}_append.txt"
 
+    if not _ensure_warm_session(port):
+        ctx.exit(1)
+
     # Validate threshold
     if not 0.0 <= threshold <= 1.0:
         click.echo("Error: --threshold must be between 0.0 and 1.0", err=True)
@@ -175,6 +196,9 @@ def stream_stop(ctx: click.Context, name: str) -> None:
     """
     port = ctx.parent.params["port"]
 
+    if not _ensure_warm_session(port):
+        ctx.exit(1)
+
     token = get_token(port)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
 
@@ -216,6 +240,9 @@ def stream_status(ctx: click.Context) -> None:
         silc 20000 stream-status
     """
     port = ctx.parent.params["port"]
+
+    if not _ensure_warm_session(port):
+        ctx.exit(1)
 
     token = get_token(port)
     headers = {"Authorization": f"Bearer {token}"} if token else {}

@@ -229,7 +229,7 @@ describe('Sidebar', () => {
     expect(document.body.textContent).toContain('Default')
   })
 
-  it('renders dormant sessions with a sleeping label', async () => {
+  it('renders dormant sessions without a status label', async () => {
     const router = createRouter({
       history: createWebHashHistory(),
       routes: [{ path: '/', component: { template: '<div />' } }],
@@ -246,7 +246,7 @@ describe('Sidebar', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('sleeping')
+    expect(wrapper.text()).not.toContain('sleeping')
   })
 
   it('prompts to rename a session on double click', async () => {

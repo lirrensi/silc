@@ -350,8 +350,8 @@ Grid view of all sessions with preview terminals.
 - Display 2-column grid of session cards with 16px gap (gap-4)
 - Container has 16px padding (p-4)
 - Non-interactive terminal previews (scaled 2x)
-- Dormant sessions render as sleeping cards with no preview surface
-- Click card → navigate to session view
+- Dormant sessions render as gray cards with no preview surface until selected
+- Click card → navigate to session view and wake if dormant
 
 **State:**
 ```typescript
@@ -381,6 +381,7 @@ port: number  // From route params
 - Lifecycle buttons: Close Session, Kill, Restart (managed by daemon)
 - Arrow key buttons for navigation
 - Actions: Refresh, Refit, Redraw, Bottom, Paste
+- Any interaction with a dormant session wakes it synchronously before continuing, except Close/Kill/Restart
 - Top-bar lifecycle actions remain available even if the terminal surface is broken
 - UI cleanup after daemon actions is best-effort and must not block or throw
 - Processing block shows the current operation stage while terminal actions are running
@@ -421,7 +422,7 @@ Session list navigation.
 - **Collapsed rail** — Desktop sidebar collapses to a thin visible icon rail instead of disappearing
 - **Micro sessions** — Collapsed session list becomes compact icon buttons with status indicators
 - **Home button** — Navigate to home view
-- **Session list** — Name, status indicator, and port number
+- **Session list** — Name, color indicator, and port number
 - **Active session highlighting** — Current session highlighted
 
 **New Session Modal:**
@@ -432,9 +433,8 @@ Session list navigation.
 - Path validation and normalization on submit
 
 **Status Colors:**
-- `active` → Green (`#4ade80`)
-- `idle` → Gray (`#6b7280`)
-- `dormant` → Muted gray / desaturated sleeping indicator
+- live / not sleeping → Green (`#4ade80`)
+- dormant / sleeping → Muted gray / desaturated indicator
 - `dead` → Red (`#f87171`)
 
 ### SessionCard
@@ -448,7 +448,7 @@ Preview card for a session in the grid view.
 - Status indicator
 - Session name, port, shell
 - Dormant card state uses gray/desaturated styling and omits preview content
-- Click to open session view
+- Click to open session view and wake if dormant
 
 **Layout:**
 - Fixed header (40px) with session info
@@ -469,7 +469,7 @@ interactive?: boolean  // Enable input and resize
 - `interactive=false`: Static preview
 - Auto-connect WebSocket if not connected
 - Debounced resize (100ms)
-- Dormant sessions must not auto-connect or assume a listening session port exists
+- Dormant sessions must not auto-connect until the view has synchronously woken the session
 
 **Styling:**
 - Container has 8px padding (p-2)

@@ -34,3 +34,6 @@ private/
 docs/archive/
 static/manager/
 docs/CODEMAP.*.md
+
+.kanban
+cancan.lock

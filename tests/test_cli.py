@@ -1557,6 +1557,54 @@ class TestCLIStreamingCommandsUnit:
         assert "stream-status" in commands
 
 
+class TestSessionWakeHelper:
+    def test_wake_session_if_dormant_restarts_once(self, monkeypatch):
+        from silc.utils import session_wake
+
+        calls: list[str] = []
+
+        class FakeResponse:
+            def __init__(self, payload):
+                self._payload = payload
+
+            @property
+            def ok(self):
+                return True
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._payload
+
+        def fake_get(url: str, timeout: float):
+            if url.endswith("/sessions"):
+                return FakeResponse(
+                    [
+                        {
+                            "port": 20000,
+                            "name": "demo",
+                            "dormant": True,
+                        }
+                    ]
+                )
+            if url.endswith("/status"):
+                return FakeResponse({"alive": True})
+            raise AssertionError(url)
+
+        def fake_post(url: str, timeout: float):
+            calls.append(url)
+            return FakeResponse({})
+
+        monkeypatch.setattr(session_wake.requests, "get", fake_get)
+        monkeypatch.setattr(session_wake.requests, "post", fake_post)
+
+        result = session_wake.wake_session_if_dormant(20000, timeout=0.01)
+
+        assert result == {"alive": True}
+        assert calls == ["http://127.0.0.1:19999/sessions/20000/restart"]
+
+
 @pytest.mark.integration
 class TestCLIStreamingCommands:
     """Tests for streaming-related CLI commands (integration)."""

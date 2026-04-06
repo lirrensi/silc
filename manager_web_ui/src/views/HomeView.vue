@@ -50,7 +50,7 @@ const gridStyle = computed(() => ({
     </div>
 
     <div v-if="manager.sessionList.length === 0" class="glass-panel border-dashed py-12 text-center text-[var(--color-text-secondary)]">
-      No active sessions. Click "+" to create one.
+      No sessions yet. Click "+" to create one.
     </div>
 
     <div

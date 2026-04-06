@@ -13,6 +13,7 @@ import SessionView from '../views/SessionView.vue'
 const mockSendInputFrame = vi.hoisted(() => vi.fn())
 const mockPasteClipboardText = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockListSessions = vi.hoisted(() => vi.fn())
+const mockRestartSession = vi.hoisted(() => vi.fn())
 const mockRemoveSession = vi.hoisted(() => vi.fn())
 
 const session = {
@@ -30,7 +31,7 @@ vi.mock('@/lib/daemonApi', () => ({
   closeSession: vi.fn(),
   killSession: vi.fn(),
   listSessions: mockListSessions,
-  restartSession: vi.fn(),
+  restartSession: mockRestartSession,
   sendInterrupt: vi.fn(),
   sendSigkill: vi.fn(),
   sendSigterm: vi.fn(),
@@ -80,6 +81,7 @@ describe('SessionView', () => {
     ])
     mockSendInputFrame.mockClear()
     mockPasteClipboardText.mockClear()
+    mockRestartSession.mockClear()
     session.terminal.reset.mockClear()
     session.terminal.scrollToBottom.mockClear()
     mockRemoveSession.mockClear()
@@ -216,7 +218,7 @@ describe('SessionView', () => {
     expect(mockRemoveSession).toHaveBeenCalledWith(1234)
   })
 
-  it('shows a dormant placeholder without trying to reconnect', async () => {
+  it('wakes a dormant session before showing controls', async () => {
     session.status = 'dormant'
     mockListSessions.mockResolvedValueOnce([
       {
@@ -231,6 +233,21 @@ describe('SessionView', () => {
         alive: false,
         runtime_state: 'dormant',
         dormant: true,
+      },
+    ])
+    mockListSessions.mockResolvedValue([
+      {
+        port: 1234,
+        name: 'demo',
+        title: 'demo',
+        session_id: 'sess-1',
+        shell: 'bash',
+        cwd: null,
+        title_updated_at: null,
+        idle_seconds: 0,
+        alive: true,
+        runtime_state: 'running',
+        dormant: false,
       },
     ])
 
@@ -254,7 +271,7 @@ describe('SessionView', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    expect(wrapper.text()).toContain('Sleeping session')
-    expect(wrapper.text()).not.toContain('Reconnect')
+    expect(mockRestartSession).toHaveBeenCalledWith(1234)
+    expect(wrapper.text()).not.toContain('Sleeping session')
   })
 })

@@ -37,7 +37,7 @@ const isDormant = computed(() => session.value?.status === 'dormant')
 const isActive = computed(() => session.value?.status === 'active' && session.value?.ws?.readyState === WebSocket.OPEN)
 const isRestarting = computed(() => session.value?.status === 'restarting')
 const hasConnectionProblem = computed(() => !isActive.value && !isDormant.value)
-const controlsDisabled = computed(() => !isActive.value || activeOperation.value !== null || isDormant.value)
+const controlsDisabled = computed(() => hasConnectionProblem.value || activeOperation.value !== null)
 const disconnectReason = computed(() => session.value?.disconnectReason ?? '')
 const sessionBootstrapped = ref(false)
 
@@ -69,21 +69,84 @@ async function ensureCurrentSessionVisible(): Promise<boolean> {
 }
 
 async function bootstrapSession(): Promise<void> {
-  manager.setFocused(port.value)
-  sessionBootstrapped.value = false
+  try {
+    manager.setFocused(port.value)
+    sessionBootstrapped.value = false
 
-  const isVisible = await ensureCurrentSessionVisible()
-  if (!isVisible) {
-    return
-  }
+    const isVisible = await ensureCurrentSessionVisible()
+    if (!isVisible) {
+      return
+    }
 
-  if (session.value?.status === 'dormant') {
+    if (session.value?.status === 'dormant') {
+      await restartSession(port.value)
+      const ready = await waitForSession(port.value)
+      if (!ready) {
+        return
+      }
+      const wakeVisible = await ensureCurrentSessionVisible()
+      if (!wakeVisible) {
+        return
+      }
+    }
+
+    const interactiveReady = await waitForInteractiveSessionReady(port.value)
+    if (!interactiveReady) {
+      return
+    }
+
     sessionBootstrapped.value = true
-    return
+    await refreshTerminal()
+  } catch (err) {
+    console.error('Failed to bootstrap session:', err)
+  }
+}
+
+async function ensureInteractiveSessionReady(): Promise<boolean> {
+  if (!session.value || session.value.status !== 'dormant') {
+    return await waitForInteractiveSessionReady(port.value)
   }
 
-  sessionBootstrapped.value = true
-  await refreshTerminal()
+  try {
+    await restartSession(port.value)
+    const ready = await waitForSession(port.value)
+    if (!ready) {
+      return false
+    }
+
+    const visible = await ensureCurrentSessionVisible()
+    if (!visible) {
+      return false
+    }
+
+    return await waitForInteractiveSessionReady(port.value)
+  } catch (err) {
+    console.error('Failed to wake dormant session:', err)
+    return false
+  }
+}
+
+async function waitForInteractiveSessionReady(
+  targetPort: number,
+  timeoutMs: number = 5000,
+): Promise<boolean> {
+  const start = Date.now()
+
+  while (Date.now() - start < timeoutMs) {
+    const currentSession = manager.getSession(targetPort)
+    if (
+      currentSession
+      && currentSession.status !== 'dormant'
+      && currentSession.terminal
+      && currentSession.ws?.readyState === WebSocket.OPEN
+    ) {
+      return true
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, 100))
+  }
+
+  return false
 }
 
 async function runOperation(
@@ -223,6 +286,10 @@ async function refreshTerminal(): Promise<void> {
 
 async function handleRefresh(): Promise<void> {
   try {
+    if (!(await ensureInteractiveSessionReady())) {
+      return
+    }
+
     const isVisible = await ensureCurrentSessionVisible()
     if (!isVisible) {
       return
@@ -318,10 +385,6 @@ async function handleKill(): Promise<void> {
 }
 
 async function handleRestart(): Promise<void> {
-  if (isDormant.value) {
-    return
-  }
-
   if (isRestarting.value) {
     return
   }
@@ -377,10 +440,6 @@ async function reconnectSession(targetPort: number, waitForFreshSession: boolean
     return
   }
 
-  if (isDormant.value) {
-    return
-  }
-
   reconnecting.value = true
 
   try {
@@ -422,6 +481,10 @@ function sendViaWs(text: string): void {
 
 async function handleReconnect(): Promise<void> {
   try {
+    if (!(await ensureInteractiveSessionReady())) {
+      return
+    }
+
     await reconnectSession(port.value)
   } catch (err) {
     manager.setStatus(port.value, 'dead')
@@ -430,6 +493,10 @@ async function handleReconnect(): Promise<void> {
 }
 
 async function handleInterrupt(): Promise<void> {
+  if (!(await ensureInteractiveSessionReady())) {
+    return
+  }
+
   await runOperation('Send SIGINT', 'info', [
     {
       stage: 'Sending interrupt',
@@ -442,6 +509,10 @@ async function handleInterrupt(): Promise<void> {
 }
 
 async function handleSigterm(): Promise<void> {
+  if (!(await ensureInteractiveSessionReady())) {
+    return
+  }
+
   await runOperation('Send SIGTERM', 'info', [
     {
       stage: 'Sending graceful termination',
@@ -454,6 +525,10 @@ async function handleSigterm(): Promise<void> {
 }
 
 async function handleSigkill(): Promise<void> {
+  if (!(await ensureInteractiveSessionReady())) {
+    return
+  }
+
   await runOperation('Send SIGKILL', 'danger', [
     {
       stage: 'Sending force kill',
@@ -467,6 +542,10 @@ async function handleSigkill(): Promise<void> {
 
 async function handlePaste(): Promise<void> {
   try {
+    if (!(await ensureInteractiveSessionReady())) {
+      return
+    }
+
     await manager.pasteClipboardText(port.value)
   } catch (err) {
     console.error('Paste failed:', err)
@@ -481,10 +560,20 @@ function scrollToBottom(): void {
 }
 
 function handleBottom(): void {
-  scrollToBottom()
+  void (async () => {
+    if (!(await ensureInteractiveSessionReady())) {
+      return
+    }
+
+    scrollToBottom()
+  })()
 }
 
 async function refitTerminal(): Promise<void> {
+  if (!(await ensureInteractiveSessionReady())) {
+    return
+  }
+
   await runOperation('Refit terminal', 'info', [
     {
       stage: 'Measuring the viewport',
@@ -498,6 +587,10 @@ async function refitTerminal(): Promise<void> {
 }
 
 async function redrawTerminal(): Promise<void> {
+  if (!(await ensureInteractiveSessionReady())) {
+    return
+  }
+
   await runOperation('Redraw terminal', 'info', [
     {
       stage: 'Repainting the renderer',
@@ -511,7 +604,13 @@ async function redrawTerminal(): Promise<void> {
 }
 
 function sendArrowKey(sequence: string): void {
-  sendViaWs(sequence)
+  void (async () => {
+    if (!(await ensureInteractiveSessionReady())) {
+      return
+    }
+
+    sendViaWs(sequence)
+  })()
 }
 </script>
 
@@ -532,7 +631,7 @@ function sendArrowKey(sequence: string): void {
           @click="handleRestart"
           class="bar-button bar-button-tight bar-button-info text-xs"
           :title="tip('Restart the session', 'Recreates the shell and reconnects the browser to it.')"
-          :disabled="isDormant"
+          :disabled="activeOperation !== null || isRestarting"
         >
           Restart
         </button>
@@ -559,8 +658,8 @@ function sendArrowKey(sequence: string): void {
         class="absolute inset-0 z-10 flex items-center justify-center bg-[color-mix(in_srgb,var(--color-bg-primary)_74%,transparent)] px-4"
       >
         <div class="glass-panel flex w-full max-w-md flex-col gap-3 p-4 text-center">
-          <p class="text-sm font-medium text-[var(--color-text-primary)]">Sleeping session</p>
-          <p class="text-xs text-[var(--color-text-secondary)]">This session remains dormant until you run resurrect.</p>
+          <p class="text-sm font-medium text-[var(--color-text-primary)]">Waking session</p>
+          <p class="text-xs text-[var(--color-text-secondary)]">The session is being materialized before interaction continues.</p>
         </div>
       </div>
       <div :class="hasConnectionProblem ? 'pointer-events-none h-full grayscale opacity-55' : 'h-full'">

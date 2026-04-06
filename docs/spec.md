@@ -141,6 +141,8 @@ Dormant sessions do not expose a live websocket endpoint.
 - `silc resurrect` materializes all persisted sessions.
 - `silc restart` performs a graceful shutdown, captures frozen raw snapshots, and starts again with dormant sessions loaded.
 - Session-targeted commands accept either a port or a resolved name.
+- Session-targeted commands wake dormant sessions synchronously before continuing, except `restart`, `close`, and `kill`.
+- Selecting a dormant session in the manager UI wakes it before the interactive view continues.
 - `silc tui` launches the native TUI binary and asks before taking over an active interactive client.
 
 ## Snapshot Persistence
@@ -186,3 +188,4 @@ The MCP server exposes:
 - WebSocket disconnects clear interactive ownership.
 - Idle sessions are never auto-closed.
 - Dormant sessions do not allocate PTYs, per-session servers, or in-memory terminal snapshots until explicitly activated.
+- Dormant sessions are activated lazily by user interaction or by `resurrect`, not by passive listing.
