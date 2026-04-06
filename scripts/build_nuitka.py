@@ -131,6 +131,7 @@ def _nuitka_command(rust_binary: Path, output_name: str, version: str) -> list[s
         "--python-flag=-m",
         f"--onefile-tempdir-spec={tempdir_spec}",
         *compiler,
+        "--nofollow-import-to=tests,manual_tests,agent_chat,pytest,pytest_asyncio",
         "--include-package=silc",
         f"--include-data-dir={ROOT / 'static'}=static",
         f"--include-data-files={rust_binary}=bin/{rust_binary.name}",
