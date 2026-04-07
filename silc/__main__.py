@@ -709,11 +709,17 @@ def _get_daemon_python_executable() -> str:
     return str(python)
 
 
+def _silc_subcommand_command(*args: str) -> list[str]:
+    """Build a SILC subprocess command that works in source and compiled mode."""
+
+    if "__compiled__" in globals():
+        return [str(Path(sys.executable)), *args]
+    return [_get_daemon_python_executable(), "-m", "silc", *args]
+
+
 def _start_detached_daemon(*, share: bool = False) -> None:
     """Start daemon in background (detached)."""
-    python_exec = _get_daemon_python_executable()
-
-    cmd = [python_exec, "-m", "silc", "daemon"]
+    cmd = _silc_subcommand_command("daemon")
     if share:
         cmd.extend(["--host", "0.0.0.0", "--share-mode"])
     _spawn_detached_process(cmd, "daemon_stderr.log")
@@ -729,8 +735,7 @@ def _launch_desktop_webview(manager_url: str) -> None:
             "pywebview is required for the desktop command. Install pywebview and try again."
         ) from exc
 
-    python_exec = _get_daemon_python_executable()
-    cmd = [python_exec, "-m", "silc", "desktop-window", "--url", manager_url]
+    cmd = _silc_subcommand_command("desktop-window", "--url", manager_url)
     _spawn_detached_process(cmd, "desktop_stderr.log")
 
 

@@ -126,8 +126,17 @@ def _integration_root() -> Path:
 
 
 def _build_helper_script() -> str:
+    if "__compiled__" in globals():
+        launcher = repr(str(Path(sys.executable).resolve()))
+        exec_line = f'os.execv({launcher}, [{launcher}, command, "--cwd", target])'
+    else:
+        exec_line = (
+            'os.execv(sys.executable, [sys.executable, "-m", "silc", '
+            'command, "--cwd", target])'
+        )
+
     return textwrap.dedent(
-        """\
+        f"""\
         #!/usr/bin/env python3
         # SILC context-menu launcher.
 
@@ -168,10 +177,7 @@ def _build_helper_script() -> str:
             enter, target = _pick_mode_and_target(sys.argv[1:])
             target = _normalize_target(target)
             command = "start-enter" if enter else "start"
-            os.execv(
-                sys.executable,
-                [sys.executable, "-m", "silc", command, "--cwd", target],
-            )
+            {exec_line}
 
 
         if __name__ == "__main__":
