@@ -131,11 +131,8 @@ class SilcSession:
             return
         self._output_event = asyncio.Event()
         self._read_task = asyncio.create_task(self._read_loop())
-        # Keep a short startup grace period so the PTY/read task can settle
-        # before callers treat the session as fully ready.
-        # This is intentionally conservative and can be replaced later by a
-        # real readiness signal if we add one.
-        await asyncio.sleep(0.5)
+        # Yield once so the PTY/read task can begin before startup continues.
+        await asyncio.sleep(0)
         self._gc_task = asyncio.create_task(self._garbage_collect())
 
     async def _read_loop(self) -> None:
