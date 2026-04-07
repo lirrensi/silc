@@ -263,6 +263,72 @@ class TestDesktopLauncher:
         }
 
 
+class TestSettingsCommands:
+    def test_settings_get_prints_json(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        class FakeResponse:
+            def __init__(self, payload):
+                self.payload = payload
+                self.status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        monkeypatch.setattr(
+            main_mod.requests,
+            "get",
+            lambda *args, **kwargs: FakeResponse(
+                {"ui": {"themePreference": "dark"}, "terminal": {"fontSize": 18}}
+            ),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["settings", "get"])
+
+        assert result.exit_code == 0
+        assert '"themePreference": "dark"' in result.output
+
+    def test_settings_set_posts_nested_update(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        calls: dict[str, object] = {}
+
+        class FakeResponse:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        def fake_post(url, **kwargs):
+            calls["url"] = url
+            calls["json"] = kwargs.get("json")
+            return FakeResponse({"ui": {"themePreference": "dark"}})
+
+        monkeypatch.setattr(main_mod.requests, "post", fake_post)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main_mod.cli, ["settings", "set", "ui.themePreference", "dark"]
+        )
+
+        assert result.exit_code == 0
+        assert calls["url"].endswith("/settings")
+        assert calls["json"] == {"ui": {"themePreference": "dark"}}
+        assert '"themePreference": "dark"' in result.output
+
+
 class TestResurrectCommand:
     def test_resurrect_reads_restored_and_failed_payload_keys(self, monkeypatch):
         from click.testing import CliRunner

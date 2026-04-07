@@ -44,6 +44,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 - **Command History** — Track executed commands
 - **Logging** — Comprehensive session and daemon logs
 - **Stream-to-File** — Export terminal output to files
+- **Daemon-owned preferences** — Shared UI/theme/terminal settings live in the daemon, not in one browser tab
 
 ### AI Agent Integration
 
@@ -194,6 +195,8 @@ All session commands use the syntax `silc <port-or-name> <command>`. You can ide
 | `silc <port-or-name> logs [--tail N]` | Show session logs |
 | `silc <port-or-name> tui` | Launch native TUI client |
 | `silc <port-or-name> web` | Open web UI in browser |
+| `silc settings get` | Show daemon-managed settings |
+| `silc settings set <path> <value>` | Merge one setting into daemon-managed settings |
 
 ### Stream-to-File Commands
 
@@ -259,6 +262,7 @@ The API is exposed by the FastAPI server. All endpoints (except `/web`) require 
 | `GET` | `/snapshot` | Return raw PTY bytes for preview rendering |
 | `GET` | `/logs?tail=N` | Return last N lines of session log |
 | `GET` | `/stream` | Server-sent events stream of terminal output |
+| `GET` | `/settings` | Return daemon-managed settings |
 | `POST` | `/in` | Send raw input to the session |
 | `POST` | `/run` | Execute a shell command |
 | `POST` | `/interrupt` | Send Ctrl+C (SIGINT) to foreground process |
@@ -267,6 +271,7 @@ The API is exposed by the FastAPI server. All endpoints (except `/web`) require 
 | `POST` | `/clear` | Clear the terminal screen |
 | `POST` | `/reset` | Reset terminal state |
 | `POST` | `/resize` | Resize PTY dimensions |
+| `POST` | `/settings` | Merge new daemon-managed settings |
 | `GET` | `/token` | Return the current session token |
 | `GET` | `/web` | Serve the static web UI |
 
@@ -773,6 +778,7 @@ Configuration is loaded from (highest to lowest priority):
 | **Token required for remote** | Non-localhost connections require valid token |
 | **Token in header or query** | Token accepted via `Authorization` header or `?token=` query |
 | **Real shell access** | Commands run with user's permissions |
+| **Settings writes are privileged** | Only daemon-authorized clients may update shared settings |
 
 ---
 

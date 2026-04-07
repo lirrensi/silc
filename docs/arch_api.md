@@ -314,6 +314,7 @@ Return session API token.
 ### `GET /web`
 
 Serve static Web UI from `static/web/index.html`. Per-session terminal interface.
+The page may best-effort read daemon settings for appearance defaults and fall back to built-in defaults if the daemon is unreachable.
 
 ---
 

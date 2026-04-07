@@ -1,9 +1,37 @@
+// FILE: manager_web_ui/src/lib/themes.ts
+// PURPOSE: Define shared theme palettes and terminal default resolution helpers for the manager UI.
+// OWNS: Theme preference resolution, xterm theme palettes, and terminal default normalization.
+// EXPORTS: resolveTheme, getTerminalTheme, resolveTerminalDefaults, DEFAULT_TERMINAL_DEFAULTS.
+// DOCS: agent_chat/plan_daemon_settings_store_2026-04-08.md
+
 import type { ITheme } from '@xterm/xterm'
+import type { DaemonTerminalSettings } from '@/lib/daemonApi'
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
 
+export interface TerminalDefaults {
+  theme: ResolvedTheme
+  cols: number
+  rows: number
+  scrollback: number
+  fontFamily: string
+  fontSize: number
+  lineHeight: number
+  cursorBlink: boolean
+}
+
 export const THEME_STORAGE_KEY = 'silc-manager-theme'
+export const DEFAULT_TERMINAL_DEFAULTS: TerminalDefaults = {
+  theme: 'dark',
+  cols: 120,
+  rows: 30,
+  scrollback: 5000,
+  fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+  fontSize: 15,
+  lineHeight: 1.05,
+  cursorBlink: true,
+}
 
 export function resolveTheme(preference: ThemePreference): ResolvedTheme {
   if (preference !== 'system') {
@@ -60,5 +88,27 @@ export function getTerminalTheme(theme: ResolvedTheme): ITheme {
     brightMagenta: '#fda4af',
     brightCyan: '#67e8f9',
     brightWhite: '#ffffff',
+  }
+}
+
+export function resolveTerminalDefaults(
+  settings?: Partial<DaemonTerminalSettings>,
+): TerminalDefaults {
+  const theme =
+    settings?.theme === 'light'
+      ? 'light'
+      : settings?.theme === 'dark'
+        ? 'dark'
+        : DEFAULT_TERMINAL_DEFAULTS.theme
+
+  return {
+    theme,
+    cols: settings?.cols ?? DEFAULT_TERMINAL_DEFAULTS.cols,
+    rows: settings?.rows ?? DEFAULT_TERMINAL_DEFAULTS.rows,
+    scrollback: settings?.scrollback ?? DEFAULT_TERMINAL_DEFAULTS.scrollback,
+    fontFamily: settings?.fontFamily ?? DEFAULT_TERMINAL_DEFAULTS.fontFamily,
+    fontSize: settings?.fontSize ?? DEFAULT_TERMINAL_DEFAULTS.fontSize,
+    lineHeight: settings?.lineHeight ?? DEFAULT_TERMINAL_DEFAULTS.lineHeight,
+    cursorBlink: settings?.cursorBlink ?? DEFAULT_TERMINAL_DEFAULTS.cursorBlink,
   }
 }

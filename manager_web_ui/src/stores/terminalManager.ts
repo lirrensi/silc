@@ -1,7 +1,7 @@
 // FILE: manager_web_ui/src/stores/terminalManager.ts
 // PURPOSE: Manage frontend terminal session lifecycle, visible-first attachment, measured resize, and recovery actions.
-// OWNS: Browser terminal instances, resize propagation, write buffering, and renderer lifecycle.
-// EXPORTS: useTerminalManager - Pinia store for terminal session state and actions including session ordering.
+// OWNS: Browser terminal instances, resize propagation, write buffering, renderer lifecycle, and terminal defaults.
+// EXPORTS: useTerminalManager - Pinia store for terminal session state, defaults, and actions including session ordering.
 // DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 import { FitAddon } from '@xterm/addon-fit'
@@ -23,8 +23,8 @@ import {
   forceTerminalRedraw,
   refreshRendererAfterSwap,
 } from '@/lib/terminalRenderer'
-import { getTerminalTheme } from '@/lib/themes'
-import type { ResolvedTheme } from '@/lib/themes'
+import { DEFAULT_TERMINAL_DEFAULTS, getTerminalTheme } from '@/lib/themes'
+import type { ResolvedTheme, TerminalDefaults } from '@/lib/themes'
 import { sendInputFrame } from '@/lib/websocketFrame'
 import type { DaemonSession, Session, SessionStatus } from '@/types/session'
 
@@ -38,6 +38,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   const sessions = ref<Map<number, Session>>(new Map())
   const focusedPort = ref<number | null>(null)
   const currentTheme = ref<ResolvedTheme>('dark')
+  const terminalDefaults = ref<TerminalDefaults>({ ...DEFAULT_TERMINAL_DEFAULTS })
   const lastAppliedRendererType = new Map<number, RendererType>()
   const historyRefreshWaiters = new Map<number, Array<() => void>>()
 
@@ -46,16 +47,16 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     fitAddon: FitAddon
   } {
     const terminal = new Terminal({
-      cols: 120,
-      rows: 30,
-      scrollback: 5000,
+      cols: terminalDefaults.value.cols,
+      rows: terminalDefaults.value.rows,
+      scrollback: terminalDefaults.value.scrollback,
       convertEol: true,
       allowProposedApi: true,
       theme: getTerminalTheme(theme),
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 15,
-      lineHeight: 1.05,
-      cursorBlink: true,
+      fontFamily: terminalDefaults.value.fontFamily,
+      fontSize: terminalDefaults.value.fontSize,
+      lineHeight: terminalDefaults.value.lineHeight,
+      cursorBlink: terminalDefaults.value.cursorBlink,
     })
 
     const fitAddon = new FitAddon()
@@ -817,6 +818,22 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
   }
 
+  function applyTerminalDefaults(defaults: TerminalDefaults): void {
+    terminalDefaults.value = defaults
+
+    for (const session of sessions.value.values()) {
+      if (session.terminalDisposed || !session.terminal) {
+        continue
+      }
+
+      session.terminal.options.scrollback = defaults.scrollback
+      session.terminal.options.fontFamily = defaults.fontFamily
+      session.terminal.options.fontSize = defaults.fontSize
+      session.terminal.options.lineHeight = defaults.lineHeight
+      session.terminal.options.cursorBlink = defaults.cursorBlink
+    }
+  }
+
   function safeWrite(port: number, data: Uint8Array): void {
     const session = sessions.value.get(port)
     if (!session) return
@@ -1003,5 +1020,6 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     applySessionOrder,
     safeWrite,
     applyTheme,
+    applyTerminalDefaults,
   }
 })

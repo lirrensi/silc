@@ -47,8 +47,10 @@ vi.mock('@/lib/daemonApi', () => ({
       { type: 'bash', label: 'Bash', path: '/usr/bin/bash' },
     ],
   }),
+  getSettings: vi.fn().mockResolvedValue({ ui: { themePreference: 'system' }, terminal: {} }),
   renameSession: vi.fn(),
   reorderSessions: vi.fn(),
+  updateSettings: vi.fn(),
 }))
 
 vi.mock('@dnd-kit/vue', () => ({

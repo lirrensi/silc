@@ -122,6 +122,13 @@ Notes:
 - `resurrect` reloads persisted session records and reconciles them.
 - `restart` performs a full daemon restart while preserving share mode.
 
+## Settings Commands
+
+- `silc settings get` reads the daemon-managed shared settings via `GET /settings`.
+- `silc settings set <path> <value>` merges a single nested setting path into the daemon-managed settings via `POST /settings`.
+- Settings commands are daemon-scoped, not session-scoped, and do not wake dormant sessions.
+- If the daemon is unreachable, `settings get` prints the best-effort fallback or an error; `settings set` fails without mutating local browser state.
+
 ## Session Commands
 
 - `run` posts JSON `{command, timeout}` to `/run`.

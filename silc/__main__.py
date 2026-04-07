@@ -1,5 +1,11 @@
 """Command-line interface entrypoint for SILC."""
 
+# FILE: silc/__main__.py
+# PURPOSE: Define the SILC command-line entrypoint and top-level command routing.
+# OWNS: CLI bootstrap, daemon launch flow, and top-level command groups.
+# EXPORTS: cli - root Click command group for all SILC commands.
+# DOCS: agent_chat/plan_daemon_settings_store_2026-04-08.md
+
 from __future__ import annotations
 
 import pathlib
@@ -26,6 +32,7 @@ if "__compiled__" not in globals():
 
 
 import asyncio
+import json
 import secrets
 import subprocess
 import time
@@ -41,6 +48,7 @@ import uvicorn
 from silc.api.server import create_app
 from silc.core.session import SilcSession
 from silc.daemon import DAEMON_PORT, is_daemon_running, kill_daemon
+from silc.daemon.settings import build_path_update
 from silc.os_integration import (
     OsIntegrationError,
     install_os_integration,
@@ -79,6 +87,23 @@ def _get_daemon_defaults(timeout: float = 2.0) -> dict[str, object]:
         return payload if isinstance(payload, dict) else {}
     except requests.RequestException:
         return {}
+
+
+def _get_daemon_settings(timeout: float = 2.0) -> dict[str, object]:
+    try:
+        resp = requests.get(_daemon_url("/settings"), timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload if isinstance(payload, dict) else {}
+    except requests.RequestException:
+        return {}
+
+
+def _parse_settings_value(value: str) -> object:
+    try:
+        return json.loads(value)
+    except ValueError:
+        return value
 
 
 def _daemon_port_open(timeout: float = 0.2) -> bool:
@@ -816,6 +841,42 @@ def mcp() -> None:
     from silc.mcp import run_mcp_server
 
     asyncio.run(run_mcp_server())
+
+
+@cli.group()
+def settings() -> None:
+    """Get or update daemon-owned shared settings."""
+
+
+@settings.command(name="get")
+def settings_get() -> None:
+    """Fetch the current shared daemon settings."""
+
+    try:
+        resp = requests.get(_daemon_url("/settings"), timeout=5)
+        resp.raise_for_status()
+        click.echo(json.dumps(resp.json(), indent=2, sort_keys=True))
+    except requests.RequestException as exc:
+        raise click.ClickException(f"Failed to fetch settings: {exc}") from exc
+
+
+@settings.command(name="set")
+@click.argument("path")
+@click.argument("value")
+def settings_set(path: str, value: str) -> None:
+    """Set one shared setting by dotted path."""
+
+    try:
+        update = build_path_update(path, _parse_settings_value(value))
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        resp = requests.post(_daemon_url("/settings"), json=update, timeout=5)
+        resp.raise_for_status()
+        click.echo(json.dumps(resp.json(), indent=2, sort_keys=True))
+    except requests.RequestException as exc:
+        raise click.ClickException(f"Failed to update settings: {exc}") from exc
 
 
 @cli.group()

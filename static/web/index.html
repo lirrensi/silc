@@ -99,10 +99,70 @@
                 const httpProtocol = window.location.protocol === "https:" ? "https:" : "http:";
                 const host = window.location.hostname;
                 const port = window.location.port || "20000";
+                const daemonPort = "19999";
                 const statusEl = document.getElementById("status");
                 const urlParams = new URLSearchParams(window.location.search);
                 const tokenParam = urlParams.get("token");
                 const httpBaseUrl = `${httpProtocol}//${host}:${port}`;
+                const daemonBaseUrl = `${httpProtocol}//${host}:${daemonPort}`;
+
+                const LIGHT_THEME = {
+                    background: "#fffbf5",
+                    foreground: "#1f2937",
+                    cursor: "#d97706",
+                    selectionBackground: "#d9770633",
+                };
+
+                const DARK_THEME = {
+                    background: "#1f232b",
+                    foreground: "#f3f4f6",
+                    cursor: "#f97316",
+                    selectionBackground: "#f9731644",
+                };
+
+                const isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+                const fetchDaemonSettings = async () => {
+                    try {
+                        const resp = await fetch(`${daemonBaseUrl}/settings`, {
+                            cache: "no-store",
+                        });
+                        if (!resp.ok) {
+                            return null;
+                        }
+                        const data = await resp.json();
+                        return isPlainObject(data) ? data : null;
+                    } catch (err) {
+                        return null;
+                    }
+                };
+
+                const buildTerminalOptions = (settings) => {
+                    const terminal = isPlainObject(settings) && isPlainObject(settings.terminal)
+                        ? settings.terminal
+                        : null;
+
+                    if (!terminal) {
+                        return {};
+                    }
+
+                    const options = {};
+                    if (Number.isFinite(terminal.cols)) options.cols = terminal.cols;
+                    if (Number.isFinite(terminal.rows)) options.rows = terminal.rows;
+                    if (Number.isFinite(terminal.scrollback)) options.scrollback = terminal.scrollback;
+                    if (typeof terminal.fontFamily === "string") options.fontFamily = terminal.fontFamily;
+                    if (Number.isFinite(terminal.fontSize)) options.fontSize = terminal.fontSize;
+                    if (Number.isFinite(terminal.lineHeight)) options.lineHeight = terminal.lineHeight;
+                    if (typeof terminal.cursorBlink === "boolean") options.cursorBlink = terminal.cursorBlink;
+
+                    if (terminal.theme === "light") {
+                        options.theme = LIGHT_THEME;
+                    } else if (terminal.theme === "dark") {
+                        options.theme = DARK_THEME;
+                    }
+
+                    return options;
+                };
 
                 const fetchTokenFromServer = async () => {
                     try {
@@ -149,21 +209,12 @@
                 const wsTokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
                 const wsUrl = `${wsProtocol}//${host}:${port}/ws${wsTokenQuery}`;
 
+                const daemonSettings = await fetchDaemonSettings();
+                const termOptions = buildTerminalOptions(daemonSettings);
                 const term = new Terminal({
-                    cols: 120,
-                    rows: 30,
-                    scrollback: 5000,
                     convertEol: true,
                     allowProposedApi: true,
-                    theme: {
-                        background: "#1e1e1e",
-                        foreground: "#ffffff",
-                        cursor: "#ff80bf",
-                        selectionBackground: "#ff80bf44",
-                    },
-                    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-                    fontSize: 15,
-                    cursorBlink: true,
+                    ...termOptions,
                 });
 
                 term.open(document.getElementById("terminal"));

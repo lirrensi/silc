@@ -8,6 +8,7 @@ The daemon is the root process for SILC. It:
 
 - serves the manager UI and daemon API on port `19999`
 - owns the desired-state registry for sessions
+- owns the shared daemon settings store for manager and terminal preferences
 - loads persisted records as dormant desired sessions on boot
 - materializes live runtime against persisted records on explicit activation
 - recreates PTYs and per-session servers when they fail
@@ -39,6 +40,7 @@ Does not own:
 |---|---|
 | `silc/daemon/manager.py` | `SilcDaemon` and daemon API |
 | `silc/daemon/registry.py` | Desired session registry |
+| `silc/daemon/settings.py` | Shared daemon settings model and merge helpers |
 | `silc/daemon/runtime.py` | Mutable runtime state and backoff helpers |
 | `silc/daemon/events.py` | Manager websocket events and binary frame encoding |
 | `silc/daemon/pidfile.py` | pidfile helpers |
@@ -104,12 +106,24 @@ class SessionRuntime:
     is_global: bool
 ```
 
+### `DaemonSettings`
+
+Shared settings persisted to `settings.json` in the SILC data dir.
+
+```python
+@dataclass
+class DaemonSettings:
+    ui: dict[str, Any]
+    terminal: dict[str, Any]
+```
+
 ### `SilcDaemon`
 
 Important fields:
 
 ```python
 registry: SessionRegistry
+settings: DaemonSettings
 sessions: dict[int, SilcSession]
 servers: dict[int, uvicorn.Server]
 runtime_by_port: dict[int, SessionRuntime]
@@ -123,10 +137,12 @@ _daemon_api_app: FastAPI
 ## Persistence
 
 - Desired records are persisted to `sessions.json` in the SILC data dir.
+- Shared settings are persisted separately to `settings.json` in the SILC data dir.
 - Frozen raw PTY snapshots from graceful shutdown/restart are persisted as separate per-session files keyed by `session_id`.
 - Writes are atomic when possible.
 - Removing a record is what actually ends a session.
 - Shutdown does **not** delete records.
+- Shared settings writes use the same daemon metadata lock discipline as registry writes.
 - Daemon startup restoration garbage-collects orphaned snapshot files whose `session_id` is not present in the desired registry.
 
 ## Runtime Model
@@ -143,10 +159,11 @@ _daemon_api_app: FastAPI
 1. Write/read pidfile and abort if another daemon is alive.
 2. Load persisted desired records.
 3. Garbage-collect orphaned snapshot files that do not match any restored `session_id`.
-4. Keep loaded records dormant by default.
-5. Record whether frozen snapshot files exist, without loading snapshot bytes into memory.
-6. Start the daemon API server.
-7. Start periodic log rotation, shutdown watcher, restart watcher, and reconcile loop.
+4. Load shared settings from `settings.json` and merge them over built-in defaults.
+5. Keep loaded records dormant by default.
+6. Record whether frozen snapshot files exist, without loading snapshot bytes into memory.
+7. Start the daemon API server.
+8. Start periodic log rotation, shutdown watcher, restart watcher, and reconcile loop.
 
 If `share_mode` is enabled, the daemon and session servers bind to LAN-reachable addresses and the manager URL reflects the host IP.
 
@@ -164,6 +181,8 @@ API routes:
 - `GET /sessions` — list sessions with live health
 - `GET /defaults` — defaults for manager UI helpers
 - `GET /resolve/{name}` — name lookup
+- `GET /settings` — return shared daemon settings
+- `POST /settings` — merge shared daemon settings
 - `POST /sessions/{port}/rename` — rename in place
 - `POST /sessions/reorder` — reorder registry order
 - `POST /sessions/{port}/close` — remove record and stop reconciling

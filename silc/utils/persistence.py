@@ -2,9 +2,9 @@
 
 # FILE: silc/utils/persistence.py
 # PURPOSE: Own daemon/session persistence paths, log files, and one-shot snapshot storage helpers.
-# OWNS: Data directory resolution, log rotation, sessions.json persistence, and raw snapshot file I/O.
-# EXPORTS: Snapshot helpers, log helpers, and sessions.json helpers used by the daemon and CLI.
-# DOCS: agent_chat/plan_dormant_resurrect_snapshots_2026-04-06.md, docs/arch_daemon.md
+# OWNS: Data directory resolution, log rotation, sessions.json/settings.json persistence, and raw snapshot file I/O.
+# EXPORTS: Snapshot helpers, log helpers, and sessions.json/settings.json helpers used by the daemon and CLI.
+# DOCS: agent_chat/plan_dormant_resurrect_snapshots_2026-04-06.md, docs/arch_daemon.md, agent_chat/plan_daemon_settings_store_2026-04-08.md
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from silc.config import get_config
 
@@ -223,6 +224,7 @@ def read_session_log(port: int, tail_lines: int | None = None) -> str:
 
 # Session persistence for resurrect feature
 SESSIONS_FILE = DATA_DIR / "sessions.json"
+SETTINGS_FILE = DATA_DIR / "settings.json"
 SNAPSHOTS_DIR = DATA_DIR / "snapshots"
 
 
@@ -341,23 +343,61 @@ def read_sessions_json() -> list[dict]:
         return []
 
 
+def _write_json_file_atomically(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, indent=2, sort_keys=True)
+    temp_file: Path | None = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+            dir=path.parent,
+            prefix=f".{path.stem}.",
+            suffix=".tmp",
+        ) as handle:
+            handle.write(text)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+            temp_file = Path(handle.name)
+        os.replace(temp_file, path)
+    except OSError:
+        path.write_text(text, encoding="utf-8")
+    finally:
+        if temp_file is not None:
+            try:
+                if temp_file.exists() and temp_file != path:
+                    temp_file.unlink()
+            except OSError:
+                pass
+
+
 def write_sessions_json(sessions: list[dict]) -> None:
     """Write sessions list to sessions.json atomically."""
-    SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    data = {"sessions": sessions}
-    # Write to temp file then rename for atomicity
-    temp_file = SESSIONS_FILE.with_suffix(".tmp")
+    _write_json_file_atomically(SESSIONS_FILE, {"sessions": sessions})
+
+
+def read_settings_json() -> dict[str, Any]:
+    """Read settings.json, returning an empty mapping when unavailable."""
+
+    if not SETTINGS_FILE.exists():
+        return {}
     try:
-        temp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        temp_file.rename(SESSIONS_FILE)
-    except OSError:
-        # Fallback: direct write if rename fails (Windows edge case)
-        SESSIONS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    finally:
-        try:
-            temp_file.unlink()
-        except OSError:
-            pass
+        content = SETTINGS_FILE.read_text(encoding="utf-8")
+        data = json.loads(content)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def write_settings_json(settings: dict[str, Any]) -> None:
+    """Write daemon settings to settings.json atomically."""
+
+    _write_json_file_atomically(SETTINGS_FILE, settings)
 
 
 def append_session_to_json(session: dict) -> None:
@@ -384,6 +424,7 @@ __all__ = [
     "LOGS_DIR",
     "DAEMON_LOG",
     "SESSIONS_FILE",
+    "SETTINGS_FILE",
     "SNAPSHOTS_DIR",
     "get_session_snapshot_path",
     "write_session_snapshot",
@@ -401,7 +442,9 @@ __all__ = [
     "rotate_session_log",
     "read_session_log",
     "read_sessions_json",
+    "read_settings_json",
     "write_sessions_json",
+    "write_settings_json",
     "append_session_to_json",
     "remove_session_from_json",
 ]

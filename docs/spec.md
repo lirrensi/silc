@@ -36,6 +36,21 @@ SILC manages shell sessions through a daemon, per-session HTTP APIs, and multipl
 - `resurrect` MUST load persisted records and materialize all desired sessions.
 - Sessions do not auto-expire; idle tracking is informational only.
 
+## Settings Store
+
+- The daemon MUST own a persisted shared settings object stored separately from the session registry.
+- The settings object MUST be loaded from disk on daemon startup and merged with built-in defaults before any client reads it.
+- The persisted settings file MUST be updated atomically when possible.
+- Settings writes MUST be serialized with other daemon metadata writes so concurrent writers cannot clobber each other.
+- The daemon MUST expose `GET /settings` to return the current effective settings object.
+- The daemon MUST expose `POST /settings` to merge a supplied JSON object into the stored settings.
+- Merging MUST be recursive for nested objects and MUST replace non-object leaf values.
+- Unknown top-level or nested keys MAY be preserved so the settings document can be extended without a migration.
+- Manager UI clients MUST treat daemon settings as the source of truth.
+- Session web pages MAY attempt to read daemon settings for appearance defaults.
+- If a session web page cannot read settings for any reason, it MUST fall back to built-in defaults.
+- Session web pages MUST NOT need write access to use appearance defaults.
+
 ## Session States
 
 - **Running**: desired record exists and a live PTY plus per-session server are active.
@@ -52,6 +67,8 @@ The daemon listens on `19999` and exposes:
 - `GET /sessions` — list desired sessions plus live health
 - `GET /defaults` — manager defaults and shell choices
 - `GET /resolve/{name}` — resolve a name to a session record
+- `GET /settings` — read current shared settings
+- `POST /settings` — merge new shared settings
 - `POST /sessions/{port}/rename` — rename a session
 - `POST /sessions/reorder` — reorder sessions
 - `POST /sessions/{port}/close` — close session
@@ -138,6 +155,8 @@ Dormant sessions do not expose a live websocket endpoint.
 - `silc start` and `silc start-enter` default session cwd to the CLI process current working directory when `--cwd` is omitted.
 - `silc manager` opens the manager UI in a browser.
 - `silc desktop` opens the manager UI in a native webview.
+- `silc settings get` reads the daemon-managed shared settings.
+- `silc settings set <path> <value>` merges a single setting path into the daemon-managed shared settings.
 - `silc list`, `shutdown`, `killall`, `restart-server`, `resurrect`, and `restart` operate on the daemon.
 - `silc full-reset` is a destructive CLI-only factory reset that prompts for confirmation and wipes SILC data.
 - Normal daemon startup loads persisted sessions as dormant records.
@@ -166,6 +185,7 @@ Dormant sessions do not expose a live websocket endpoint.
 - Append mode appends novel lines using exact + fuzzy deduplication.
 - CLI commands are `stream-file-render`, `stream-file-append`, `stream-stop`, and `stream-status`.
 - The CLI fetches the session token from `/token` when needed.
+- Settings commands use the daemon settings API and are not session-bound.
 - Current implementation accepts rotation-related config fields but does not enforce rotation.
 
 ## MCP Server
@@ -193,3 +213,9 @@ The MCP server exposes:
 - Idle sessions are never auto-closed.
 - Dormant sessions do not allocate PTYs, per-session servers, or in-memory terminal snapshots until explicitly activated.
 - Dormant sessions are activated lazily by user interaction or by `resurrect`, not by passive listing.
+
+## Security Considerations
+
+- Settings writes are privileged daemon operations and MUST NOT be exposed to untrusted session pages.
+- Session pages MAY read non-sensitive appearance defaults, but they MUST fall back cleanly if the daemon is unreachable.
+- Remote access to `GET /settings` and `POST /settings` MUST follow the same token rules as other daemon endpoints.

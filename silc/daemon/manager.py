@@ -2,14 +2,15 @@
 
 # FILE: silc/daemon/manager.py
 # PURPOSE: Run the daemon API and contain request, watcher, and session failures so they do not crash the daemon.
-# OWNS: Daemon API routes, session server lifecycle, restart/shutdown watchers, and daemon-level failure boundaries.
+# OWNS: Daemon API routes, shared settings persistence, session server lifecycle, restart/shutdown watchers, and daemon-level failure boundaries.
 # EXPORTS: SilcDaemon (daemon lifecycle manager), DAEMON_PORT (default daemon API port).
-# DOCS: docs/arch_api.md, docs/arch_daemon.md
+# DOCS: docs/arch_api.md, docs/arch_daemon.md, agent_chat/plan_daemon_settings_store_2026-04-08.md
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import shutil
@@ -25,6 +26,7 @@ from typing import Dict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -49,6 +51,7 @@ from silc.daemon.runtime import (
     record_runtime_failure,
     runtime_backoff_expired,
 )
+from silc.daemon.settings import DaemonSettings
 from silc.utils.names import generate_name, is_valid_name
 from silc.utils.persistence import (
     DAEMON_LOG,
@@ -56,11 +59,13 @@ from silc.utils.persistence import (
     cleanup_session_log,
     garbage_collect_session_snapshots,
     get_session_log_path,
+    read_settings_json,
     remove_session_snapshot,
     rotate_daemon_log,
     write_daemon_log,
     write_session_snapshot,
     write_sessions_json,
+    write_settings_json,
 )
 from silc.utils.ports import bind_port
 from silc.utils.shell_detect import ShellInfo, detect_shell, get_available_shell_choices
@@ -222,6 +227,7 @@ class SilcDaemon:
         self._restart_event = asyncio.Event()
         self._reconcile_event = asyncio.Event()
         self.events = DaemonEventBroadcaster()
+        self.shared_settings = DaemonSettings.load(read_settings_json())
         self._daemon_api_app = self._create_daemon_api()
         self._session_tasks: Dict[int, asyncio.Task] = {}
         self._cleanup_tasks: Dict[int, asyncio.Task[None]] = {}
@@ -233,6 +239,13 @@ class SilcDaemon:
     def _create_daemon_api(self) -> FastAPI:
         """Create daemon management API."""
         app = FastAPI(title="Silc Daemon")
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
+        )
 
         @app.exception_handler(HTTPException)
         async def handle_http_exception(
@@ -562,6 +575,48 @@ class SilcDaemon:
                     ),
                     "shell_options": [asdict(choice) for choice in shell_choices],
                 }
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.get("/settings")
+        async def get_settings():
+            """Return the current shared daemon settings."""
+
+            return self.shared_settings.to_dict()
+
+        @app.post("/settings")
+        async def update_settings(request: Request):
+            """Deep-merge a JSON object into the shared daemon settings."""
+
+            operation = "update_settings"
+            try:
+                try:
+                    payload = await request.json()
+                except (json.JSONDecodeError, ValueError) as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=_build_validation_error_payload(
+                            operation, "Request body must be valid JSON"
+                        ),
+                    ) from exc
+                if not isinstance(payload, dict):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=_build_validation_error_payload(
+                            operation, "Settings update must be a JSON object"
+                        ),
+                    )
+
+                async with self._registry_lock:
+                    self.shared_settings = self.shared_settings.merged(payload)
+                    settings_payload = self.shared_settings.to_dict()
+                    write_settings_json(settings_payload)
+                    return settings_payload
             except HTTPException:
                 raise
             except Exception as exc:

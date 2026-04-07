@@ -1,7 +1,7 @@
 // FILE: manager_web_ui/src/lib/daemonApi.ts
-// PURPOSE: Call daemon HTTP endpoints and define the stable daemon session payload shape used by the manager UI.
+// PURPOSE: Call daemon HTTP endpoints and define the stable daemon session and settings payload shapes used by the manager UI.
 // OWNS: Daemon base URL helpers, HTTP API calls, and daemon response interfaces.
-// EXPORTS: getDaemonUrl, listSessions, createSession, closeSession, killSession, restartSession, renameSession, reorderSessions, getDefaults.
+// EXPORTS: getDaemonUrl, listSessions, createSession, closeSession, killSession, restartSession, renameSession, reorderSessions, getDefaults, getSettings, updateSettings.
 // DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md
 
 function getPageProtocol(): string {
@@ -50,6 +50,26 @@ export interface DaemonDefaults {
   shell_options: DaemonShellOption[]
 }
 
+export interface DaemonUiSettings {
+  themePreference?: 'light' | 'dark' | 'system'
+}
+
+export interface DaemonTerminalSettings {
+  theme?: 'light' | 'dark'
+  cols?: number
+  rows?: number
+  scrollback?: number
+  fontFamily?: string
+  fontSize?: number
+  lineHeight?: number
+  cursorBlink?: boolean
+}
+
+export interface DaemonSettings {
+  ui?: DaemonUiSettings
+  terminal?: DaemonTerminalSettings
+}
+
 export interface DaemonShellOption {
   type: string
   label: string
@@ -94,6 +114,26 @@ export async function getDefaults(): Promise<DaemonDefaults> {
   const resp = await fetch(`${getDaemonUrl()}/defaults`)
   if (!resp.ok) {
     throw new Error(`Failed to load defaults: HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+export async function getSettings(): Promise<DaemonSettings> {
+  const resp = await fetch(`${getDaemonUrl()}/settings`)
+  if (!resp.ok) {
+    throw new Error(`Failed to load settings: HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+export async function updateSettings(update: Record<string, unknown>): Promise<DaemonSettings> {
+  const resp = await fetch(`${getDaemonUrl()}/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  })
+  if (!resp.ok) {
+    throw new Error(`Failed to update settings: HTTP ${resp.status}`)
   }
   return resp.json()
 }

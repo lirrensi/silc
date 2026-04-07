@@ -1,3 +1,8 @@
+// FILE: manager_web_ui/src/main.ts
+// PURPOSE: Bootstrap the Vue app and hydrate shared UI/terminal defaults at startup.
+// OWNS: Client app startup wiring and early settings hydration.
+// DOCS: agent_chat/plan_daemon_settings_store_2026-04-08.md
+
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 
@@ -19,6 +24,12 @@ const terminalManager = useTerminalManager(pinia)
 
 ui.initTheme()
 terminalManager.applyTheme(ui.resolvedTheme)
+terminalManager.applyTerminalDefaults(ui.terminalDefaults)
+
+void ui.loadDaemonSettings().then(() => {
+  terminalManager.applyTheme(ui.resolvedTheme)
+  terminalManager.applyTerminalDefaults(ui.terminalDefaults)
+})
 
 app.mount('#app')
 

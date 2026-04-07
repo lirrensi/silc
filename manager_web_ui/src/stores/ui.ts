@@ -1,18 +1,27 @@
 // FILE: manager_web_ui/src/stores/ui.ts
-// PURPOSE: Store global UI preferences including theme, sidebar state, and Home grid density.
-// OWNS: Shared app chrome preferences and persisted UI toggles.
-// EXPORTS: useUiStore - Pinia store for UI state and actions.
+// PURPOSE: Store global UI preferences and hydrate daemon-owned shared settings for the manager UI.
+// OWNS: Shared app chrome preferences, persisted UI toggles, and daemon settings fallback state.
+// EXPORTS: useUiStore - Pinia store for UI state, settings hydration, and actions.
 // DOCS: agent_chat/plan_home_grid_frozen_previews_2026-04-04.md
 
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { THEME_STORAGE_KEY, resolveTheme } from '@/lib/themes'
-import type { ResolvedTheme, ThemePreference } from '@/lib/themes'
+import { getSettings, updateSettings } from '@/lib/daemonApi'
+import {
+  DEFAULT_TERMINAL_DEFAULTS,
+  THEME_STORAGE_KEY,
+  resolveTerminalDefaults,
+  resolveTheme,
+  type ResolvedTheme,
+  type TerminalDefaults,
+  type ThemePreference,
+} from '@/lib/themes'
 import type { HomeGridDensity } from '@/lib/homePreview'
 
 const SIDEBAR_STORAGE_KEY = 'silc.sidebarCollapsed'
 const SIDEBAR_WIDTH_STORAGE_KEY = 'silc.sidebarWidth'
 const HOME_GRID_STORAGE_KEY = 'silc.homeGridDensity'
+const DAEMON_SETTINGS_CACHE_KEY = 'silc.daemonSettingsCache'
 const DEFAULT_SIDEBAR_WIDTH = 320
 const MIN_SIDEBAR_WIDTH = 180
 const MAX_SIDEBAR_WIDTH = 400
@@ -24,6 +33,7 @@ export const useUiStore = defineStore('ui', () => {
   const sidebarWidth = ref(DEFAULT_SIDEBAR_WIDTH)
   const isThemeReady = ref(false)
   const homeGridDensity = ref<HomeGridDensity>('3x3')
+  const terminalDefaults = ref<TerminalDefaults>({ ...DEFAULT_TERMINAL_DEFAULTS })
   let mediaQuery: MediaQueryList | null = null
   let mediaHandler: (() => void) | null = null
 
@@ -37,6 +47,13 @@ export const useUiStore = defineStore('ui', () => {
 
   function persistTheme(): void {
     localStorage.setItem(THEME_STORAGE_KEY, themePreference.value)
+  }
+
+  function persistDaemonSettingsCache(): void {
+    localStorage.setItem(
+      DAEMON_SETTINGS_CACHE_KEY,
+      JSON.stringify({ ui: { themePreference: themePreference.value }, terminal: terminalDefaults.value }),
+    )
   }
 
   function persistSidebar(): void {
@@ -66,6 +83,10 @@ export const useUiStore = defineStore('ui', () => {
     themePreference.value = preference
     applyTheme()
     persistTheme()
+    persistDaemonSettingsCache()
+    void Promise.resolve(updateSettings({ ui: { themePreference: preference } })).catch(
+      () => undefined,
+    )
   }
 
   function toggleTheme(): void {
@@ -95,6 +116,41 @@ export const useUiStore = defineStore('ui', () => {
   function setHomeGridDensity(density: HomeGridDensity): void {
     homeGridDensity.value = density
     persistHomeGridDensity()
+  }
+
+  async function loadDaemonSettings(): Promise<void> {
+    try {
+      const settings = await getSettings()
+      const uiTheme = settings.ui?.themePreference
+      if (uiTheme === 'light' || uiTheme === 'dark' || uiTheme === 'system') {
+        themePreference.value = uiTheme
+        persistTheme()
+      }
+      terminalDefaults.value = resolveTerminalDefaults(settings.terminal)
+      persistDaemonSettingsCache()
+      applyTheme()
+    } catch {
+      const cached = localStorage.getItem(DAEMON_SETTINGS_CACHE_KEY)
+      if (!cached) {
+        return
+      }
+
+      try {
+        const parsed = JSON.parse(cached) as {
+          ui?: { themePreference?: ThemePreference }
+          terminal?: Partial<TerminalDefaults>
+        }
+        const uiTheme = parsed.ui?.themePreference
+        if (uiTheme === 'light' || uiTheme === 'dark' || uiTheme === 'system') {
+          themePreference.value = uiTheme
+          persistTheme()
+        }
+        terminalDefaults.value = resolveTerminalDefaults(parsed.terminal)
+        applyTheme()
+      } catch {
+        // Ignore bad cache and keep browser fallback state.
+      }
+    }
   }
 
   function initTheme(): void {
@@ -149,6 +205,7 @@ export const useUiStore = defineStore('ui', () => {
     sidebarWidth,
     isThemeReady,
     homeGridDensity,
+    terminalDefaults,
     setTheme,
     toggleTheme,
     openMobileNav,
@@ -159,5 +216,6 @@ export const useUiStore = defineStore('ui', () => {
     setSidebarWidth,
     setHomeGridDensity,
     initTheme,
+    loadDaemonSettings,
   }
 })

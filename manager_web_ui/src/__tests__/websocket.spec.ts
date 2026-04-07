@@ -72,6 +72,8 @@ vi.mock('@/stores/terminalManager', () => ({
 
 vi.mock('@/lib/daemonApi', () => ({
   getSessionHttpUrl: () => 'http://127.0.0.1:20000',
+  getSettings: vi.fn().mockResolvedValue({ ui: { themePreference: 'system' }, terminal: {} }),
+  updateSettings: vi.fn(),
 }))
 
 describe('connectWebSocket', () => {

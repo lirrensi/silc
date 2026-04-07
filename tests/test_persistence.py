@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from silc.daemon.settings import build_path_update, deep_merge_settings
 from silc.utils import persistence
 
 
@@ -12,6 +13,12 @@ def _patch_log_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(persistence, "LOGS_DIR", logs_dir)
     monkeypatch.setattr(persistence, "DAEMON_LOG", logs_dir / "daemon.log")
     return logs_dir
+
+
+def _patch_settings_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    settings_file = tmp_path / "settings.json"
+    monkeypatch.setattr(persistence, "SETTINGS_FILE", settings_file)
+    return settings_file
 
 
 def test_daemon_log_rotation_trims_old_lines(
@@ -91,3 +98,34 @@ def test_purge_silc_data_removes_data_and_logs(
 
     assert not data_dir.exists()
     assert not log_dir.exists()
+
+
+def test_settings_json_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_file = _patch_settings_path(tmp_path, monkeypatch)
+
+    payload = {
+        "ui": {"themePreference": "dark"},
+        "terminal": {"fontSize": 18, "theme": "light"},
+    }
+
+    persistence.write_settings_json(payload)
+
+    assert settings_file.exists()
+    assert persistence.read_settings_json() == payload
+
+
+def test_settings_helpers_deep_merge_nested_values() -> None:
+    base = {
+        "ui": {"themePreference": "system"},
+        "terminal": {"fontSize": 15, "cursorBlink": True},
+    }
+    update = build_path_update("terminal.fontSize", 20)
+
+    merged = deep_merge_settings(base, update)
+
+    assert merged == {
+        "ui": {"themePreference": "system"},
+        "terminal": {"fontSize": 20, "cursorBlink": True},
+    }

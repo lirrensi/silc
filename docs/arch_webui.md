@@ -12,6 +12,7 @@ The Manager Web UI is a single-page application (SPA) that provides:
 - **Terminal Access** — Interactive terminal emulation via xterm.js
 - **Real-time Updates** — WebSocket streaming of terminal output
 - **Multi-session View** — Grid view of all active sessions
+- **Shared Appearance Settings** — Manager theme and terminal defaults hydrate from daemon-owned settings
 
 Users access it via `silc manager` (browser tab) or `silc desktop` (native webview window).
 
@@ -26,6 +27,7 @@ Users access it via `silc manager` (browser tab) or `silc desktop` (native webvi
 - WebSocket connection management
 - Daemon API client
 - Session lifecycle UI
+- UI settings hydration and local fallback cache for daemon-owned preferences
 
 **This component does NOT own:**
 - Session PTY management (see [arch_core.md](arch_core.md))
@@ -215,6 +217,27 @@ setWs(port, ws | null): void
 
 ---
 
+### UI Preferences Store
+
+Shared app settings for chrome and terminal defaults.
+
+**State:**
+```typescript
+themePreference: 'light' | 'dark' | 'system'
+resolvedTheme: 'light' | 'dark'
+homeGridDensity: '2x2' | '3x3' | '4x4'
+isSidebarCollapsed: boolean
+sidebarWidth: number
+```
+
+**Behavior:**
+- Hydrates from daemon-owned settings when available.
+- Falls back to cached browser state and built-in defaults when the daemon cannot be reached.
+- Applies the manager theme to the document and provides the resolved xterm theme to terminal instances.
+- Treats daemon settings as the source of truth for shared preferences.
+
+---
+
 ### Daemon API Client
 
 HTTP client for the daemon management API.
@@ -239,6 +262,16 @@ interface CreateSessionResponse {
   session_id: string
   shell: string
 }
+
+interface DaemonSettings {
+  ui: {
+    theme?: 'light' | 'dark' | 'system'
+    xterm_theme?: 'light' | 'dark'
+    font_size?: number
+    font_family?: string
+  }
+  terminal?: Record<string, unknown>
+}
 ```
 
 **Functions:**
@@ -248,6 +281,8 @@ createSession(options?: { port?, shell?, cwd? }): Promise<CreateSessionResponse>
 closeSession(port: number): Promise<void>
 killSession(port: number): Promise<void>
 restartSession(port: number): Promise<void>
+getSettings(): Promise<DaemonSettings>
+updateSettings(partial: Partial<DaemonSettings>): Promise<DaemonSettings>
 resizeSession(port: number, rows: number, cols: number): Promise<void>
 sendSigterm(port: number): Promise<void>
 sendSigkill(port: number): Promise<void>

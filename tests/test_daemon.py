@@ -32,6 +32,7 @@ from silc.daemon.manager import DAEMON_PORT, SilcDaemon
 from silc.daemon.pidfile import read_pidfile, remove_pidfile, write_pidfile
 from silc.daemon.registry import SessionRegistry
 from silc.daemon.runtime import SessionState
+from silc.utils import persistence
 
 
 def _decode_ws_frame(frame: bytes) -> tuple[dict, bytes]:
@@ -287,6 +288,39 @@ def test_list_sessions_marks_dormant_records() -> None:
     session = resp.json()[0]
     assert session["dormant"] is True
     assert session["runtime_state"] == "dormant"
+
+
+def test_settings_routes_merge_and_persist(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(persistence, "SETTINGS_FILE", tmp_path / "settings.json")
+
+    daemon = SilcDaemon(enable_hard_exit=False)
+    client = TestClient(daemon._create_daemon_api())
+
+    get_resp = client.get("/settings")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["ui"]["themePreference"] == "system"
+
+    post_resp = client.post(
+        "/settings",
+        json={"ui": {"themePreference": "dark"}, "terminal": {"fontSize": 18}},
+    )
+    assert post_resp.status_code == 200
+    payload = post_resp.json()
+    assert payload["ui"]["themePreference"] == "dark"
+    assert payload["terminal"]["fontSize"] == 18
+    assert payload["terminal"]["cursorBlink"] is True
+
+    persisted = persistence.read_settings_json()
+    assert persisted["ui"]["themePreference"] == "dark"
+    assert persisted["terminal"]["fontSize"] == 18
+
+    daemon_reload = SilcDaemon(enable_hard_exit=False)
+    reload_client = TestClient(daemon_reload._create_daemon_api())
+    reload_resp = reload_client.get("/settings")
+    assert reload_resp.status_code == 200
+    assert reload_resp.json()["ui"]["themePreference"] == "dark"
 
 
 @pytest.mark.asyncio

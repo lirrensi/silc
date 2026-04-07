@@ -31,10 +31,12 @@ vi.mock('@/lib/daemonApi', () => ({
   closeSession: vi.fn(),
   killSession: vi.fn(),
   listSessions: mockListSessions,
+  getSettings: vi.fn().mockResolvedValue({ ui: { themePreference: 'system' }, terminal: {} }),
   restartSession: mockRestartSession,
   sendInterrupt: vi.fn(),
   sendSigkill: vi.fn(),
   sendSigterm: vi.fn(),
+  updateSettings: vi.fn(),
 }))
 
 vi.mock('@/lib/websocket', () => ({

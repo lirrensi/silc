@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@/lib/daemonApi', () => ({
   listSessions: vi.fn().mockResolvedValue([]),
+  getSettings: vi.fn().mockResolvedValue({ ui: { themePreference: 'system' }, terminal: {} }),
+  updateSettings: vi.fn(),
 }))
 
 vi.mock('@/lib/websocket', () => ({
