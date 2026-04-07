@@ -103,7 +103,7 @@ def _shutdown_daemon() -> None:
 
 
 def _kill_daemon() -> None:
-    """Force kill daemon via CLI."""
+    """Best-effort full cleanup for the daemon test module."""
     try:
         subprocess.run(
             [sys.executable, "-m", "silc", "killall"],
@@ -114,6 +114,26 @@ def _kill_daemon() -> None:
         )
     except subprocess.TimeoutExpired:
         pass
+    except Exception:
+        pass
+
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "silc", "shutdown"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception:
+        pass
+
+    try:
+        from silc.daemon.pidfile import kill_daemon as kill_daemon_process
+
+        kill_daemon_process(port=DAEMON_PORT, force=True, timeout=2.0)
     except Exception:
         pass
 
@@ -1063,7 +1083,7 @@ async def test_resurrect_materializes_dormant_sessions(
 async def test_killall_removes_records(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """Killall should still delete desired records and sessions.json."""
+    """Killall should delete desired records without shutting down the daemon."""
     from silc.utils import persistence
 
     monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
@@ -1093,8 +1113,9 @@ async def test_killall_removes_records(
     resp = await _post_daemon_json(daemon, "/killall", {})
 
     assert resp.status_code == 200
-    assert resp.json()["status"] == "killed"
+    assert resp.json()["status"] == "cleared"
     assert daemon.registry.get(entry.port) is None
     assert entry.port not in daemon.runtime_by_port
     assert persistence.read_sessions_json() == []
     assert persistence.read_session_snapshot(entry.session_id) == b""
+    assert not daemon._shutdown_event.is_set()

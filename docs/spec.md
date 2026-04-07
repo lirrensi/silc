@@ -29,7 +29,8 @@ SILC manages shell sessions through a daemon, per-session HTTP APIs, and multipl
 - If a stored launch cwd is invalid, the new runtime falls back to the user's home directory or the shell default instead of failing the restart.
 - `shutdown` MUST persist a frozen raw terminal snapshot for each live session before stopping runtime when shutdown is graceful.
 - `shutdown` stops live runtime but preserves records as dormant sessions.
-- `killall` destroys live sessions and exits the daemon.
+- `killall` removes all current session records and session artifacts while keeping the daemon process alive.
+- `full-reset` is CLI-only, requires typed confirmation, stops the daemon, and deletes all SILC data except the installed binaries.
 - Daemon startup MUST load persisted records without materializing live runtime.
 - Persisted sessions loaded at daemon startup are in a dormant state until explicitly materialized.
 - `resurrect` MUST load persisted records and materialize all desired sessions.
@@ -59,7 +60,7 @@ The daemon listens on `19999` and exposes:
 - `POST /restart-server` — restart daemon HTTP server only
 - `POST /resurrect` — reload persisted records and reconcile
 - `POST /shutdown` — graceful daemon shutdown
-- `POST /killall` — force kill daemon and sessions
+- `POST /killall` — clear sessions and session artifacts
 - `GET /events` — binary websocket stream of manager events
 
 ## Session API
@@ -137,6 +138,7 @@ Dormant sessions do not expose a live websocket endpoint.
 - `silc manager` opens the manager UI in a browser.
 - `silc desktop` opens the manager UI in a native webview.
 - `silc list`, `shutdown`, `killall`, `restart-server`, `resurrect`, and `restart` operate on the daemon.
+- `silc full-reset` is a destructive CLI-only factory reset that prompts for confirmation and wipes SILC data.
 - Normal daemon startup loads persisted sessions as dormant records.
 - `silc resurrect` materializes all persisted sessions.
 - `silc restart` performs a graceful shutdown, captures frozen raw snapshots, and starts again with dormant sessions loaded.
@@ -144,6 +146,7 @@ Dormant sessions do not expose a live websocket endpoint.
 - Session-targeted commands wake dormant sessions synchronously before continuing, except `restart`, `close`, and `kill`.
 - Selecting a dormant session in the manager UI wakes it before the interactive view continues.
 - `silc tui` launches the native TUI binary and asks before taking over an active interactive client.
+- `silc full-reset` is not exposed through the daemon API.
 
 ## Snapshot Persistence
 

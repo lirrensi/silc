@@ -172,7 +172,7 @@ API routes:
 - `POST /restart-server` — restart daemon HTTP server only
 - `POST /resurrect` — reload `sessions.json` and materialize desired sessions
 - `POST /shutdown` — graceful shutdown, preserve records
-- `POST /killall` — force kill everything
+- `POST /killall` — clear all sessions and session artifacts, keep daemon alive
 - `GET /events` — manager websocket event stream
 
 ## Session Creation Rules
@@ -212,6 +212,6 @@ Important event types:
 ## Shutdown and Hard Exit
 
 - `shutdown` is bounded, saves frozen raw snapshots for live sessions during graceful stop, and preserves records as dormant entries.
-- `killall` is bounded and removes live runtime aggressively.
+- `killall` is bounded and aggressively removes live runtime plus session records/artifacts without terminating the daemon.
 - On some platforms a delayed hard exit is scheduled so a wedged process does not keep the daemon alive.
 - Signal handlers set the shutdown event and let the normal shutdown path finish.

@@ -38,6 +38,7 @@ silc
 ├── list
 ├── shutdown
 ├── killall
+├── full-reset
 ├── restart-server
 ├── resurrect
 ├── restart
@@ -114,7 +115,8 @@ Notes:
 
 - `list` prints active sessions from the daemon registry.
 - `shutdown` gracefully stops the daemon but preserves records.
-- `killall` forcefully terminates sessions and daemon.
+- `killall` removes all sessions and session artifacts while keeping the daemon alive.
+- `full-reset` is a CLI-only factory reset that prompts for typed confirmation, stops the daemon, and deletes SILC data.
 - `restart-server` restarts the daemon HTTP server only.
 - `resurrect` reloads persisted session records and reconciles them.
 - `restart` performs a full daemon restart while preserving share mode.

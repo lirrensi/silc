@@ -762,46 +762,37 @@ class SilcDaemon:
 
         @app.post("/killall")
         async def killall():
-            """Force kill: close all sessions and terminate daemon.
-
-            This is the "absolute nuke" path.
-            """
+            """Clear all sessions and session artifacts while keeping the daemon alive."""
 
             write_daemon_log("Killall requested")
 
-            ports = list(self.sessions.keys())
-            for port in ports:
-                session = self.sessions.get(port)
-                if session:
+            async with self._registry_lock:
+                ports = [entry.port for entry in self.registry.list_all()]
+                for port in ports:
+                    session = self.sessions.get(port)
+                    if session:
+                        try:
+                            await asyncio.wait_for(session.force_kill(), timeout=1.0)
+                        except asyncio.TimeoutError:
+                            write_daemon_log(
+                                f"Timeout force-killing session PTY: port={port}"
+                            )
+                        except Exception as exc:
+                            write_daemon_log(
+                                f"Error force-killing session PTY: port={port}, error={exc}"
+                            )
+
                     try:
-                        await asyncio.wait_for(session.force_kill(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        write_daemon_log(
-                            f"Timeout force-killing session PTY: port={port}"
-                        )
+                        await self._remove_record_and_stop_reconciliation(port)
+                    except HTTPException:
+                        continue
                     except Exception as exc:
                         write_daemon_log(
-                            f"Error force-killing session PTY: port={port}, error={exc}"
+                            f"Error clearing session: port={port}, error={exc}"
                         )
 
-                try:
-                    await asyncio.wait_for(self._ensure_cleanup_task(port), timeout=2.0)
-                except asyncio.TimeoutError:
-                    write_daemon_log(f"Timeout cleaning session: port={port}")
-                except Exception as exc:
-                    write_daemon_log(
-                        f"Error cleaning session: port={port}, error={exc}"
-                    )
-
-            self._shutdown_event.set()
-            if self._daemon_server:
-                self._daemon_server.should_exit = True
-
-            # Ensure the process is actually gone even if uvicorn/asyncio is wedged.
-            if self._enable_hard_exit:
-                asyncio.create_task(self._hard_exit_after(delay=0.25, exit_code=1))
-
-            return {"status": "killed"}
+            write_daemon_log(f"Killall complete: cleared {len(ports)} session(s)")
+            return {"status": "cleared", "removed": len(ports)}
 
         @app.post("/restart-server")
         async def restart_server():
@@ -1850,10 +1841,12 @@ class SilcDaemon:
                         write_daemon_log(
                             f"Existing daemon process found (PID {existing_pid}), aborting startup"
                         )
-                        write_daemon_log("Use 'silc shutdown' or 'silc killall' first")
+                        write_daemon_log(
+                            "Use 'silc shutdown' or 'silc full-reset' first"
+                        )
                         raise RuntimeError(
                             f"Daemon already running (PID {existing_pid}). "
-                            "Use 'silc shutdown' or 'silc killall' to stop it."
+                            "Use 'silc shutdown' or 'silc full-reset' to stop it."
                         )
                 except psutil.NoSuchProcess:
                     write_daemon_log(

@@ -524,9 +524,15 @@ def run_cli(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProce
 @pytest.fixture(scope="module")
 def ensure_daemon_stopped():
     """Stop any existing daemon before and after tests."""
-    # Stop before
+    # Clear sessions first, then stop the daemon.
     try:
         run_cli(["killall"], timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+    time.sleep(1)
+
+    try:
+        run_cli(["shutdown"], timeout=35)
     except subprocess.TimeoutExpired:
         pass
     time.sleep(1)
@@ -536,6 +542,10 @@ def ensure_daemon_stopped():
     # Stop after
     try:
         run_cli(["killall"], timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        run_cli(["shutdown"], timeout=35)
     except subprocess.TimeoutExpired:
         pass
 

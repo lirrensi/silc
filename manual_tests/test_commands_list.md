@@ -16,7 +16,8 @@ cmd> python main.py 20000 clear
 ## Daemon management
 
 cmd> python main.py shutdown           # graceful shutdown (closes all sessions)
-cmd> python main.py killall            # force kill daemon and all sessions
+cmd> python main.py killall            # clear sessions and session artifacts
+cmd> python main.py full-reset         # wipe SILC data and stop daemon
 
 ## Token-protected global session (for remote API tests)
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -109,6 +110,58 @@ def cleanup_session_log(port: int) -> None:
             log_path.unlink()
     except OSError:
         pass
+
+
+def remove_session_artifacts() -> None:
+    """Delete persisted session state and session-specific logs."""
+
+    try:
+        if SESSIONS_FILE.exists():
+            SESSIONS_FILE.unlink()
+    except OSError:
+        pass
+
+    try:
+        if SNAPSHOTS_DIR.exists():
+            shutil.rmtree(SNAPSHOTS_DIR, ignore_errors=True)
+    except OSError:
+        pass
+
+    try:
+        if LOGS_DIR.exists():
+            for path in LOGS_DIR.glob("session_*.log"):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+def purge_silc_data() -> None:
+    """Delete all SILC data directories and artifacts."""
+
+    from silc.config import get_config
+
+    config = get_config()
+    paths = []
+    if config.paths.data_dir is not None:
+        paths.append(config.paths.data_dir)
+    if config.paths.log_dir is not None:
+        paths.append(config.paths.log_dir)
+
+    seen: set[Path] = set()
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            elif path.exists():
+                path.unlink()
+        except OSError:
+            pass
 
 
 def write_daemon_log(message: str) -> None:
@@ -341,6 +394,8 @@ __all__ = [
     "get_session_log_path",
     "rotate_daemon_log",
     "cleanup_session_log",
+    "remove_session_artifacts",
+    "purge_silc_data",
     "write_daemon_log",
     "write_session_log",
     "rotate_session_log",
