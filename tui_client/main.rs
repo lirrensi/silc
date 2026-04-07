@@ -2,7 +2,7 @@
 // PURPOSE: Orchestrate the native SILC TUI by wiring session transport, terminal emulation, and rendering.
 // OWNS: Process startup, event-loop coordination, and high-level session lifecycle.
 // EXPORTS: main - launch the standalone TUI client binary.
-// DOCS: agent_chat/plan_rust_tui_par_term_remake_2026-04-07.md
+// DOCS: agent_chat/plan_rust_tui_cleanup_2026-04-07.md; agent_chat/plan_rust_tui_par_term_remake_2026-04-07.md
 
 mod session_connection;
 mod terminal_engine;
@@ -21,10 +21,12 @@ use crossterm::{
     execute,
     terminal::{self, Clear, ClearType},
 };
+use serde::Deserialize;
 use std::{
     io::{self, Write},
     sync::Arc,
     thread,
+    time::Duration,
 };
 use tokio::sync::mpsc;
 use ureq::Agent;
@@ -32,6 +34,18 @@ use url::Url;
 
 type DynError = Box<dyn std::error::Error>;
 type DynResult<T> = Result<T, DynError>;
+
+#[derive(Debug, Deserialize)]
+struct SessionStatus {
+    name: String,
+    port: u16,
+    title: String,
+}
+
+enum UiEvent {
+    Input(Event),
+    Tick,
+}
 
 struct TerminalGuard {
     restored: bool,
@@ -79,6 +93,47 @@ fn clear_local_screen() -> DynResult<()> {
     execute!(stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
     stdout.flush()?;
     Ok(())
+}
+
+fn content_rows_for_terminal(rows: u16) -> u16 {
+    rows.saturating_sub(1)
+}
+
+fn session_label_from_url(ws_url: &Url) -> String {
+    let mut label = format!("{}://{}", ws_url.scheme(), ws_url.host_str().unwrap_or("session"));
+
+    if let Some(port) = ws_url.port() {
+        label.push(':');
+        label.push_str(&port.to_string());
+    }
+
+    let path = ws_url.path();
+    if !path.is_empty() && path != "/" {
+        label.push_str(path);
+    } else {
+        label.push('/');
+    }
+
+    label
+}
+
+fn session_label_from_status(status: Option<SessionStatus>, fallback: &Url) -> String {
+    if let Some(status) = status {
+        let title = status.title.trim();
+        if title.is_empty() {
+            format!("[{}:{}]", status.name, status.port)
+        } else {
+            format!("[{}:{}] {}", status.name, status.port, title)
+        }
+    } else {
+        session_label_from_url(fallback)
+    }
+}
+
+fn fetch_session_status(agent: &Agent, status_url: &Url) -> Option<SessionStatus> {
+    let response = agent.get(&status_url.to_string()).call().ok()?;
+    let body = response.into_string().ok()?;
+    serde_json::from_str(&body).ok()
 }
 
 fn map_key_to_bytes(key: KeyEvent) -> Option<Vec<u8>> {
@@ -207,6 +262,8 @@ async fn run() -> DynResult<()> {
     let parsed_ws_url = Url::parse(&ws_url)?;
 
     let http_base = ws_to_http_base(&parsed_ws_url);
+    let mut status_url = http_base.clone();
+    status_url.set_path("/status");
     let mut clear_url = http_base.clone();
     clear_url.set_path("/clear");
 
@@ -214,13 +271,16 @@ async fn run() -> DynResult<()> {
     resize_url.set_path("/resize");
 
     let http_agent = Arc::new(Agent::new());
+    let session_status = fetch_session_status(&http_agent, &status_url);
+    let session_label = session_label_from_status(session_status, &parsed_ws_url);
 
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
-    request_resize(Arc::clone(&http_agent), resize_url.to_string(), rows, cols).await?;
+    let content_rows = content_rows_for_terminal(rows);
+    request_resize(Arc::clone(&http_agent), resize_url.to_string(), content_rows, cols).await?;
 
     clear_local_screen()?;
 
-    let mut engine = ParTermEngine::new(cols as usize, rows as usize);
+    let mut engine = ParTermEngine::new(cols as usize, content_rows as usize);
     let mut renderer = CrosstermTerminalRenderer::new();
 
     let connection = match SessionConnection::connect(&parsed_ws_url).await {
@@ -241,19 +301,29 @@ async fn run() -> DynResult<()> {
         writer_handle,
     } = connection;
 
-    let (tx_term, mut rx_term) = mpsc::unbounded_channel::<Event>();
+    let (tx_term, mut rx_term) = mpsc::unbounded_channel::<UiEvent>();
+
+    let tick_tx = tx_term.clone();
 
     let _input_handle = thread::spawn(move || {
         while let Ok(evt) = event::read() {
-            if tx_term.send(evt).is_err() {
+            if tx_term.send(UiEvent::Input(evt)).is_err() {
                 break;
             }
         }
     });
 
-    let mut should_quit = false;
+    let _tick_handle = thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(1));
+        if tick_tx.send(UiEvent::Tick).is_err() {
+            break;
+        }
+    });
 
-    renderer.render(&mut engine, *status_rx.borrow())?;
+    let mut should_quit = false;
+    let mut detach_notice: Option<String> = None;
+
+    renderer.render(&mut engine, *status_rx.borrow(), &session_label)?;
 
     while !should_quit {
         tokio::select! {
@@ -265,7 +335,7 @@ async fn run() -> DynResult<()> {
                             engine.process_output(&extra);
                         }
 
-                        renderer.render(&mut engine, *status_rx.borrow())?;
+                        renderer.render(&mut engine, *status_rx.borrow(), &session_label)?;
 
                         let responses = engine.drain_responses();
                         if !responses.is_empty() {
@@ -277,7 +347,7 @@ async fn run() -> DynResult<()> {
             }
             maybe_evt = rx_term.recv() => {
                 match maybe_evt {
-                    Some(Event::Key(key)) => {
+                    Some(UiEvent::Input(Event::Key(key))) => {
                         if key.kind == KeyEventKind::Release {
                             continue;
                         }
@@ -285,6 +355,9 @@ async fn run() -> DynResult<()> {
                         if key.code == KeyCode::Char('q')
                             && key.modifiers.contains(KeyModifiers::CONTROL)
                         {
+                            detach_notice = Some(format!(
+                                "Detached from {session_label}. Reconnect with `silc-tui {ws_url}`."
+                            ));
                             should_quit = true;
                             continue;
                         }
@@ -299,7 +372,7 @@ async fn run() -> DynResult<()> {
                             engine.reset();
                             renderer.reset();
                             let _ = clear_local_screen();
-                            renderer.render(&mut engine, *status_rx.borrow())?;
+                            renderer.render(&mut engine, *status_rx.borrow(), &session_label)?;
                             continue;
                         }
 
@@ -307,7 +380,7 @@ async fn run() -> DynResult<()> {
                             let _ = input_tx.send(sequence);
                         }
                     }
-                    Some(Event::Paste(text)) => {
+                    Some(UiEvent::Input(Event::Paste(text))) => {
                         if !text.is_empty() {
                             engine.paste(&text);
                             let responses = engine.drain_responses();
@@ -316,20 +389,25 @@ async fn run() -> DynResult<()> {
                             }
                         }
                     }
-                    Some(Event::Resize(cols, rows)) => {
+                    Some(UiEvent::Input(Event::Resize(cols, rows))) => {
+                        let content_rows = content_rows_for_terminal(rows);
                         let _ = request_resize(
                             Arc::clone(&http_agent),
                             resize_url.to_string(),
-                            rows,
+                            content_rows,
                             cols,
                         )
                         .await;
 
-                        engine.resize(cols as usize, rows as usize);
+                        engine.resize(cols as usize, content_rows as usize);
                         renderer.reset();
-                        renderer.render(&mut engine, *status_rx.borrow())?;
+                        renderer.render(&mut engine, *status_rx.borrow(), &session_label)?;
                     }
-                    Some(Event::Mouse(mouse)) => {
+                    Some(UiEvent::Input(Event::Mouse(mouse))) => {
+                        if mouse.row as usize >= engine.rows() {
+                            continue;
+                        }
+
                         let kind = mouse.kind;
                         let raw = match kind {
                             MouseEventKind::Down(_)
@@ -346,17 +424,20 @@ async fn run() -> DynResult<()> {
                             let _ = input_tx.send(sequence);
                         }
                     }
-                    Some(Event::FocusGained) => {
+                    Some(UiEvent::Input(Event::FocusGained)) => {
                         let focus = engine.report_focus_in();
                         if !focus.is_empty() {
                             let _ = input_tx.send(focus);
                         }
                     }
-                    Some(Event::FocusLost) => {
+                    Some(UiEvent::Input(Event::FocusLost)) => {
                         let focus = engine.report_focus_out();
                         if !focus.is_empty() {
                             let _ = input_tx.send(focus);
                         }
+                    }
+                    Some(UiEvent::Tick) => {
+                        renderer.render(&mut engine, *status_rx.borrow(), &session_label)?;
                     }
                     None => break,
                 }
@@ -374,7 +455,9 @@ async fn run() -> DynResult<()> {
     reader_handle.abort();
     writer_handle.abort();
 
-    if *status_rx.borrow() == ConnectionState::Disconnected {
+    if let Some(message) = detach_notice {
+        eprintln!("{message}");
+    } else if *status_rx.borrow() == ConnectionState::Disconnected {
         let reason = disconnect_reason
             .lock()
             .ok()

@@ -2,15 +2,16 @@
 // PURPOSE: Paint terminal engine state into the native TUI without leaking terminal raw bytes.
 // OWNS: Cell-by-cell screen redraws, cursor placement, and local terminal title updates.
 // EXPORTS: CrosstermTerminalRenderer.
-// DOCS: agent_chat/plan_rust_tui_par_term_remake_2026-04-07.md; agent_chat/plan_tui_full_repaint_2026-04-07.md
+// DOCS: agent_chat/plan_rust_tui_cleanup_2026-04-07.md; agent_chat/plan_rust_tui_par_term_remake_2026-04-07.md; agent_chat/plan_tui_full_repaint_2026-04-07.md
 
 use crate::{session_connection::ConnectionState, terminal_engine::TerminalEngine};
 use crossterm::{
     cursor, queue,
-    style::{Attribute, Color, SetAttribute, SetBackgroundColor, SetForegroundColor},
+    style::{Attribute, Color, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor},
     terminal,
 };
 use std::io::{self, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 type DynError = Box<dyn std::error::Error>;
 type DynResult<T> = Result<T, DynError>;
@@ -40,11 +41,17 @@ impl CrosstermTerminalRenderer {
         &mut self,
         engine: &mut dyn TerminalEngine,
         state: ConnectionState,
+        session_label: &str,
     ) -> DynResult<()> {
         let title = self.window_title(engine, state);
         let cursor = engine.cursor();
         let cursor_state = (cursor.col as u16, cursor.row as u16, cursor.visible);
-        let rows_to_render = (0..engine.rows()).collect::<Vec<_>>();
+        let rows_to_render = 0..engine.rows();
+        let footer_row = engine.rows() as u16;
+        let footer_width = terminal::size()
+            .map(|(cols, _)| cols as usize)
+            .unwrap_or(engine.cols());
+        let footer_line = self.footer_line(session_label, state, footer_width);
         if self.force_full_refresh {
             self.force_full_refresh = false;
         }
@@ -113,6 +120,13 @@ impl CrosstermTerminalRenderer {
             }
         }
 
+        queue!(stdout, cursor::MoveTo(0, footer_row))?;
+        queue!(stdout, SetAttribute(Attribute::Reset))?;
+        queue!(stdout, SetForegroundColor(Color::Grey))?;
+        queue!(stdout, SetBackgroundColor(Color::DarkGrey))?;
+        stdout.write_all(footer_line.as_bytes())?;
+        queue!(stdout, ResetColor)?;
+
         if cursor.visible {
             queue!(
                 stdout,
@@ -129,6 +143,33 @@ impl CrosstermTerminalRenderer {
         engine.mark_clean();
 
         Ok(())
+    }
+
+    fn footer_line(&self, session_label: &str, state: ConnectionState, width: usize) -> String {
+        let state_label = match state {
+            ConnectionState::Connected => "connected",
+            ConnectionState::Disconnected => "disconnected",
+        };
+        let left = format!(" {} [{}]", session_label, state_label);
+        let right = format!("Ctrl+Q detach  Ctrl+L clear  {}", clock_hint());
+
+        if width == 0 {
+            return String::new();
+        }
+
+        if right.len() >= width {
+            return pad_to_width(truncate_to_width(&right, width), width);
+        }
+
+        let left_budget = width - right.len();
+        let left = truncate_to_width(&left, left_budget.saturating_sub(1));
+        let gap = width.saturating_sub(left.len() + right.len());
+
+        let mut out = String::with_capacity(width);
+        out.push_str(&left);
+        out.extend(std::iter::repeat(' ').take(gap.max(1)));
+        out.push_str(&right);
+        pad_to_width(out, width)
     }
 
     fn window_title(&self, engine: &dyn TerminalEngine, state: ConnectionState) -> String {
@@ -155,4 +196,27 @@ impl CrosstermTerminalRenderer {
 fn par_term_color(color: par_term_emu_core_rust::color::Color) -> Color {
     let (r, g, b) = color.to_rgb();
     Color::Rgb { r, g, b }
+}
+
+fn truncate_to_width(text: &str, width: usize) -> String {
+    text.chars().take(width).collect()
+}
+
+fn pad_to_width(mut text: String, width: usize) -> String {
+    let current = text.chars().count();
+    if current < width {
+        text.extend(std::iter::repeat(' ').take(width - current));
+    }
+    text
+}
+
+fn clock_hint() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let day_seconds = seconds % 86_400;
+    let hours = day_seconds / 3_600;
+    let minutes = (day_seconds % 3_600) / 60;
+    format!("UTC {hours:02}:{minutes:02}")
 }

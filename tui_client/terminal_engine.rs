@@ -22,7 +22,6 @@ pub trait TerminalEngine {
     fn report_focus_out(&self) -> Vec<u8>;
     fn rows(&self) -> usize;
     fn cols(&self) -> usize;
-    fn dirty_rows(&self) -> Vec<usize>;
     fn mark_clean(&mut self);
     fn cell(&self, row: usize, col: usize) -> Option<&Cell>;
     fn cursor(&self) -> Cursor;
@@ -82,10 +81,6 @@ impl TerminalEngine for ParTermEngine {
 
     fn cols(&self) -> usize {
         self.terminal.active_grid().cols()
-    }
-
-    fn dirty_rows(&self) -> Vec<usize> {
-        self.terminal.get_dirty_rows()
     }
 
     fn mark_clean(&mut self) {

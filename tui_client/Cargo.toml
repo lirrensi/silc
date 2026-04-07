@@ -1,6 +1,6 @@
 [package]
 name = "silc_tui"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 
 [[bin]]
@@ -13,7 +13,14 @@ futures-util = "0.3"
 par-term-emu-core-rust = { version = "0.41.0", default-features = false, features = ["rust-only"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 tokio-tungstenite = "0.28"
 ureq = { version = "2", default-features = false }
 url = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "unwind"
+strip = "symbols"
