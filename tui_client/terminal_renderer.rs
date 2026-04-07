@@ -65,7 +65,6 @@ impl CrosstermTerminalRenderer {
 
         for row in rows_to_render {
             queue!(stdout, cursor::MoveTo(0, row as u16))?;
-            queue!(stdout, terminal::Clear(terminal::ClearType::UntilNewLine))?;
 
             for col in 0..engine.cols() {
                 let Some(cell) = engine.cell(row, col) else {
