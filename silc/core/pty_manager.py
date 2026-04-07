@@ -66,13 +66,16 @@ def _resolve_launch_cwd(cwd: str | None) -> str | None:
         if _is_usable(requested):
             return str(requested)
 
-    try:
-        home = Path.home()
-    except Exception:
+        try:
+            home = Path.home()
+        except Exception:
+            return None
+
+        if _is_usable(home):
+            return str(home)
         return None
 
-    if _is_usable(home):
-        return str(home)
+    # Preserve an unset cwd so the launched shell inherits the daemon's cwd.
     return None
 
 

@@ -592,7 +592,6 @@ def start(
     # Daemon is running, derive name from folder if not provided
     if name is None:
         import re
-        from pathlib import Path
 
         folder_name = Path.cwd().name.lower()
         # Sanitize: keep only alphanumeric and hyphens, remove leading/trailing hyphens
@@ -619,6 +618,8 @@ def start(
                 suffix += 1
             name = f"{folder_name}-{suffix}"
 
+    effective_cwd = cwd if cwd is not None else str(Path.cwd())
+
     click.echo("Creating new session...", err=False)
     session: dict[str, object] | None = None
     try:
@@ -633,8 +634,7 @@ def start(
             payload["token"] = session_token
         if shell:
             payload["shell"] = shell
-        if cwd:
-            payload["cwd"] = cwd
+        payload["cwd"] = effective_cwd
         resp = requests.post(_daemon_url("/sessions"), json=payload, timeout=5)
         resp.raise_for_status()
         session = resp.json()

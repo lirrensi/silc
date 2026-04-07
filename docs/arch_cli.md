@@ -84,13 +84,14 @@ Behavior:
 3. Warn loudly about network exposure when using `--global` or `--share`.
 4. Start or reuse the daemon.
 5. If no name is provided, derive one from the current folder name.
-6. Create the session through the daemon API.
+6. Create the session through the daemon API, sending the CLI process cwd when `--cwd` is omitted.
 7. Print connection hints for TUI, web UI, and API access.
 
 Notes:
 
 - Folder-derived names are sanitized and collision-safe (`name`, `name-2`, ...).
 - `--no-detach` starts the daemon in-process instead of detaching.
+- Session cwd defaults to the caller's current working directory, not the daemon process cwd.
 - `--global` is a session-level network exposure mode, distinct from daemon `--share`.
 
 ## `silc start-enter`

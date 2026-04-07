@@ -216,7 +216,7 @@ All session commands use the syntax `silc <port-or-name> <command>`. You can ide
 | `--no-detach` | flag | false | Run daemon in foreground |
 | `--token` | string | auto | Custom API token for remote access |
 | `--shell` | string | auto | Shell to use (bash, zsh, pwsh, cmd) |
-| `--cwd` | string | daemon cwd | Working directory for session |
+| `--cwd` | string | current working directory | Working directory for session |
 
 **Name format:** `[a-z][a-z0-9-]*[a-z0-9]` (lowercase letters, numbers, hyphens; must start with letter, cannot end with hyphen).
 
