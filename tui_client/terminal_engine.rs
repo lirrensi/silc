@@ -12,6 +12,7 @@ use par_term_emu_core_rust::{
 
 pub trait TerminalEngine {
     fn resize(&mut self, cols: usize, rows: usize);
+    fn reset(&mut self);
     fn process_output(&mut self, data: &[u8]);
     fn drain_responses(&mut self) -> Vec<u8>;
     fn paste(&mut self, text: &str);
@@ -40,6 +41,10 @@ impl ParTermEngine {
 impl TerminalEngine for ParTermEngine {
     fn resize(&mut self, cols: usize, rows: usize) {
         self.terminal.resize(cols, rows);
+    }
+
+    fn reset(&mut self) {
+        self.terminal.reset();
     }
 
     fn process_output(&mut self, data: &[u8]) {

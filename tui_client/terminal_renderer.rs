@@ -5,10 +5,7 @@
 // DOCS: agent_chat/plan_rust_tui_par_term_remake_2026-04-07.md
 
 use crate::{session_connection::ConnectionState, terminal_engine::TerminalEngine};
-use crossterm::{
-    cursor, execute,
-    terminal::{self, Clear, ClearType},
-};
+use crossterm::{cursor, execute, terminal};
 use std::io::{self, Write};
 
 type DynError = Box<dyn std::error::Error>;
@@ -17,6 +14,7 @@ type DynResult<T> = Result<T, DynError>;
 pub struct CrosstermTerminalRenderer {
     last_frame: Option<String>,
     last_title: Option<String>,
+    last_cursor: Option<(u16, u16, bool)>,
 }
 
 impl CrosstermTerminalRenderer {
@@ -24,33 +22,34 @@ impl CrosstermTerminalRenderer {
         Self {
             last_frame: None,
             last_title: None,
+            last_cursor: None,
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.last_frame = None;
+        self.last_title = None;
+        self.last_cursor = None;
     }
 
     pub fn render(&mut self, engine: &dyn TerminalEngine, state: ConnectionState) -> DynResult<()> {
         let frame = engine.render_visible();
         let title = self.window_title(engine, state);
+        let cursor = engine.cursor();
+        let cursor_state = (cursor.col as u16, cursor.row as u16, cursor.visible);
 
         if self.last_frame.as_deref() == Some(frame.as_str())
             && self.last_title.as_deref() == Some(title.as_str())
+            && self.last_cursor == Some(cursor_state)
         {
             return Ok(());
         }
 
-        self.last_frame = Some(frame.clone());
-        self.last_title = Some(title.clone());
-
         let mut stdout = io::stdout();
-        execute!(
-            stdout,
-            cursor::Hide,
-            terminal::SetTitle(title),
-            Clear(ClearType::All),
-            cursor::MoveTo(0, 0)
-        )?;
+        execute!(stdout, cursor::Hide, terminal::SetTitle(title.clone()))?;
+
         stdout.write_all(frame.as_bytes())?;
 
-        let cursor = engine.cursor();
         if cursor.visible {
             execute!(
                 stdout,
@@ -62,6 +61,11 @@ impl CrosstermTerminalRenderer {
         }
 
         stdout.flush()?;
+
+        self.last_frame = Some(frame);
+        self.last_title = Some(title);
+        self.last_cursor = Some(cursor_state);
+
         Ok(())
     }
 

@@ -306,7 +306,11 @@ async fn run() -> DynResult<()> {
                                 Arc::clone(&http_agent),
                                 clear_url.to_string(),
                             ));
+                            engine.reset();
+                            renderer.reset();
                             let _ = clear_local_screen();
+                            renderer.render(&engine, *status_rx.borrow())?;
+                            update_render_loop_title(&engine)?;
                             continue;
                         }
 
@@ -324,20 +328,17 @@ async fn run() -> DynResult<()> {
                         }
                     }
                     Some(Event::Resize(cols, rows)) => {
+                        let _ = request_resize(
+                            Arc::clone(&http_agent),
+                            resize_url.to_string(),
+                            rows,
+                            cols,
+                        )
+                        .await;
+
                         engine.resize(cols as usize, rows as usize);
                         renderer.render(&engine, *status_rx.borrow())?;
                         update_render_loop_title(&engine)?;
-
-                        let http_agent = Arc::clone(&http_agent);
-                        let resize_url = resize_url.clone();
-                        tokio::spawn(async move {
-                            let _ = request_resize(
-                                http_agent,
-                                resize_url.to_string(),
-                                rows,
-                                cols,
-                            ).await;
-                        });
                     }
                     Some(Event::Mouse(mouse)) => {
                         let kind = mouse.kind;

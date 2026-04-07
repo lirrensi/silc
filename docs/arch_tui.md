@@ -65,7 +65,7 @@ The native TUI uses the same binary envelope as the session websocket:
 Server messages include `output`, `history`, `title`, and `cwd`.
 Client messages include `input` and `load_history`.
 
-The Rust client ignores websocket ping/pong frames, reports close code/reason on disconnect, and strips terminal device-attribute query noise from rendered output.
+The Rust client ignores websocket ping/pong frames, reports close code/reason on disconnect, and feeds PTY bytes through `par-term-emu-core-rust` so terminal negotiation is parsed instead of rendered. Resize requests are awaited before repainting.
 
 ## Error Handling
 
