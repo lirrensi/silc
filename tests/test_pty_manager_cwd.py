@@ -33,3 +33,13 @@ def test_create_pty_preserves_valid_cwd(monkeypatch, tmp_path) -> None:
     pty = pty_manager.create_pty(cwd=str(tmp_path))
 
     assert pty.cwd == str(tmp_path)
+
+
+def test_create_pty_leaves_unset_cwd_unmodified(monkeypatch) -> None:
+    monkeypatch.setattr(pty_manager.sys, "platform", "linux")
+    monkeypatch.setattr(pty_manager.Path, "home", lambda: Path("/unused-home"))
+    monkeypatch.setattr(pty_manager, "UnixPTY", _CapturePTY)
+
+    pty = pty_manager.create_pty(cwd=None)
+
+    assert pty.cwd is None

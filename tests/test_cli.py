@@ -1063,6 +1063,45 @@ class TestCLIStartOptions:
         assert "--shell" in output
         assert "--cwd" in output
 
+    def test_start_defaults_cwd_to_invocation_directory(self, monkeypatch, tmp_path):
+        """`silc start` should send the caller cwd, not daemon cwd."""
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        class _GetResp:
+            ok = True
+
+            def json(self) -> list[dict[str, object]]:
+                return []
+
+        class _PostResp:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {"name": "demo", "port": 20000}
+
+        captured: dict[str, object] = {}
+
+        monkeypatch.setattr(main_mod, "_daemon_available", lambda: True)
+        monkeypatch.setattr(main_mod, "is_daemon_running", lambda: True)
+        monkeypatch.setattr(main_mod.Path, "cwd", lambda: tmp_path)
+        monkeypatch.setattr(main_mod.requests, "get", lambda *a, **k: _GetResp())
+
+        def fake_post(*args, **kwargs):
+            captured["payload"] = kwargs.get("json")
+            return _PostResp()
+
+        monkeypatch.setattr(main_mod.requests, "post", fake_post)
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["start", "demo"])
+
+        assert result.exit_code == 0
+        assert captured["payload"]["cwd"] == str(tmp_path)
+        assert "cwd" in captured["payload"]
+
     def test_start_enter_forwards_to_start_with_tui(self, monkeypatch):
         """`silc start-enter` should invoke the start flow and open TUI."""
         from click.testing import CliRunner

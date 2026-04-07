@@ -135,6 +135,7 @@ Dormant sessions do not expose a live websocket endpoint.
 
 - `silc start` starts the daemon if needed and creates a session.
 - `silc start-enter` starts the daemon if needed, creates a session, and opens the native TUI.
+- `silc start` and `silc start-enter` default session cwd to the CLI process current working directory when `--cwd` is omitted.
 - `silc manager` opens the manager UI in a browser.
 - `silc desktop` opens the manager UI in a native webview.
 - `silc list`, `shutdown`, `killall`, `restart-server`, `resurrect`, and `restart` operate on the daemon.
