@@ -374,7 +374,7 @@ generic `Exception`.
 - Session resurrection failures are quarantined per saved session entry,
   appended to the resurrection result as failures, and logged with full
   traceback detail instead of aborting daemon startup.
-- Shutdown and `killall` remain the only expected process-exit paths.
+- Shutdown and CLI `full-reset` remain the only expected process-exit paths.
 
 ### Session Not Alive
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,3 +48,46 @@ def test_session_logs_round_trip(
 
     persistence.cleanup_session_log(port)
     assert persistence.read_session_log(port) == ""
+
+
+def test_remove_session_artifacts_clears_session_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logs_dir = _patch_log_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(persistence, "SESSIONS_FILE", tmp_path / "sessions.json")
+    monkeypatch.setattr(persistence, "SNAPSHOTS_DIR", tmp_path / "snapshots")
+
+    persistence.SESSIONS_FILE.write_text('{"sessions": []}', encoding="utf-8")
+    persistence.SNAPSHOTS_DIR.mkdir(parents=True)
+    persistence.write_session_snapshot("abc123", b"snapshot")
+    session_log = logs_dir / "session_12345.log"
+    session_log.write_text("session log", encoding="utf-8")
+    persistence.DAEMON_LOG.write_text("daemon log", encoding="utf-8")
+
+    persistence.remove_session_artifacts()
+
+    assert not persistence.SESSIONS_FILE.exists()
+    assert not persistence.SNAPSHOTS_DIR.exists()
+    assert not session_log.exists()
+    assert persistence.DAEMON_LOG.exists()
+
+
+def test_purge_silc_data_removes_data_and_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_dir = tmp_path / "data"
+    log_dir = tmp_path / "logs"
+    data_dir.mkdir()
+    log_dir.mkdir()
+    (data_dir / "sessions.json").write_text('{"sessions": []}', encoding="utf-8")
+    (log_dir / "daemon.log").write_text("daemon log", encoding="utf-8")
+
+    fake_config = SimpleNamespace(
+        paths=SimpleNamespace(data_dir=data_dir, log_dir=log_dir)
+    )
+    monkeypatch.setattr("silc.config.get_config", lambda: fake_config)
+
+    persistence.purge_silc_data()
+
+    assert not data_dir.exists()
+    assert not log_dir.exists()

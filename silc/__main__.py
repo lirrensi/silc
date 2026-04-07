@@ -272,6 +272,15 @@ def _get_session_entry(port: int) -> dict | None:
     return None
 
 
+def _format_idle_seconds(value: object) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        return f"{float(value):.0f}s"
+    except (TypeError, ValueError):
+        return "?"
+
+
 def _get_error_detail(response: requests.Response | None) -> str:
     if response is None:
         return "unknown error"
@@ -774,7 +783,7 @@ def _ensure_manager_ready(share: bool) -> tuple[str, dict[str, object]] | None:
                 pass
 
             if not _wait_for_daemon_stop(timeout=30):
-                click.echo("⚠️  Shutdown timed out; forcing killall", err=True)
+                click.echo("⚠️  Shutdown timed out; forcing hard stop", err=True)
                 kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
                 _wait_for_daemon_stop(timeout=5)
 
@@ -1069,7 +1078,9 @@ def list_sessions() -> None:
                 f"  port: {s['port']} | shell: {s['shell']} | alive: {status_icon}"
             )
             click.echo(f"  cwd: {cwd_display}")
-            click.echo(f"  idle: {s['idle_seconds']:.0f}s | session: {s['session_id']}")
+            click.echo(
+                f"  idle: {_format_idle_seconds(s.get('idle_seconds'))} | session: {s['session_id']}"
+            )
             click.echo()
 
     except requests.RequestException:
@@ -1093,26 +1104,62 @@ def shutdown() -> None:
         return
 
     # If the daemon is wedged, enforce a hard stop.
-    click.echo("⚠️  Shutdown timed out; forcing killall", err=True)
+    click.echo("⚠️  Shutdown timed out; forcing hard stop", err=True)
     kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
     _wait_for_daemon_stop(timeout=5)
-    click.echo("💀 SILC daemon and all sessions killed")
+    click.echo("💀 SILC daemon stopped")
     click.echo("SILC daemon is no longer running")
 
 
 @cli.command()
 def killall() -> None:
-    """Force kill daemon and all sessions."""
+    """Remove all sessions and session artifacts, but keep the daemon running."""
 
-    # Best-effort API call first (lets daemon clean logs/ports), but never rely on it.
     try:
-        requests.post(_daemon_url("/killall"), timeout=3)
+        resp = requests.post(_daemon_url("/killall"), timeout=5)
+        resp.raise_for_status()
+        click.echo("💀 SILC sessions cleared")
+        return
+    except requests.RequestException:
+        if _daemon_port_open():
+            click.echo("Error: Failed to clear sessions", err=True)
+            sys.exit(1)
+
+    from silc.utils.persistence import remove_session_artifacts
+
+    remove_session_artifacts()
+    click.echo("💀 SILC session artifacts cleared")
+
+
+@cli.command(name="full-reset")
+def full_reset() -> None:
+    """Factory reset SILC by wiping data and stopping the daemon."""
+
+    confirmation = click.prompt(
+        "Type FULL RESET to delete all SILC data", default="", show_default=False
+    )
+    if confirmation.strip() != "FULL RESET":
+        click.echo("Aborted.")
+        return
+
+    try:
+        requests.post(_daemon_url("/killall"), timeout=5)
     except requests.RequestException:
         pass
 
-    kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
-    _wait_for_daemon_stop(timeout=5)
-    click.echo("💀 SILC daemon and all sessions killed")
+    try:
+        requests.post(_daemon_url("/shutdown"), timeout=35)
+    except requests.RequestException:
+        pass
+
+    if not _wait_for_daemon_stop(timeout=15):
+        kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
+        _wait_for_daemon_stop(timeout=5)
+
+    from silc.utils.persistence import purge_silc_data
+
+    purge_silc_data()
+    click.echo("💥 SILC full reset complete")
 
 
 @cli.command(name="restart-server")
@@ -1177,7 +1224,7 @@ def restart() -> None:
 
     # Wait for daemon to stop
     if not _wait_for_daemon_stop(timeout=30):
-        click.echo("⚠️  Shutdown timed out; forcing killall", err=True)
+        click.echo("⚠️  Shutdown timed out; forcing hard stop", err=True)
         kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
         _wait_for_daemon_stop(timeout=5)
 

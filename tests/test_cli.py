@@ -149,6 +149,36 @@ class TestCLIHelp:
         assert result.exit_code == 0
         assert "preserv" in result.output.lower()
 
+    def test_list_handles_missing_idle_seconds(self, monkeypatch):
+        """`silc list` should not crash when idle_seconds is missing."""
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        class FakeResponse:
+            def json(self):
+                return [
+                    {
+                        "name": "demo",
+                        "port": 20000,
+                        "shell": "bash",
+                        "alive": True,
+                        "cwd": None,
+                        "idle_seconds": None,
+                        "session_id": "sess-1",
+                    }
+                ]
+
+        monkeypatch.setattr(
+            main_mod.requests, "get", lambda *args, **kwargs: FakeResponse()
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["list"])
+
+        assert result.exit_code == 0
+        assert "idle: n/a" in result.output
+
 
 class TestDesktopLauncher:
     """Tests for the detached desktop launcher command."""
@@ -269,9 +299,15 @@ class TestResurrectCommand:
 @pytest.fixture(scope="module")
 def ensure_daemon_stopped():
     """Stop any existing daemon before and after tests."""
-    # Stop before
+    # Clear sessions first, then stop the daemon.
     try:
         run_cli(["killall"], timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+    time.sleep(1)
+
+    try:
+        run_cli(["shutdown"], timeout=35)
     except subprocess.TimeoutExpired:
         pass
     time.sleep(1)
@@ -283,6 +319,10 @@ def ensure_daemon_stopped():
         run_cli(["killall"], timeout=10)
     except subprocess.TimeoutExpired:
         pass
+    try:
+        run_cli(["shutdown"], timeout=35)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 @pytest.mark.integration
@@ -292,7 +332,7 @@ class TestCLISessionCommands:
     @pytest.mark.asyncio
     async def test_list_no_sessions(self, ensure_daemon_stopped):
         """`silc list` shows 'No active sessions' when empty."""
-        # Ensure daemon is not running
+        # Clear any leftover session state.
         try:
             run_cli(["killall"], timeout=10)
         except subprocess.TimeoutExpired:
@@ -374,8 +414,10 @@ class TestCLISessionCommands:
         assert "not running" in list_output.lower() or "No active" in list_output
 
     @pytest.mark.asyncio
-    async def test_killall_stops_daemon(self, ensure_daemon_stopped):
-        """`silc killall` forces daemon termination."""
+    async def test_killall_clears_sessions_without_stopping_daemon(
+        self, ensure_daemon_stopped
+    ):
+        """`silc killall` clears sessions but keeps the daemon alive."""
         # Start daemon
         run_cli(["start", "killall-test"], timeout=60)
         time.sleep(1)
@@ -384,11 +426,11 @@ class TestCLISessionCommands:
         result = run_cli(["killall"], timeout=10)
         assert result.returncode == 0
 
-        # Verify daemon is stopped
+        # Verify daemon is still alive but sessions are gone
         time.sleep(1)
         list_result = run_cli(["list"], timeout=10)
         list_output = list_result.stdout or list_result.stderr
-        assert "not running" in list_output.lower() or "No active" in list_output
+        assert "No active sessions" in list_output
 
 
 @pytest.mark.integration
@@ -919,9 +961,49 @@ class TestCLIMiscCommands:
         output = result.stdout or result.stderr
 
         # Check for major commands
-        expected_commands = ["start", "list", "shutdown", "killall", "logs"]
+        expected_commands = [
+            "start",
+            "list",
+            "shutdown",
+            "killall",
+            "full-reset",
+            "logs",
+        ]
         for cmd in expected_commands:
             assert cmd in output.lower(), f"Command '{cmd}' not in help output"
+
+    def test_full_reset_requires_confirmation(self, monkeypatch):
+        """`silc full-reset` should require typed confirmation."""
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        calls: dict[str, object] = {}
+
+        monkeypatch.setattr(
+            main_mod.requests,
+            "post",
+            lambda *args, **kwargs: calls.setdefault("post", True),
+        )
+        monkeypatch.setattr(
+            main_mod, "_wait_for_daemon_stop", lambda timeout=10.0: True
+        )
+        monkeypatch.setattr(
+            main_mod,
+            "kill_daemon",
+            lambda **kwargs: calls.setdefault("kill_daemon", True),
+        )
+        monkeypatch.setattr(
+            "silc.utils.persistence.purge_silc_data",
+            lambda: calls.setdefault("purged", True),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["full-reset"], input="FULL RESET\n")
+
+        assert result.exit_code == 0
+        assert calls.get("purged") is True
+        assert "full reset complete" in result.output.lower()
 
     def test_logs_without_daemon(self):
         """`silc logs` without daemon should not crash."""

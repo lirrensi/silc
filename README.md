@@ -528,7 +528,8 @@ silc desktop                   # Open Web UI in native desktop window
 silc desktop --share           # Open desktop manager on LAN (⚠️ exposes to network)
 silc list                      # List all active sessions (shows port, name, idle time)
 silc shutdown                  # Graceful shutdown (closes all sessions)
-silc killall                   # Force kill daemon + all sessions
+silc killall                   # Clear all sessions + session artifacts (daemon stays up)
+silc full-reset                # Stop daemon and wipe SILC data (prompts first)
 silc resurrect                 # Restore sessions from previous state
 silc restart                   # Shutdown + restart (auto-resurrects sessions)
 silc restart-server            # Restart HTTP server only (sessions survive)

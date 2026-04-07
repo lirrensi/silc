@@ -167,7 +167,8 @@ silc 20000 run "htop"         # Use TUI apps remotely
 | `silc os-integration uninstall` | Remove OS context-menu integration |
 | `silc list` | List all active sessions |
 | `silc shutdown` | Gracefully shut down daemon, save frozen snapshots, close live sessions, and preserve dormant records |
-| `silc killall` | Force kill daemon and all sessions |
+| `silc killall` | Clear all current sessions and session artifacts while keeping the daemon running |
+| `silc full-reset` | Stop the daemon and wipe SILC data back to a clean slate |
 | `silc resurrect` | Materialize all persisted sessions from previous state |
 | `silc restart` | Save frozen snapshots, shut down, and immediately start with dormant sessions loaded |
 | `silc restart-server` | Restart daemon HTTP server (sessions survive) |
@@ -483,7 +484,7 @@ The daemon exposes a management API on port 19999 for session lifecycle operatio
 | `POST` | `/restart-server` | Restart daemon HTTP server |
 | `POST` | `/resurrect` | Reload persisted sessions and reconcile them |
 | `POST` | `/shutdown` | Graceful shutdown |
-| `POST` | `/killall` | Force kill all |
+| `POST` | `/killall` | Clear sessions and session artifacts |
 | `GET` | `/events` | Daemon websocket event stream |
 
 The manager UI is served at `/ui/`, and `/` redirects there.
@@ -741,7 +742,8 @@ Configuration is loaded from (highest to lowest priority):
 | **No expiration** | Sessions stay alive indefinitely until explicitly closed |
 | **Shell exit detection** | Sessions automatically close when shell process exits |
 | **Graceful shutdown** | `silc shutdown` saves frozen snapshots, closes live sessions cleanly, and preserves dormant records |
-| **Force kill** | `silc killall` terminates everything immediately |
+| **Session wipe** | `silc killall` clears current sessions and session artifacts without stopping the daemon |
+| **Factory reset** | `silc full-reset` stops the daemon and deletes all SILC data except installed binaries |
 
 ### Command Execution
 
@@ -799,13 +801,13 @@ Configuration is loaded from (highest to lowest priority):
 - Use `silc <port> close` to gracefully close the session
 - Use `silc <port> kill` to force kill the session
 - Use `silc <port> restart` to restart with same port/name/cwd/shell
-- Use `silc killall` as last resort to kill everything
+- Use `silc killall` to wipe current sessions and keep the daemon running
 
 ### Daemon Not Starting
 
 - Check if daemon is already running: `silc list`
 - Check daemon logs: `silc logs`
-- Force kill existing: `silc killall`
+- Clear existing sessions: `silc killall`; stop and reset: `silc full-reset`
 - Retry: `silc start`
 
 ### Command Timeout
@@ -864,7 +866,8 @@ SILC deliberately does NOT:
 | `silc <port-or-name> restart` | Restart session (same port/name/cwd/shell) |
 | `silc list` | List all sessions |
 | `silc shutdown` | Stop daemon, save frozen snapshots, preserve dormant records |
-| `silc killall` | Force kill everything |
+| `silc killall` | Clear sessions and session artifacts |
+| `silc full-reset` | Stop daemon and wipe SILC data |
 | `silc resurrect` | Materialize all persisted sessions from previous state |
 | `silc restart` | Save frozen snapshots, shutdown, and immediately start with dormant sessions |
 
