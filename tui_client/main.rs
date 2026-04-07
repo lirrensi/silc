@@ -1,36 +1,35 @@
 // FILE: tui_client/main.rs
-// PURPOSE: Run the native SILC TUI client over framed binary websocket transport.
-// OWNS: Native websocket framing, keyboard input encoding, and terminal output rendering.
+// PURPOSE: Orchestrate the native SILC TUI by wiring session transport, terminal emulation, and rendering.
+// OWNS: Process startup, event-loop coordination, and high-level session lifecycle.
 // EXPORTS: main - launch the standalone TUI client binary.
-// DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
+// DOCS: agent_chat/plan_rust_tui_par_term_remake_2026-04-07.md
 
+mod session_connection;
+mod terminal_engine;
+mod terminal_renderer;
+
+use crate::{
+    session_connection::{request_clear, request_resize, ConnectionState, SessionConnection},
+    terminal_engine::{ParTermEngine, TerminalEngine},
+    terminal_renderer::CrosstermTerminalRenderer,
+};
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind},
     execute,
     terminal::{self, Clear, ClearType},
 };
-use futures_util::{SinkExt, StreamExt};
-use serde_json::{json, Value};
 use std::{
     io::{self, Write},
-    sync::{Arc, Mutex},
+    sync::Arc,
     thread,
 };
-use tokio::sync::{mpsc, watch};
-use tokio::task;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio::sync::mpsc;
 use ureq::Agent;
 use url::Url;
 
 type DynError = Box<dyn std::error::Error>;
 type DynResult<T> = Result<T, DynError>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ConnectionState {
-    Connected,
-    Disconnected,
-}
 
 struct TerminalGuard {
     restored: bool,
@@ -38,12 +37,6 @@ struct TerminalGuard {
 
 impl TerminalGuard {
     fn enter() -> DynResult<Self> {
-        // Raw mode is required so we can capture keys (including Enter/Arrows/Ctrl).
-        //
-        // NOTE: We intentionally do NOT enter the alternate screen buffer, because many
-        // terminals map mouse wheel scrolling to Up/Down keys while in the alt buffer.
-        // For SILC this is undesirable: it triggers shell history navigation instead of
-        // local scrollback.
         terminal::enable_raw_mode()?;
         Ok(Self { restored: false })
     }
@@ -73,79 +66,10 @@ fn ws_to_http_base(ws_url: &Url) -> Url {
         other => other,
     });
 
-    // Strip websocket path; endpoints are absolute (e.g. /ws, /clear).
     http.set_path("/");
     http.set_query(None);
     http.set_fragment(None);
     http
-}
-
-fn map_key_to_sequence(key: KeyEvent) -> Option<String> {
-    if matches!(key.kind, KeyEventKind::Release) {
-        return None;
-    }
-
-    // Ctrl+Q is reserved for quitting locally.
-    if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        return None;
-    }
-
-    // Ctrl+<letter> handling
-    let sequence = match (key.code, key.modifiers) {
-        (KeyCode::Char('c' | 'C'), mods) if mods.contains(KeyModifiers::CONTROL) => "\x03".to_string(),
-        (KeyCode::Char('d' | 'D'), mods) if mods.contains(KeyModifiers::CONTROL) => "\x04".to_string(),
-        (KeyCode::Char(c), mods) if mods.contains(KeyModifiers::CONTROL) => {
-            let upper = (c as u8).to_ascii_uppercase();
-            if (b'A'..=b'Z').contains(&upper) {
-                String::from_utf8(vec![upper - b'A' + 1]).ok()?
-            } else {
-                return None;
-            }
-        }
-
-        // Common terminal keys
-        (KeyCode::Enter, _) => "\r".to_string(),
-        (KeyCode::Tab, _) => "\t".to_string(),
-        (KeyCode::Backspace, _) => "\x7f".to_string(),
-        (KeyCode::Delete, _) => "\x1b[3~".to_string(),
-        (KeyCode::Insert, _) => "\x1b[2~".to_string(),
-        (KeyCode::Esc, _) => "\x1b".to_string(),
-
-        (KeyCode::Up, _) => "\x1b[A".to_string(),
-        (KeyCode::Down, _) => "\x1b[B".to_string(),
-        (KeyCode::Right, _) => "\x1b[C".to_string(),
-        (KeyCode::Left, _) => "\x1b[D".to_string(),
-        (KeyCode::Home, _) => "\x1b[H".to_string(),
-        (KeyCode::End, _) => "\x1b[F".to_string(),
-        (KeyCode::PageUp, _) => "\x1b[5~".to_string(),
-        (KeyCode::PageDown, _) => "\x1b[6~".to_string(),
-
-        // Function keys (xterm-ish)
-        (KeyCode::F(1), _) => "\x1bOP".to_string(),
-        (KeyCode::F(2), _) => "\x1bOQ".to_string(),
-        (KeyCode::F(3), _) => "\x1bOR".to_string(),
-        (KeyCode::F(4), _) => "\x1bOS".to_string(),
-        (KeyCode::F(5), _) => "\x1b[15~".to_string(),
-        (KeyCode::F(6), _) => "\x1b[17~".to_string(),
-        (KeyCode::F(7), _) => "\x1b[18~".to_string(),
-        (KeyCode::F(8), _) => "\x1b[19~".to_string(),
-        (KeyCode::F(9), _) => "\x1b[20~".to_string(),
-        (KeyCode::F(10), _) => "\x1b[21~".to_string(),
-        (KeyCode::F(11), _) => "\x1b[23~".to_string(),
-        (KeyCode::F(12), _) => "\x1b[24~".to_string(),
-
-        // Printable characters
-        (KeyCode::Char(c), _) => c.to_string(),
-
-        _ => return None,
-    };
-
-    // Alt modifier usually prefixes ESC.
-    if key.modifiers.contains(KeyModifiers::ALT) {
-        Some(format!("\x1b{}", sequence))
-    } else {
-        Some(sequence)
-    }
 }
 
 fn clear_local_screen() -> DynResult<()> {
@@ -155,100 +79,130 @@ fn clear_local_screen() -> DynResult<()> {
     Ok(())
 }
 
-fn encode_ws_frame(header: &Value, payload: &[u8]) -> DynResult<Vec<u8>> {
-    let header_bytes = serde_json::to_vec(header)?;
-    let header_len: u32 = header_bytes
-        .len()
-        .try_into()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "frame header too large"))?;
-
-    let mut frame = Vec::with_capacity(4 + header_bytes.len() + payload.len());
-    frame.extend_from_slice(&header_len.to_be_bytes());
-    frame.extend_from_slice(&header_bytes);
-    frame.extend_from_slice(payload);
-    Ok(frame)
-}
-
-fn decode_ws_frame(data: &[u8]) -> DynResult<(Value, Vec<u8>)> {
-    if data.len() < 4 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too short").into());
+fn map_key_to_bytes(key: KeyEvent) -> Option<Vec<u8>> {
+    if matches!(key.kind, KeyEventKind::Release) {
+        return None;
     }
 
-    let header_len = u32::from_be_bytes(data[0..4].try_into().unwrap()) as usize;
-    if data.len() < 4 + header_len {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame truncated").into());
+    if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return None;
     }
 
-    let header: Value = serde_json::from_slice(&data[4..4 + header_len])?;
-    if !header.is_object() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame header must be object").into());
-    }
-
-    Ok((header, data[4 + header_len..].to_vec()))
-}
-
-fn strip_terminal_query_noise(data: &[u8]) -> Vec<u8> {
-    let mut filtered = Vec::with_capacity(data.len());
-    let mut i = 0;
-
-    while i < data.len() {
-        if i + 3 < data.len() && data[i] == 0x1b && data[i + 1] == b'[' && data[i + 2] == b'?' {
-            let mut j = i + 3;
-            while j < data.len() && (data[j].is_ascii_digit() || data[j] == b';') {
-                j += 1;
-            }
-
-            if j < data.len() && data[j] == b'c' {
-                i = j + 1;
-                continue;
+    let sequence = match (key.code, key.modifiers) {
+        (KeyCode::Char('c' | 'C'), mods) if mods.contains(KeyModifiers::CONTROL) => vec![0x03],
+        (KeyCode::Char('d' | 'D'), mods) if mods.contains(KeyModifiers::CONTROL) => vec![0x04],
+        (KeyCode::Char(c), mods) if mods.contains(KeyModifiers::CONTROL) => {
+            let upper = (c as u8).to_ascii_uppercase();
+            if (b'A'..=b'Z').contains(&upper) {
+                vec![upper - b'A' + 1]
+            } else {
+                return None;
             }
         }
+        (KeyCode::Enter, _) => b"\r".to_vec(),
+        (KeyCode::Tab, _) => b"\t".to_vec(),
+        (KeyCode::Backspace, _) => b"\x7f".to_vec(),
+        (KeyCode::Delete, _) => b"\x1b[3~".to_vec(),
+        (KeyCode::Insert, _) => b"\x1b[2~".to_vec(),
+        (KeyCode::Esc, _) => b"\x1b".to_vec(),
+        (KeyCode::Up, _) => b"\x1b[A".to_vec(),
+        (KeyCode::Down, _) => b"\x1b[B".to_vec(),
+        (KeyCode::Right, _) => b"\x1b[C".to_vec(),
+        (KeyCode::Left, _) => b"\x1b[D".to_vec(),
+        (KeyCode::Home, _) => b"\x1b[H".to_vec(),
+        (KeyCode::End, _) => b"\x1b[F".to_vec(),
+        (KeyCode::PageUp, _) => b"\x1b[5~".to_vec(),
+        (KeyCode::PageDown, _) => b"\x1b[6~".to_vec(),
+        (KeyCode::F(1), _) => b"\x1bOP".to_vec(),
+        (KeyCode::F(2), _) => b"\x1bOQ".to_vec(),
+        (KeyCode::F(3), _) => b"\x1bOR".to_vec(),
+        (KeyCode::F(4), _) => b"\x1bOS".to_vec(),
+        (KeyCode::F(5), _) => b"\x1b[15~".to_vec(),
+        (KeyCode::F(6), _) => b"\x1b[17~".to_vec(),
+        (KeyCode::F(7), _) => b"\x1b[18~".to_vec(),
+        (KeyCode::F(8), _) => b"\x1b[19~".to_vec(),
+        (KeyCode::F(9), _) => b"\x1b[20~".to_vec(),
+        (KeyCode::F(10), _) => b"\x1b[21~".to_vec(),
+        (KeyCode::F(11), _) => b"\x1b[23~".to_vec(),
+        (KeyCode::F(12), _) => b"\x1b[24~".to_vec(),
+        (KeyCode::Char(c), _) => c.to_string().into_bytes(),
+        _ => return None,
+    };
 
-        filtered.push(data[i]);
-        i += 1;
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        let mut out = vec![0x1b];
+        out.extend_from_slice(&sequence);
+        Some(out)
+    } else {
+        Some(sequence)
     }
-
-    filtered
 }
 
-fn set_disconnect_reason(slot: &Arc<Mutex<Option<String>>>, reason: String) {
-    if let Ok(mut guard) = slot.lock() {
-        if guard.is_none() {
-            *guard = Some(reason);
+fn map_mouse_to_bytes(
+    engine: &mut dyn TerminalEngine,
+    mouse_kind: MouseEventKind,
+    col: u16,
+    row: u16,
+    modifiers: KeyModifiers,
+) -> Option<Vec<u8>> {
+    if engine.mouse_mode() == par_term_emu_core_rust::mouse::MouseMode::Off {
+        return None;
+    }
+
+    let modifiers = modifiers.bits();
+    let (button, pressed) = match mouse_kind {
+        MouseEventKind::Down(button) => (match button {
+            MouseButton::Left => 0,
+            MouseButton::Middle => 1,
+            MouseButton::Right => 2,
+        }, true),
+        MouseEventKind::Up(button) => (match button {
+            MouseButton::Left => 0,
+            MouseButton::Middle => 1,
+            MouseButton::Right => 2,
+        }, false),
+        MouseEventKind::Drag(button) => (match button {
+            MouseButton::Left => 0,
+            MouseButton::Middle => 1,
+            MouseButton::Right => 2,
+        }, true),
+        MouseEventKind::ScrollUp => (64, true),
+        MouseEventKind::ScrollDown => (65, true),
+        _ => return None,
+    };
+
+    let event = par_term_emu_core_rust::mouse::MouseEvent::new(
+        button,
+        col as usize,
+        row as usize,
+        pressed,
+        modifiers,
+    );
+    Some(engine.report_mouse(event))
+}
+
+fn update_render_loop_title(engine: &dyn TerminalEngine) -> DynResult<()> {
+    let title_text = engine.title();
+    let title = if let Some(cwd) = engine.current_directory() {
+        if title_text.trim().is_empty() {
+            cwd
+        } else {
+            format!("{} — {}", title_text.trim(), cwd)
         }
-    }
-}
+    } else if title_text.trim().is_empty() {
+        "SILC".to_string()
+    } else {
+        title_text.trim().to_string()
+    };
 
-async fn request_clear(agent: Arc<Agent>, clear_url: String) {
-    let _ = task::spawn_blocking(move || agent.post(&clear_url).call()).await;
-}
-
-async fn request_resize(
-    agent: Arc<Agent>,
-    resize_url: String,
-    rows: u16,
-    cols: u16,
-) -> DynResult<()> {
-    task::spawn_blocking(move || {
-        let rows_s = rows.to_string();
-        let cols_s = cols.to_string();
-        agent.post(&resize_url)
-            .query("rows", &rows_s)
-            .query("cols", &cols_s)
-            .call()
-    })
-    .await??;
-
+    let mut stdout = io::stdout();
+    execute!(stdout, terminal::SetTitle(title))?;
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> DynResult<()> {
+async fn run() -> DynResult<()> {
     let mut guard = TerminalGuard::enter()?;
 
-    // Ask xterm-compatible terminals to *not* translate mouse wheel scrolling into
-    // Up/Down key presses ("alternate scroll mode"). This keeps scrollback scrolling
-    // local, matching xterm.js behavior.
     {
         let mut stdout = io::stdout();
         write!(stdout, "\x1b[?1007l")?;
@@ -269,21 +223,16 @@ async fn main() -> DynResult<()> {
 
     let http_agent = Arc::new(Agent::new());
 
-    // Best-effort: sync PTY size to current terminal.
-    if let Ok((cols, rows)) = terminal::size() {
-        request_resize(
-            Arc::clone(&http_agent),
-            resize_url.to_string(),
-            rows,
-            cols,
-        )
-        .await?;
-    }
+    let (cols, rows) = terminal::size().unwrap_or((80, 24));
+    request_resize(Arc::clone(&http_agent), resize_url.to_string(), rows, cols).await?;
 
     clear_local_screen()?;
 
-    let (ws_stream, _) = match connect_async(&ws_url).await {
-        Ok(ok) => ok,
+    let mut engine = ParTermEngine::new(cols as usize, rows as usize);
+    let mut renderer = CrosstermTerminalRenderer::new();
+
+    let connection = match SessionConnection::connect(&parsed_ws_url).await {
+        Ok(connection) => connection,
         Err(err) => {
             guard.restore();
             eprintln!("WebSocket connect failed: {err}");
@@ -291,19 +240,15 @@ async fn main() -> DynResult<()> {
         }
     };
 
-    let (status_tx, mut status_rx) = watch::channel(ConnectionState::Connected);
-    let disconnect_reason = Arc::new(Mutex::new(None::<String>));
+    let SessionConnection {
+        input_tx,
+        mut output_rx,
+        mut status_rx,
+        disconnect_reason,
+        reader_handle,
+        writer_handle,
+    } = connection;
 
-    let (mut ws_write, mut ws_read) = ws_stream.split();
-
-    ws_write
-        .send(Message::Binary(
-            encode_ws_frame(&json!({"type": "load_history"}), &[])?.into(),
-        ))
-        .await?;
-
-    let (tx_input, mut rx_input) = mpsc::unbounded_channel::<String>();
-    let (tx_output, mut rx_output) = mpsc::unbounded_channel::<Vec<u8>>();
     let (tx_term, mut rx_term) = mpsc::unbounded_channel::<Event>();
 
     let _input_handle = thread::spawn(move || {
@@ -314,117 +259,27 @@ async fn main() -> DynResult<()> {
         }
     });
 
-    // WebSocket reader: terminal output
-    let reader_handle = {
-        let status_tx = status_tx.clone();
-        let disconnect_reason = Arc::clone(&disconnect_reason);
-        tokio::spawn(async move {
-            while let Some(next) = ws_read.next().await {
-                match next {
-                    Ok(Message::Binary(data)) => {
-                        let Ok((header, payload)) = decode_ws_frame(&data) else {
-                            break;
-                        };
-
-                        match header.get("type").and_then(|value| value.as_str()) {
-                            Some("output") | Some("history") => {
-                                let payload = strip_terminal_query_noise(&payload);
-                                if payload.is_empty() {
-                                    continue;
-                                }
-                                let _ = tx_output.send(payload);
-                            }
-                            Some("title") => {}
-                            _ => break,
-                        }
-                    }
-                    Ok(Message::Close(frame)) => {
-                        let reason = match frame {
-                            Some(frame) => {
-                                let code = format!("{:?}", frame.code);
-                                let reason = frame.reason.to_string();
-                                if reason.is_empty() {
-                                    format!("Disconnected: websocket closed (code {code})")
-                                } else {
-                                    format!(
-                                        "Disconnected: websocket closed (code {code}): {reason}"
-                                    )
-                                }
-                            }
-                            None => "Disconnected: websocket closed".to_string(),
-                        };
-                        set_disconnect_reason(&disconnect_reason, reason);
-                        break;
-                    }
-                    Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
-                    Ok(Message::Text(text)) => {
-                        set_disconnect_reason(
-                            &disconnect_reason,
-                            format!("Disconnected: unexpected text websocket frame: {text}"),
-                        );
-                        break;
-                    }
-                    Ok(_) => {}
-                    Err(err) => {
-                        set_disconnect_reason(
-                            &disconnect_reason,
-                            format!("Disconnected: websocket read error: {err}"),
-                        );
-                        break;
-                    }
-                }
-            }
-            set_disconnect_reason(
-                &disconnect_reason,
-                "Disconnected: connection closed".to_string(),
-            );
-            let _ = status_tx.send(ConnectionState::Disconnected);
-        })
-    };
-
-    // WebSocket writer: keyboard input
-    let writer_handle = {
-        let status_tx = status_tx.clone();
-        let disconnect_reason = Arc::clone(&disconnect_reason);
-        tokio::spawn(async move {
-            while let Some(chunk) = rx_input.recv().await {
-                if chunk.is_empty() {
-                    continue;
-                }
-                let frame = match encode_ws_frame(
-                    &json!({"type": "input", "nonewline": true}),
-                    chunk.as_bytes(),
-                ) {
-                    Ok(frame) => frame,
-                    Err(_) => continue,
-                };
-
-                if ws_write.send(Message::Binary(frame.into())).await.is_err() {
-                    set_disconnect_reason(
-                        &disconnect_reason,
-                        "Disconnected: websocket write error".to_string(),
-                    );
-                    let _ = status_tx.send(ConnectionState::Disconnected);
-                    break;
-                }
-            }
-        })
-    };
-
     let mut should_quit = false;
+
+    renderer.render(&engine, *status_rx.borrow())?;
+    update_render_loop_title(&engine)?;
 
     while !should_quit {
         tokio::select! {
-            maybe_data = rx_output.recv() => {
+            maybe_data = output_rx.recv() => {
                 match maybe_data {
                     Some(data) => {
-                        let mut stdout = io::stdout();
-                        stdout.write_all(&data)?;
-                        stdout.flush()?;
+                        engine.process_output(&data);
+                        while let Ok(extra) = output_rx.try_recv() {
+                            engine.process_output(&extra);
+                        }
 
-                        while let Ok(extra) = rx_output.try_recv() {
-                            stdout.write_all(&extra)?;
-                            stdout.flush()?;
+                        renderer.render(&engine, *status_rx.borrow())?;
+                        update_render_loop_title(&engine)?;
+
+                        let responses = engine.drain_responses();
+                        if !responses.is_empty() {
+                            let _ = input_tx.send(responses);
                         }
                     }
                     None => break,
@@ -455,16 +310,24 @@ async fn main() -> DynResult<()> {
                             continue;
                         }
 
-                        if let Some(sequence) = map_key_to_sequence(key) {
-                            let _ = tx_input.send(sequence);
+                        if let Some(sequence) = map_key_to_bytes(key) {
+                            let _ = input_tx.send(sequence);
                         }
                     }
                     Some(Event::Paste(text)) => {
                         if !text.is_empty() {
-                            let _ = tx_input.send(text);
+                            engine.paste(&text);
+                            let responses = engine.drain_responses();
+                            if !responses.is_empty() {
+                                let _ = input_tx.send(responses);
+                            }
                         }
                     }
                     Some(Event::Resize(cols, rows)) => {
+                        engine.resize(cols as usize, rows as usize);
+                        renderer.render(&engine, *status_rx.borrow())?;
+                        update_render_loop_title(&engine)?;
+
                         let http_agent = Arc::clone(&http_agent);
                         let resize_url = resize_url.clone();
                         tokio::spawn(async move {
@@ -473,11 +336,38 @@ async fn main() -> DynResult<()> {
                                 resize_url.to_string(),
                                 rows,
                                 cols,
-                            )
-                            .await;
+                            ).await;
                         });
                     }
-                    Some(_) => {}
+                    Some(Event::Mouse(mouse)) => {
+                        let kind = mouse.kind;
+                        let raw = match kind {
+                            MouseEventKind::Down(_)
+                            | MouseEventKind::Up(_)
+                            | MouseEventKind::Drag(_)
+                            | MouseEventKind::ScrollUp
+                            | MouseEventKind::ScrollDown => {
+                                map_mouse_to_bytes(&mut engine, kind, mouse.column, mouse.row, mouse.modifiers)
+                            }
+                            _ => None,
+                        };
+
+                        if let Some(sequence) = raw {
+                            let _ = input_tx.send(sequence);
+                        }
+                    }
+                    Some(Event::FocusGained) => {
+                        let focus = engine.report_focus_in();
+                        if !focus.is_empty() {
+                            let _ = input_tx.send(focus);
+                        }
+                    }
+                    Some(Event::FocusLost) => {
+                        let focus = engine.report_focus_out();
+                        if !focus.is_empty() {
+                            let _ = input_tx.send(focus);
+                        }
+                    }
                     None => break,
                 }
             }
@@ -489,10 +379,10 @@ async fn main() -> DynResult<()> {
         }
     }
 
+    guard.restore();
+
     reader_handle.abort();
     writer_handle.abort();
-
-    guard.restore();
 
     if *status_rx.borrow() == ConnectionState::Disconnected {
         let reason = disconnect_reason
@@ -504,4 +394,9 @@ async fn main() -> DynResult<()> {
     }
 
     Ok(())
+}
+
+#[tokio::main]
+async fn main() -> DynResult<()> {
+    run().await
 }
