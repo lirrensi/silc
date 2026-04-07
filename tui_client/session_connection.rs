@@ -10,7 +10,11 @@ use std::{
     io,
     sync::{Arc, Mutex},
 };
-use tokio::{sync::{mpsc, watch}, task, task::JoinHandle};
+use tokio::{
+    sync::{mpsc, watch},
+    task,
+    task::JoinHandle,
+};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use ureq::Agent;
 use url::Url;
@@ -121,13 +125,12 @@ impl SessionConnection {
                         continue;
                     }
 
-                    let frame = match encode_ws_frame(
-                        &json!({"type": "input", "nonewline": true}),
-                        &chunk,
-                    ) {
-                        Ok(frame) => frame,
-                        Err(_) => continue,
-                    };
+                    let frame =
+                        match encode_ws_frame(&json!({"type": "input", "nonewline": true}), &chunk)
+                        {
+                            Ok(frame) => frame,
+                            Err(_) => continue,
+                        };
 
                     if ws_write.send(Message::Binary(frame.into())).await.is_err() {
                         set_disconnect_reason(
@@ -150,7 +153,6 @@ impl SessionConnection {
             writer_handle,
         })
     }
-
 }
 
 pub async fn request_clear(agent: Arc<Agent>, clear_url: String) {
@@ -166,7 +168,8 @@ pub async fn request_resize(
     task::spawn_blocking(move || {
         let rows_s = rows.to_string();
         let cols_s = cols.to_string();
-        agent.post(&resize_url)
+        agent
+            .post(&resize_url)
             .query("rows", &rows_s)
             .query("cols", &cols_s)
             .call()
@@ -202,7 +205,9 @@ fn decode_ws_frame(data: &[u8]) -> DynResult<(Value, Vec<u8>)> {
 
     let header: Value = serde_json::from_slice(&data[4..4 + header_len])?;
     if !header.is_object() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame header must be object").into());
+        return Err(
+            io::Error::new(io::ErrorKind::InvalidData, "frame header must be object").into(),
+        );
     }
 
     Ok((header, data[4 + header_len..].to_vec()))

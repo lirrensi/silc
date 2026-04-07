@@ -15,7 +15,9 @@ use crate::{
 };
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind},
+    event::{
+        self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+    },
     execute,
     terminal::{self, Clear, ClearType},
 };
@@ -151,21 +153,30 @@ fn map_mouse_to_bytes(
 
     let modifiers = modifiers.bits();
     let (button, pressed) = match mouse_kind {
-        MouseEventKind::Down(button) => (match button {
-            MouseButton::Left => 0,
-            MouseButton::Middle => 1,
-            MouseButton::Right => 2,
-        }, true),
-        MouseEventKind::Up(button) => (match button {
-            MouseButton::Left => 0,
-            MouseButton::Middle => 1,
-            MouseButton::Right => 2,
-        }, false),
-        MouseEventKind::Drag(button) => (match button {
-            MouseButton::Left => 0,
-            MouseButton::Middle => 1,
-            MouseButton::Right => 2,
-        }, true),
+        MouseEventKind::Down(button) => (
+            match button {
+                MouseButton::Left => 0,
+                MouseButton::Middle => 1,
+                MouseButton::Right => 2,
+            },
+            true,
+        ),
+        MouseEventKind::Up(button) => (
+            match button {
+                MouseButton::Left => 0,
+                MouseButton::Middle => 1,
+                MouseButton::Right => 2,
+            },
+            false,
+        ),
+        MouseEventKind::Drag(button) => (
+            match button {
+                MouseButton::Left => 0,
+                MouseButton::Middle => 1,
+                MouseButton::Right => 2,
+            },
+            true,
+        ),
         MouseEventKind::ScrollUp => (64, true),
         MouseEventKind::ScrollDown => (65, true),
         _ => return None,
@@ -179,25 +190,6 @@ fn map_mouse_to_bytes(
         modifiers,
     );
     Some(engine.report_mouse(event))
-}
-
-fn update_render_loop_title(engine: &dyn TerminalEngine) -> DynResult<()> {
-    let title_text = engine.title();
-    let title = if let Some(cwd) = engine.current_directory() {
-        if title_text.trim().is_empty() {
-            cwd
-        } else {
-            format!("{} — {}", title_text.trim(), cwd)
-        }
-    } else if title_text.trim().is_empty() {
-        "SILC".to_string()
-    } else {
-        title_text.trim().to_string()
-    };
-
-    let mut stdout = io::stdout();
-    execute!(stdout, terminal::SetTitle(title))?;
-    Ok(())
 }
 
 async fn run() -> DynResult<()> {
@@ -261,8 +253,7 @@ async fn run() -> DynResult<()> {
 
     let mut should_quit = false;
 
-    renderer.render(&engine, *status_rx.borrow())?;
-    update_render_loop_title(&engine)?;
+    renderer.render(&mut engine, *status_rx.borrow())?;
 
     while !should_quit {
         tokio::select! {
@@ -274,8 +265,7 @@ async fn run() -> DynResult<()> {
                             engine.process_output(&extra);
                         }
 
-                        renderer.render(&engine, *status_rx.borrow())?;
-                        update_render_loop_title(&engine)?;
+                        renderer.render(&mut engine, *status_rx.borrow())?;
 
                         let responses = engine.drain_responses();
                         if !responses.is_empty() {
@@ -309,8 +299,7 @@ async fn run() -> DynResult<()> {
                             engine.reset();
                             renderer.reset();
                             let _ = clear_local_screen();
-                            renderer.render(&engine, *status_rx.borrow())?;
-                            update_render_loop_title(&engine)?;
+                            renderer.render(&mut engine, *status_rx.borrow())?;
                             continue;
                         }
 
@@ -337,8 +326,8 @@ async fn run() -> DynResult<()> {
                         .await;
 
                         engine.resize(cols as usize, rows as usize);
-                        renderer.render(&engine, *status_rx.borrow())?;
-                        update_render_loop_title(&engine)?;
+                        renderer.reset();
+                        renderer.render(&mut engine, *status_rx.borrow())?;
                     }
                     Some(Event::Mouse(mouse)) => {
                         let kind = mouse.kind;
