@@ -17,7 +17,7 @@ import pytest
 import pytest_asyncio
 
 from silc.daemon.manager import DAEMON_PORT
-from silc.utils.names import generate_name, is_valid_name
+from silc.utils.names import derive_folder_session_name, generate_name, is_valid_name
 
 
 def run_cli(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess:
@@ -77,6 +77,13 @@ class TestNameValidation:
         """Names must start with a letter."""
         assert not is_valid_name("123project")
         assert not is_valid_name("1test")
+        assert not is_valid_name("123")
+
+    def test_folder_name_helper_rewrites_digit_only_names(self):
+        """Digit-only folder names should not be confused with ports."""
+        assert derive_folder_session_name("111") == "folder-111"
+        assert is_valid_name(derive_folder_session_name("111"))
+        assert derive_folder_session_name("Project 42") == "project-42"
 
     def test_invalid_name_trailing_hyphen(self):
         """Names cannot end with hyphen."""

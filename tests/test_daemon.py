@@ -78,6 +78,69 @@ class _EventTestSession:
         self.killed = True
 
 
+class _RouteTestSession(_EventTestSession):
+    def __init__(self, port: int, name: str, session_id: str) -> None:
+        super().__init__(port, name, session_id)
+        self.output_calls: list[tuple[int, bool]] = []
+        self.input_calls: list[str] = []
+        self.run_calls: list[tuple[str, int]] = []
+        self.signal_calls: list[str] = []
+        self.resize_calls: list[tuple[int, int]] = []
+
+    def get_status(self) -> dict:
+        return {
+            "session_id": self.session_id,
+            "port": self.port,
+            "name": self.name,
+            "title": self.title,
+            "cwd": self.cwd,
+            "title_updated_at": self.title_updated_at.isoformat() + "Z",
+            "alive": True,
+            "tui_active": False,
+            "idle_seconds": 3,
+            "waiting_for_input": False,
+            "last_line": "ready>",
+            "run_locked": False,
+        }
+
+    def get_output(self, lines: int = 100, raw: bool = False) -> str:
+        self.output_calls.append((lines, raw))
+        data = ["line-1", "line-2", "line-3"]
+        if lines > 0:
+            data = data[-lines:]
+        if raw:
+            return "\n".join(data)
+        return "\n".join(data)
+
+    def get_snapshot_bytes(self) -> bytes:
+        return b"snapshot-bytes"
+
+    async def write_input(self, text: str) -> None:
+        self.input_calls.append(text)
+
+    async def run_command(self, command: str, timeout: int) -> dict:
+        self.run_calls.append((command, timeout))
+        return {"output": f"ran:{command}", "exit_code": 0, "status": "completed"}
+
+    async def interrupt(self) -> None:
+        self.signal_calls.append("interrupt")
+
+    async def send_sigterm(self) -> None:
+        self.signal_calls.append("sigterm")
+
+    async def send_sigkill(self) -> None:
+        self.signal_calls.append("sigkill")
+
+    async def clear_screen(self) -> None:
+        self.signal_calls.append("clear")
+
+    async def reset_terminal(self) -> None:
+        self.signal_calls.append("reset")
+
+    def resize(self, rows: int, cols: int) -> None:
+        self.resize_calls.append((rows, cols))
+
+
 class _DummyServer:
     def __init__(self) -> None:
         self.should_exit = False
@@ -288,6 +351,99 @@ def test_list_sessions_marks_dormant_records() -> None:
     session = resp.json()[0]
     assert session["dormant"] is True
     assert session["runtime_state"] == "dormant"
+
+
+def test_resolve_session_target_prefers_port_then_name() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    port_entry = daemon.registry.add(20022, "alpha", "sess-alpha", "bash")
+    name_entry = daemon.registry.add(20023, "beta", "sess-beta", "bash")
+
+    resolved_port, _ = daemon._resolve_session_target("20022", operation="resolve")
+    resolved_name, _ = daemon._resolve_session_target("beta", operation="resolve")
+
+    assert resolved_port.port == port_entry.port
+    assert resolved_name.port == name_entry.port
+
+
+def test_daemon_session_routes_use_shared_key_resolution() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry = daemon.registry.add(20024, "alpha", "sess-route", "bash")
+    session = _RouteTestSession(entry.port, entry.name, entry.session_id)
+    daemon.runtime_by_port[entry.port] = SimpleNamespace(
+        session=session, state=SessionState.RUNNING
+    )
+
+    client = TestClient(daemon._create_daemon_api())
+
+    status = client.get("/sessions/alpha/status")
+    assert status.status_code == 200
+    assert status.json()["name"] == "alpha"
+
+    status_by_port = client.get("/sessions/20024/status")
+    assert status_by_port.status_code == 200
+    assert status_by_port.json()["port"] == 20024
+
+    out = client.get("/sessions/alpha/out?lines=2")
+    assert out.status_code == 200
+    assert out.json()["output"] == "line-2\nline-3"
+
+    raw = client.get("/sessions/20024/raw?lines=1")
+    assert raw.status_code == 200
+    assert raw.json()["output"] == "line-3"
+
+    run = client.post("/sessions/alpha/run", content="echo hi")
+    assert run.status_code == 200
+    assert run.json()["output"] == "ran:echo hi"
+
+    interrupt = client.post("/sessions/alpha/interrupt")
+    assert interrupt.status_code == 200
+    resize = client.post("/sessions/20024/resize?rows=24&cols=80")
+    assert resize.status_code == 200
+
+    assert session.output_calls == [(2, False), (1, True)]
+    assert session.run_calls == [("echo hi", 60)]
+    assert session.signal_calls == ["interrupt"]
+    assert session.resize_calls == [(24, 80)]
+
+
+def test_daemon_session_snapshot_and_logs_fallback_without_live_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry = daemon.registry.add(20025, "sleepy", "sess-snapshot", "bash")
+
+    monkeypatch.setattr(
+        "silc.daemon.manager.read_session_snapshot",
+        lambda session_id: b"frozen-bytes",
+    )
+    monkeypatch.setattr(
+        "silc.daemon.manager.read_session_log",
+        lambda port, tail_lines=None: "line-a\nline-b",
+    )
+
+    client = TestClient(daemon._create_daemon_api())
+
+    status = client.get("/sessions/sleepy/status")
+    assert status.status_code == 200
+    assert status.json()["dormant"] is True
+
+    snapshot = client.get("/sessions/20025/snapshot")
+    assert snapshot.status_code == 200
+    assert snapshot.content == b"frozen-bytes"
+
+    logs = client.get("/sessions/sleepy/logs?tail=10")
+    assert logs.status_code == 200
+    assert logs.json()["logs"] == "line-a\nline-b"
+
+
+def test_create_session_rejects_numeric_only_name() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    client = TestClient(daemon._create_daemon_api())
+
+    resp = client.post("/sessions", json={"name": "123", "shell": "bash"})
+
+    assert resp.status_code == 400
+    assert "Invalid name format" in str(resp.json()["detail"])
 
 
 def test_settings_routes_merge_and_persist(

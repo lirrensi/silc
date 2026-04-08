@@ -28,6 +28,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 
 - **One-command setup** — Start daemon and create sessions instantly
 - **Native shell startup** — Preserve shell profiles/init files when launching sessions
+- **Single exposed daemon port** — Remote control uses one daemon endpoint; session ports stay private
 - **HTTP API** — Full REST API for all shell operations
 - **WebSocket Streaming** — Real-time terminal output
 - **Native TUI** — Terminal UI for interactive sessions
@@ -148,9 +149,11 @@ silc 20000 tui                # Launch native TUI
 # On server
 silc start --global --token <your-token>
 
-# From client (via SSH tunnel)
-ssh -L 20000:localhost:20000 user@server
-silc 20000 run "htop"         # Use TUI apps remotely
+# From client
+curl -H "Authorization: Bearer <your-token>" \
+  https://server.example.com:19999/sessions/my-project/run
+
+# Use the manager UI for interactive work; WebSocket is for live terminal control only
 ```
 
 ---

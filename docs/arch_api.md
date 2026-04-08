@@ -16,6 +16,8 @@ Each running session gets its own FastAPI app instance bound to its port.
 
 Dormant sessions do not have a per-session FastAPI app until they are materialized.
 
+The daemon may expose session-control HTTP routes on its own public port, but it does not need to proxy WebSocket for non-interactive command execution.
+
 The daemon management API in `silc/daemon/manager.py` is a separate FastAPI app
 that owns daemon-wide failure containment for manager operations such as session
 creation, restart, resurrection, and shutdown.

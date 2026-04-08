@@ -6,13 +6,14 @@ This document describes `silc/daemon/`.
 
 The daemon is the root process for SILC. It:
 
-- serves the manager UI and daemon API on port `19999`
+- serves the manager UI, daemon API, and daemon-routed session control on port `19999`
 - owns the desired-state registry for sessions
 - owns the shared daemon settings store for manager and terminal preferences
 - loads persisted records as dormant desired sessions on boot
 - materializes live runtime against persisted records on explicit activation
 - recreates PTYs and per-session servers when they fail
 - performs bounded cleanup, graceful snapshot save, shutdown, and resurrection
+- centralizes session-target resolution (port first, then name)
 
 There is no separate supervisor process; supervision is an internal daemon concern.
 
@@ -27,6 +28,7 @@ Owns:
 - manager UI serving and daemon API routes
 - daemon event broadcasting
 - pidfile management and signal handling
+- shared session-target resolution
 
 Does not own:
 
@@ -194,13 +196,24 @@ API routes:
 - `POST /killall` — clear all sessions and session artifacts, keep daemon alive
 - `GET /events` — manager websocket event stream
 
+Session control routes are also available on the daemon port using a shared `{key}` resolver. WebSocket does not need to be proxied for programmatic session control; it remains an interactive-terminal concern.
+
 ## Session Creation Rules
 
 - Explicit names are validated with `is_valid_name()`.
 - If no name is provided, the daemon generates a unique Docker-style name.
 - If no port is provided, the daemon scans `20000..21000` for a free port.
+- Numeric-only names are invalid.
+- Folder-derived auto-names that sanitize to digits only must be rewritten with a non-numeric marker, e.g. `folder-111`.
 - `MAX_SESSIONS` caps the total registry size.
 - `--global` or daemon share mode causes session servers to bind externally.
+
+## Session Resolution
+
+- `resolve_session_target(key)` centralizes all daemon session lookup.
+- Numeric keys are resolved as ports first.
+- Non-numeric keys are resolved by name.
+- All daemon session-control routes use the same resolver.
 
 ## Reconciliation Rules
 

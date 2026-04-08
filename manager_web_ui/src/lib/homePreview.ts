@@ -4,7 +4,7 @@
 // EXPORTS: HOME_GRID_OPTIONS - supported Home grid densities; getHomeGridSlots - maps density to visible card count; getCachedHomePreviewSnapshot - reads the local snapshot cache; loadHomePreviewSnapshot - fetches a frozen session snapshot with throttling.
 // DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
-import { getSessionHttpUrl } from '@/lib/daemonApi'
+import { getDaemonSessionUrl } from '@/lib/daemonApi'
 
 export type HomeGridDensity = '2x2' | '3x3' | '4x4'
 
@@ -89,7 +89,7 @@ async function requestSnapshot(port: number, timeoutMs: number): Promise<Uint8Ar
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch(`${getSessionHttpUrl(port)}/snapshot`, {
+    const response = await fetch(`${getDaemonSessionUrl(port)}/snapshot`, {
       signal: controller.signal,
       cache: 'no-store',
       headers: { Accept: 'application/octet-stream' },

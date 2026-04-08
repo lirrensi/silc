@@ -27,11 +27,12 @@ from typing import Dict
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from silc.api.server import create_app
+from silc.core.cleaner import clean_output
 from silc.core.session import SilcSession
 from silc.daemon.events import (
     DaemonEventBroadcaster,
@@ -59,6 +60,8 @@ from silc.utils.persistence import (
     cleanup_session_log,
     garbage_collect_session_snapshots,
     get_session_log_path,
+    read_session_log,
+    read_session_snapshot,
     read_settings_json,
     remove_session_snapshot,
     rotate_daemon_log,
@@ -198,6 +201,25 @@ def _shell_display_name(shell_info: ShellInfo) -> str:
     }.get(shell_info.type, shell_info.type)
 
 
+def _client_is_local(host: str | None) -> bool:
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    if "%" in host:
+        host = host.split("%", 1)[0]
+    try:
+        from ipaddress import AddressValueError, ip_address
+
+        addr = ip_address(host)
+    except AddressValueError:
+        return False
+    if addr.is_loopback:
+        return True
+    ipv4_mapped = getattr(addr, "ipv4_mapped", None)
+    return bool(ipv4_mapped and ipv4_mapped.is_loopback)
+
+
 class SilcDaemon:
     """Main daemon managing multiple SILC sessions."""
 
@@ -235,6 +257,105 @@ class SilcDaemon:
         self._registry_lock = (
             asyncio.Lock()
         )  # Serialize registry mutations and persistence
+
+    def _resolve_session_target(self, key: str, *, operation: str) -> tuple:
+        normalized_key = key.strip()
+        if not normalized_key:
+            raise HTTPException(
+                status_code=404,
+                detail=_build_validation_error_payload(operation, "Session not found"),
+            )
+
+        if normalized_key.isdigit():
+            port = int(normalized_key)
+            entry = self._get_desired_entry_for_port(port)
+            if entry is None:
+                raise HTTPException(status_code=404, detail="Session not found")
+            return entry, self.runtime_by_port.get(port)
+
+        entry = self._get_desired_entry_for_name(normalized_key)
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session '{normalized_key}' not found",
+            )
+        return entry, self.runtime_by_port.get(entry.port)
+
+    def _require_session_token(self, request: Request, session: SilcSession) -> None:
+        token = session.api_token
+        if not token:
+            return
+
+        client = request.client
+        client_host = client[0] if client else None
+        if _client_is_local(client_host):
+            return
+
+        auth_header = request.headers.get("authorization")
+        if not auth_header:
+            raise HTTPException(status_code=401, detail="Missing API token")
+
+        parts = auth_header.strip().split(" ", 1)
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise HTTPException(status_code=401, detail="Invalid Authorization header")
+
+        if parts[1].strip() != token:
+            raise HTTPException(status_code=403, detail="Invalid API token")
+
+    def _session_status_payload(self, entry, runtime) -> dict[str, object]:
+        session = runtime.session if runtime else None
+        if session is not None:
+            try:
+                status = session.get_status()
+            except Exception:
+                status = None
+            if isinstance(status, dict):
+                status["runtime_state"] = runtime.state.value if runtime else "dormant"
+                status["dormant"] = False
+                return status
+
+        payload = serialize_session_snapshot(entry, runtime)
+        payload.update(
+            {
+                "tui_active": False,
+                "waiting_for_input": False,
+                "last_line": "",
+                "run_locked": False,
+            }
+        )
+        if runtime is None:
+            payload["dormant"] = True
+        return payload
+
+    def _decode_snapshot_output(self, snapshot_bytes: bytes, *, raw: bool) -> str:
+        lines = snapshot_bytes.decode("utf-8", errors="replace").splitlines()
+        if raw:
+            return "\n".join(lines)
+        return clean_output(lines)
+
+    def _read_session_snapshot_bytes(self, entry, runtime) -> bytes:
+        session = runtime.session if runtime else None
+        if session is not None:
+            try:
+                return session.get_snapshot_bytes()
+            except Exception:
+                pass
+        return read_session_snapshot(entry.session_id)
+
+    def _session_is_alive(self, session: SilcSession) -> bool:
+        try:
+            return bool(session.get_status().get("alive"))
+        except Exception:
+            return False
+
+    def _resolve_active_session_target(
+        self, key: str, *, operation: str
+    ) -> tuple[object, object, SilcSession]:
+        entry, runtime = self._resolve_session_target(key, operation=operation)
+        session = runtime.session if runtime else None
+        if session is None or not self._session_is_alive(session):
+            raise HTTPException(status_code=410, detail="Session has ended")
+        return entry, runtime, session
 
     def _create_daemon_api(self) -> FastAPI:
         """Create daemon management API."""
@@ -625,18 +746,292 @@ class SilcDaemon:
                     detail=_build_logged_daemon_exception_payload(operation, exc),
                 ) from exc
 
-        @app.get("/resolve/{name}")
-        async def resolve_session(name: str):
-            """Resolve session name to session info."""
+        @app.get("/resolve/{key}")
+        async def resolve_session(key: str):
+            """Resolve a session target using the shared port-first/name-second rule."""
             operation = "resolve_session"
             try:
-                entry = self._get_desired_entry_for_name(name)
-                if not entry:
-                    raise HTTPException(
-                        status_code=404, detail=f"Session '{name}' not found"
-                    )
-
+                entry, _runtime = self._resolve_session_target(key, operation=operation)
                 return self._serialize_session_entry(entry)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.get("/sessions/{key}/status")
+        async def session_status(key: str, request: Request) -> dict[str, object]:
+            operation = "session_status"
+            try:
+                entry, runtime = self._resolve_session_target(key, operation=operation)
+                session = runtime.session if runtime else None
+                if session is not None:
+                    self._require_session_token(request, session)
+                return self._session_status_payload(entry, runtime)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.get("/sessions/{key}/out")
+        async def session_out(key: str, request: Request, lines: int = 100) -> dict:
+            operation = "session_out"
+            try:
+                entry, runtime = self._resolve_session_target(key, operation=operation)
+                session = runtime.session if runtime else None
+                if session is not None:
+                    self._require_session_token(request, session)
+                    output = session.get_output(lines)
+                else:
+                    snapshot_bytes = self._read_session_snapshot_bytes(entry, runtime)
+                    output = self._decode_snapshot_output(snapshot_bytes, raw=False)
+                    if lines > 0:
+                        output = "\n".join(output.splitlines()[-lines:])
+                return {"output": output, "lines": len(output.splitlines())}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.get("/sessions/{key}/raw")
+        async def session_raw(key: str, request: Request, lines: int = 100) -> dict:
+            operation = "session_raw"
+            try:
+                entry, runtime = self._resolve_session_target(key, operation=operation)
+                session = runtime.session if runtime else None
+                if session is not None:
+                    self._require_session_token(request, session)
+                    output = session.get_output(lines, raw=True)
+                else:
+                    snapshot_bytes = self._read_session_snapshot_bytes(entry, runtime)
+                    output = self._decode_snapshot_output(snapshot_bytes, raw=True)
+                    if lines > 0:
+                        output = "\n".join(output.splitlines()[-lines:])
+                return {"output": output, "lines": len(output.splitlines())}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.get("/sessions/{key}/snapshot")
+        async def session_snapshot(key: str, request: Request) -> Response:
+            operation = "session_snapshot"
+            try:
+                entry, runtime = self._resolve_session_target(key, operation=operation)
+                session = runtime.session if runtime else None
+                if session is not None:
+                    self._require_session_token(request, session)
+                    snapshot_bytes = session.get_snapshot_bytes()
+                else:
+                    snapshot_bytes = self._read_session_snapshot_bytes(entry, runtime)
+                if not snapshot_bytes:
+                    raise HTTPException(
+                        status_code=404, detail="Session snapshot not found"
+                    )
+                return Response(
+                    content=snapshot_bytes,
+                    media_type="application/octet-stream",
+                    headers={"Cache-Control": "no-store"},
+                )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.get("/sessions/{key}/logs")
+        async def session_logs(key: str, request: Request, tail: int = 100) -> dict:
+            operation = "session_logs"
+            try:
+                entry, runtime = self._resolve_session_target(key, operation=operation)
+                session = runtime.session if runtime else None
+                if session is not None:
+                    self._require_session_token(request, session)
+                    log_content = read_session_log(session.port, tail_lines=tail)
+                else:
+                    log_content = read_session_log(entry.port, tail_lines=tail)
+                lines = log_content.splitlines() if log_content else []
+                return {"logs": log_content, "lines": len(lines)}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/in")
+        async def session_in(
+            key: str, request: Request, nonewline: bool = False
+        ) -> dict:
+            operation = "session_in"
+            try:
+                entry, runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                body = await request.body()
+                text = body.decode("utf-8", errors="replace")
+                text = text.rstrip("\r\n")
+                if not nonewline:
+                    text += "\r\n" if sys.platform == "win32" else "\n"
+                await session.write_input(text)
+                _ = entry, runtime
+                return {"status": "sent"}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/run")
+        async def session_run(key: str, request: Request, timeout: int = 60) -> dict:
+            operation = "session_run"
+            try:
+                entry, runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                body = await request.body()
+                if not body:
+                    return {"error": "No command provided", "status": "bad_request"}
+                text = body.decode("utf-8", errors="replace")
+                command = text
+                resolved_timeout = timeout
+                try:
+                    payload = json.loads(text)
+                    command = payload.get("command", "")
+                    resolved_timeout = payload.get("timeout", timeout)
+                except json.JSONDecodeError:
+                    pass
+                command = command.rstrip("\r\n")
+                _ = entry, runtime
+                return await session.run_command(command, resolved_timeout)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/interrupt")
+        async def session_interrupt(key: str, request: Request) -> dict:
+            operation = "session_interrupt"
+            try:
+                _entry, _runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                await session.interrupt()
+                return {"status": "interrupted"}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/sigterm")
+        async def session_sigterm(key: str, request: Request) -> dict:
+            operation = "session_sigterm"
+            try:
+                _entry, _runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                await session.send_sigterm()
+                return {"status": "sigterm_sent"}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/sigkill")
+        async def session_sigkill(key: str, request: Request) -> dict:
+            operation = "session_sigkill"
+            try:
+                _entry, _runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                await session.send_sigkill()
+                return {"status": "sigkill_sent"}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/clear")
+        async def session_clear(key: str, request: Request) -> dict:
+            operation = "session_clear"
+            try:
+                _entry, _runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                await session.clear_screen()
+                return {"status": "cleared"}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/reset")
+        async def session_reset(key: str, request: Request) -> dict:
+            operation = "session_reset"
+            try:
+                _entry, _runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                await session.reset_terminal()
+                return {"status": "reset"}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/resize")
+        async def session_resize(
+            key: str, request: Request, rows: int, cols: int
+        ) -> dict:
+            operation = "session_resize"
+            try:
+                _entry, _runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                session.resize(rows, cols)
+                return {"status": "resized", "rows": rows, "cols": cols}
             except HTTPException:
                 raise
             except Exception as exc:

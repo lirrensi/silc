@@ -61,6 +61,7 @@ from silc.stream.cli_commands import (
     stream_stop,
 )
 from silc.tui.installer import InstallerError, ensure_native_tui_binary
+from silc.utils.names import derive_folder_session_name
 from silc.utils.ports import find_available_port
 from silc.utils.session_wake import wake_session_if_dormant
 
@@ -616,15 +617,7 @@ def start(
 
     # Daemon is running, derive name from folder if not provided
     if name is None:
-        import re
-
-        folder_name = Path.cwd().name.lower()
-        # Sanitize: keep only alphanumeric and hyphens, remove leading/trailing hyphens
-        folder_name = re.sub(r"[^a-z0-9-]+", "-", folder_name)
-        folder_name = folder_name.strip("-")
-        # Ensure starts with letter (pad if needed)
-        if not folder_name or not folder_name[0].isalpha():
-            folder_name = "s" + (folder_name or "")
+        folder_name = derive_folder_session_name(Path.cwd().name)
 
         # Check for collision with existing sessions
         try:

@@ -17,6 +17,14 @@ SILC manages shell sessions through a daemon, per-session HTTP APIs, and multipl
 - If the CLI creates a session without a name, it derives one from the current folder.
 - If the daemon API creates a session without a name, it generates a unique Docker-style name like `happy-fox-42`.
 
+## Session Target Resolution
+
+- Daemon session-targeted routes MUST resolve a key using **port first**, then **name**.
+- A key containing only digits MUST be treated as a port candidate before any name lookup.
+- Numeric-only session names MUST be rejected.
+- If folder-derived auto-naming would produce a digits-only name after sanitization, the name MUST be rewritten with a non-numeric marker, e.g. `folder-111`.
+- All daemon session-targeted routes MUST use the same shared resolver helper.
+
 ## Session Lifecycle
 
 - Creating a session writes a desired-state record and realizes a live PTY plus per-session HTTP server.
@@ -81,6 +89,24 @@ The daemon listens on `19999` and exposes:
 - `POST /shutdown` — graceful daemon shutdown
 - `POST /killall` — clear sessions and session artifacts
 - `GET /events` — binary websocket stream of manager events
+
+The daemon also exposes session control on the same public port using a resolved session key:
+
+- `GET /sessions/{key}/status` — session metadata and liveness
+- `GET /sessions/{key}/out` — rendered output
+- `GET /sessions/{key}/raw` — raw output
+- `GET /sessions/{key}/snapshot` — raw PTY snapshot for previews
+- `GET /sessions/{key}/logs` — session logs
+- `POST /sessions/{key}/in` — send input
+- `POST /sessions/{key}/run` — run a command
+- `POST /sessions/{key}/interrupt` — send Ctrl+C
+- `POST /sessions/{key}/sigterm` — terminate foreground process tree gently
+- `POST /sessions/{key}/sigkill` — kill foreground process tree forcefully
+- `POST /sessions/{key}/clear` — clear screen
+- `POST /sessions/{key}/reset` — reset terminal state
+- `POST /sessions/{key}/resize` — resize terminal
+
+These routes resolve `{key}` with the shared port-first/name-second rule. WebSocket is not required for this remote programmatic control path.
 
 ## Session API
 
@@ -147,6 +173,8 @@ Includes: `session_id`, `port`, `name`, `title`, `cwd`, `title_updated_at`, `ali
 - `cwd`
 
 `mode=interactive` claims the live terminal; `mode=preview` is read-only.
+
+This WebSocket remains the interactive terminal channel; it is not needed for daemon-routed command execution or output retrieval.
 
 Dormant sessions do not expose a live websocket endpoint.
 

@@ -1,5 +1,11 @@
 """Session name generation and validation."""
 
+# FILE: silc/utils/names.py
+# PURPOSE: Generate and validate session names, including folder-derived naming helpers.
+# OWNS: Session name validation rules, random name generation, and folder-to-session name normalization.
+# EXPORTS: is_valid_name (explicit name validator), generate_name (random daemon name), derive_folder_session_name (folder-based auto-name helper).
+# DOCS: docs/spec.md, docs/product.md
+
 from __future__ import annotations
 
 import random
@@ -257,4 +263,34 @@ def generate_name() -> str:
     return f"{adjective}-{noun}-{number}"
 
 
-__all__ = ["ADJECTIVES", "NOUNS", "NAME_PATTERN", "is_valid_name", "generate_name"]
+def derive_folder_session_name(folder_name: str) -> str:
+    """Normalize a folder name into an auto-generated session name.
+
+    Digit-only folder names are rewritten with a visible suffix so they cannot
+    be mistaken for a port number.
+    """
+
+    normalized = folder_name.lower()
+    normalized = re.sub(r"[^a-z0-9-]+", "-", normalized)
+    normalized = normalized.strip("-")
+
+    if not normalized:
+        return "session"
+
+    if normalized.isdigit():
+        return f"folder-{normalized}"
+
+    if not normalized[0].isalpha():
+        return f"s-{normalized}"
+
+    return normalized
+
+
+__all__ = [
+    "ADJECTIVES",
+    "NOUNS",
+    "NAME_PATTERN",
+    "is_valid_name",
+    "generate_name",
+    "derive_folder_session_name",
+]
