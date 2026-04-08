@@ -43,9 +43,7 @@ from urllib.parse import urlencode
 
 import click
 import requests
-import uvicorn
 
-from silc.api.server import create_app
 from silc.core.session import SilcSession
 from silc.daemon import DAEMON_PORT, is_daemon_running, kill_daemon
 from silc.daemon.settings import build_path_update
@@ -342,12 +340,6 @@ def _is_valid_name(s: str) -> bool:
 
 
 SESSION_REGISTRY: dict[int, SilcSession] = {}
-
-
-def _build_server(session: SilcSession, host: str) -> uvicorn.Server:
-    app = create_app(session)
-    config = uvicorn.Config(app, host=host, port=session.port, log_level="info")
-    return uvicorn.Server(config)
 
 
 class SessionGroup(click.Group):

@@ -7,7 +7,7 @@ This document describes `silc/__main__.py`.
 The CLI is a Click-based front end for:
 
 - starting or managing the daemon
-- operating on an existing session by port or name
+- operating on an existing session by port or name through a daemon-backed adapter or direct daemon route
 - launching the manager UI, desktop webview, TUI, and MCP server
 - installing OS integrations
 
@@ -131,14 +131,14 @@ Notes:
 
 ## Session Commands
 
-- `run` posts JSON `{command, timeout}` to `/run`.
+- `run` posts JSON `{command, timeout}` to `/run` on the port adapter, which forwards to the daemon.
 - `out` reads rendered output from `/out`.
 - `in` posts raw input bytes to `/in`.
 - `status` reads `/status` and prints session metadata.
-- `interrupt`, `clear`, `reset`, `resize` map directly to the session API.
+- `interrupt`, `clear`, `reset`, `resize` map directly to the adapter surface.
 - `close`, `kill`, `restart` call daemon lifecycle endpoints.
 - `logs` reads the daemon-maintained session log file.
-- `web` opens the per-session web UI.
+- `web` opens the per-port session UI.
 - `start-enter` starts a session and immediately launches the native TUI.
 - `tui` launches the native TUI binary.
 - All session-targeted commands first wake dormant sessions synchronously, except `close`, `kill`, and `restart`.
@@ -149,7 +149,7 @@ Notes:
 - `stream-file-append` starts append-mode file streaming with deduplication.
 - `stream-stop` stops streaming for the named file.
 - `stream-status` shows active file streams.
-- Stream commands also wake dormant sessions before calling the session API.
+- Stream commands also wake dormant sessions before calling the session surface.
 
 The CLI fetches the session token from `/token` when one is needed for stream calls.
 

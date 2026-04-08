@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import socket
 import time
+from types import SimpleNamespace
 
 import pytest
 import requests
@@ -36,6 +37,12 @@ def _find_remote_host() -> str | None:
 
 
 def _pick_free_daemon_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _pick_free_session_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
@@ -109,26 +116,70 @@ class _WsSession:
 
 
 @pytest.mark.asyncio
-async def test_session_requires_token_for_remote_requests() -> None:
+async def test_session_requires_token_for_remote_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Remote clients must provide the session token, local CLI calls do not."""
     kill_daemon(port=DAEMON_PORT)
     _shutdown_daemon()
     await asyncio.sleep(1)
 
     daemon = SilcDaemon()
+
+    class _AuthSession:
+        def __init__(self, port: int, name: str, api_token: str | None) -> None:
+            self.port = port
+            self.name = name
+            self.session_id = "auth-test"
+            self.api_token = api_token
+            self.title = "auth-test"
+            self.title_updated_at = dt.datetime.utcnow()
+            self.cwd = None
+            self.shell_info = SimpleNamespace(type="bash")
+            self.tui_active = False
+            self.buffer = RawByteBuffer()
+            self._output_event = asyncio.Event()
+
+        def get_status(self) -> dict:
+            return {"alive": True, "tui_active": self.tui_active}
+
+        def get_snapshot_bytes(self) -> bytes:
+            return b""
+
+        async def close(self) -> None:
+            return None
+
+    async def fake_construct(*args, **kwargs):
+        port = int(args[0])
+        name = str(args[1])
+        api_token = args[3] if len(args) > 3 else kwargs.get("api_token")
+        return _AuthSession(port, name, api_token)
+
+    async def fake_start(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(daemon, "_construct_session", fake_construct)
+    monkeypatch.setattr(daemon, "_start_session_with_timeout", fake_start)
+    monkeypatch.setattr(daemon, "_validate_session_launch", lambda *a, **k: None)
     task = asyncio.create_task(daemon.start())
     await wait_for_daemon_start(daemon, timeout=10)
 
     try:
         token = "test-token-123"
 
-        resp = requests.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions",
-            json={"is_global": True, "token": token},
-            timeout=15,
+        session_port = _pick_free_session_port()
+        entry = daemon.registry.add(
+            session_port,
+            "auth-test",
+            "auth-test",
+            "bash",
+            is_global=True,
+            title="auth-test",
         )
-        assert resp.status_code == 200
-        session_port = resp.json()["port"]
+        runtime = daemon._get_or_create_runtime(
+            entry, api_token=token, title="auth-test"
+        )
+        await daemon._realize_runtime(entry, runtime, preserve_session_id="auth-test")
 
         time.sleep(0.5)
 
@@ -156,6 +207,10 @@ async def test_session_requires_token_for_remote_requests() -> None:
         local_url = f"http://127.0.0.1:{session_port}/status"
         local_resp = requests.get(local_url, timeout=5)
         assert local_resp.status_code == 200
+
+        token_resp = requests.get(f"http://127.0.0.1:{session_port}/token", timeout=5)
+        assert token_resp.status_code == 200
+        assert token_resp.json()["token"] == token
     finally:
         daemon._shutdown_event.set()
         try:
@@ -165,6 +220,7 @@ async def test_session_requires_token_for_remote_requests() -> None:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         _shutdown_daemon()
+        monkeypatch.undo()
 
 
 def test_session_api_allows_browser_resize_cors() -> None:

@@ -32,13 +32,13 @@ The daemon-owned desired-state entry that defines that a session should exist. R
 
 ## Session Runtime
 
-The currently realized live resources for a session record, including PTY, per-session server, socket, generation, and health state.
+The currently realized live resources for a session record, including PTY, adapter, socket, generation, and health state.
 
 ---
 
 ## Messenger
 
-The replaceable per-session HTTP/WebSocket server attached to a session runtime. Messenger failure does not imply session death.
+The replaceable per-port HTTP/WebSocket forwarder attached to a session runtime. Messenger failure does not imply session death.
 
 ---
 

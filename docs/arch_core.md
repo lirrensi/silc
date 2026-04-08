@@ -25,7 +25,7 @@ Owns:
 Does not own:
 
 - daemon record management (`silc/daemon/`)
-- session HTTP/WebSocket routing (`silc/api/server.py`)
+- session HTTP/WebSocket routing or port adapters (`silc/api/server.py`)
 - CLI parsing (`silc/__main__.py`)
 
 ## Key Modules

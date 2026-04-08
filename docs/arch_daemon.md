@@ -6,12 +6,12 @@ This document describes `silc/daemon/`.
 
 The daemon is the root process for SILC. It:
 
-- serves the manager UI, daemon API, and daemon-routed session control on port `19999`
+- serves the manager UI and daemon API on port `19999`
 - owns the desired-state registry for sessions
 - owns the shared daemon settings store for manager and terminal preferences
 - loads persisted records as dormant desired sessions on boot
 - materializes live runtime against persisted records on explicit activation
-- recreates PTYs and per-session servers when they fail
+- recreates PTYs and lightweight port adapters when they fail
 - performs bounded cleanup, graceful snapshot save, shutdown, and resurrection
 - centralizes session-target resolution (port first, then name)
 
@@ -24,7 +24,8 @@ Owns:
 - desired session records and persistence
 - frozen snapshot file ownership and lookup
 - runtime generation/backoff state
-- PTY + session server realization
+- PTY + session runtime realization
+- lightweight per-port adapter lifecycle
 - manager UI serving and daemon API routes
 - daemon event broadcasting
 - pidfile management and signal handling
@@ -150,9 +151,9 @@ _daemon_api_app: FastAPI
 ## Runtime Model
 
 - A record is truth; runtime is disposable.
-- Dormant records have no live PTY, no live server, and no in-memory snapshot payload until explicitly activated.
+- Dormant records have no live PTY, no live adapter, and no in-memory snapshot payload until explicitly activated.
 - PTY failure triggers PTY recreation.
-- Server failure triggers server recreation.
+- Adapter failure triggers adapter recreation.
 - Generation counters prevent stale cleanup from killing newer runtime.
 - Runtime failures enter backoff and are retried later.
 
@@ -167,7 +168,7 @@ _daemon_api_app: FastAPI
 7. Start the daemon API server.
 8. Start periodic log rotation, shutdown watcher, restart watcher, and reconcile loop.
 
-If `share_mode` is enabled, the daemon and session servers bind to LAN-reachable addresses and the manager URL reflects the host IP.
+If `share_mode` is enabled, the daemon and adapters bind to LAN-reachable addresses and the manager URL reflects the host IP.
 
 ## Daemon API
 
@@ -196,7 +197,7 @@ API routes:
 - `POST /killall` — clear all sessions and session artifacts, keep daemon alive
 - `GET /events` — manager websocket event stream
 
-Session control routes are also available on the daemon port using a shared `{key}` resolver. WebSocket does not need to be proxied for programmatic session control; it remains an interactive-terminal concern.
+Session control routes are also available on the daemon port using a shared `{key}` resolver. Lightweight loopback adapters may forward port-based traffic into these daemon routes so client URLs stay stable.
 
 ## Session Creation Rules
 
@@ -206,7 +207,7 @@ Session control routes are also available on the daemon port using a shared `{ke
 - Numeric-only names are invalid.
 - Folder-derived auto-names that sanitize to digits only must be rewritten with a non-numeric marker, e.g. `folder-111`.
 - `MAX_SESSIONS` caps the total registry size.
-- `--global` or daemon share mode causes session servers to bind externally.
+- `--global` or daemon share mode causes adapters to bind externally.
 
 ## Session Resolution
 
@@ -219,7 +220,7 @@ Session control routes are also available on the daemon port using a shared `{ke
 
 - Dormant records stay unloaded until explicit activation or all-session resurrection.
 - Missing PTY -> recreate session.
-- Missing server -> recreate server.
+- Missing adapter -> recreate adapter.
 - Stopping/stopped runtimes are skipped.
 - Backoff prevents hot-loop retries after repeated failure.
 - The runtime is updated from live title/cwd callbacks when those values change.

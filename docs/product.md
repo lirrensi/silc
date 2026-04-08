@@ -28,7 +28,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 
 - **One-command setup** — Start daemon and create sessions instantly
 - **Native shell startup** — Preserve shell profiles/init files when launching sessions
-- **Single exposed daemon port** — Remote control uses one daemon endpoint; session ports stay private
+- **Daemon + thin session adapters** — One real daemon owns behavior; live session ports are tiny loopback forwarders
 - **HTTP API** — Full REST API for all shell operations
 - **WebSocket Streaming** — Real-time terminal output
 - **Native TUI** — Terminal UI for interactive sessions
@@ -73,28 +73,33 @@ Unlike tmux, screen, or SSH, SILC provides:
        │                   │                   │
        └───────────────────┼───────────────────┘
                            │
-                    ┌──────▼──────┐
-                    │   Daemon    │
-                    │  (Manager)  │
-                    └──────┬──────┘
-                           │
-              ┌────────────┼────────────┐
-              │            │            │
-         ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
-         │Session 1│  │Session 2│  │Session N│
-         │ (PTY)   │  │ (PTY)   │  │ (PTY)   │
-         └────┬────┘  └────┬────┘  └────┬────┘
-              │            │            │
-         ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
-         │ Shell 1 │  │ Shell 2 │  │ Shell N │
-         └─────────┘  └─────────┘  └─────────┘
+                     ┌──────▼──────┐
+                     │   Daemon    │
+                     │  (Manager)  │
+                     └──────┬──────┘
+                            │
+               ┌────────────┼────────────┐
+               │            │            │
+          ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
+          │Adapter  │  │Adapter  │  │Adapter  │
+          │ :20000  │  │ :20001  │  │ :2000N  │
+          └────┬────┘  └────┬────┘  └────┬────┘
+               │            │            │
+          ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
+          │Session 1│  │Session 2│  │Session N│
+          │  PTY    │  │  PTY    │  │  PTY    │
+          └────┬────┘  └────┬────┘  └────┬────┘
+               │            │            │
+          ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
+          │ Shell 1 │  │ Shell 2 │  │ Shell N │
+          └─────────┘  └─────────┘  └─────────┘
 ```
 
 **Components:**
 - **Daemon** — Background process that owns session records, frozen snapshots, and on-demand runtime materialization (port 19999)
-- **Session** — Persistent session identity that may be running or dormant; dormant sessions have no live PTY until materialized (ports 20000+ when live)
+- **Session** — Persistent session identity that may be running or dormant; live sessions may also have a tiny port adapter bound for convenience
 - **CLI** — Command-line interface for human interaction
-- **API** — FastAPI server for programmatic access
+- **API** — Daemon HTTP/WebSocket API for programmatic access
 - **TUI/Web UI** — Interactive interfaces
 
 ---
@@ -105,7 +110,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 
 ```bash
 silc start                    # Start daemon and create session
-silc 20000 run "ls -la"       # Execute command (by port)
+silc 20000 run "ls -la"       # Execute command (by port adapter)
 silc 20000 out                # View output
 ```
 

@@ -101,7 +101,7 @@ Normalization strips ANSI color codes, collapses whitespace, and lowercases text
 
 ## REST API
 
-Mounted at `/stream` on the session API.
+Mounted at `/stream` on the session adapter/API surface.
 
 - `POST /stream/start` — start a stream from `StreamConfig`
 - `POST /stream/stop` — stop by filename

@@ -301,7 +301,7 @@ Reset terminal state.
 
 Resize terminal dimensions.
 
-The session app sends permissive CORS headers so the browser manager UI can
+The session adapter sends permissive CORS headers so the browser manager UI can
 call this endpoint directly from `http://127.0.0.1:19999` or other local
 origins without CORS failures.
 
@@ -315,7 +315,7 @@ Return session API token.
 
 ### `GET /web`
 
-Serve static Web UI from `static/web/index.html`. Per-session terminal interface.
+Serve static Web UI from `static/web/index.html`. Per-port terminal interface.
 The page may best-effort read daemon settings for appearance defaults and fall back to built-in defaults if the daemon is unreachable.
 
 ---
@@ -357,7 +357,7 @@ The JSON header uses `type`, not `event`.
 - PTY bytes are forwarded without UTF-8 decoding on output/history paths.
 - Malformed or unsupported frames close the socket with a protocol error.
 - The websocket is for interactive sessions; frozen previews use `GET /snapshot`.
-- Dormant sessions do not expose websocket or snapshot endpoints because they do not have a live per-session server.
+- Dormant sessions do not expose websocket or snapshot endpoints because they do not have a live adapter.
 
 ---
 

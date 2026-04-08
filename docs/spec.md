@@ -1,13 +1,14 @@
 # SILC Behavior Specification
 
-SILC manages shell sessions through a daemon, per-session HTTP APIs, and multiple client surfaces.
+SILC manages shell sessions through a daemon, lightweight per-port adapters, and multiple client surfaces.
 
 ## Core Concepts
 
-- **Daemon**: owns the desired session registry, manages lifecycle, and serves the manager UI.
-- **Session**: a named shell bound to a port with a live PTY and persisted record.
-- **Runtime**: the live, replaceable process/server pair for a session.
+- **Daemon**: owns the desired session registry, manages lifecycle, serves the manager UI, and is the only real application server.
+- **Session**: a named shell with a persisted record and a live PTY when running.
+- **Runtime**: the live, replaceable PTY/session process state for a session.
 - **Manager UI**: the browser/native desktop session manager.
+- **Adapter**: a tiny loopback listener on a session port that forwards requests to the daemon.
 
 ## Session Identity
 
@@ -27,13 +28,13 @@ SILC manages shell sessions through a daemon, per-session HTTP APIs, and multipl
 
 ## Session Lifecycle
 
-- Creating a session writes a desired-state record and realizes a live PTY plus per-session HTTP server.
+- Creating a session writes a desired-state record and realizes a live PTY plus, when enabled, a lightweight port adapter.
 - Shell startup preserves native profiles/init files; SILC bootstraps after the shell's normal startup behavior.
 - If the PTY dies, the daemon recreates it while preserving the record.
-- If the per-session HTTP server dies, the daemon recreates it while preserving the record.
+- If the port adapter dies, the daemon recreates it while preserving the record.
 - `close` removes the desired record and stops reconciling the session.
 - `kill` forcefully destroys the session and removes the record.
-- `restart` replaces the PTY/server but preserves the record, port, name, cwd, and shell.
+- `restart` replaces the PTY/adapter but preserves the record, port, name, cwd, and shell.
 - If a stored launch cwd is invalid, the new runtime falls back to the user's home directory or the shell default instead of failing the restart.
 - `shutdown` MUST persist a frozen raw terminal snapshot for each live session before stopping runtime when shutdown is graceful.
 - `shutdown` stops live runtime but preserves records as dormant sessions.
@@ -63,8 +64,8 @@ SILC manages shell sessions through a daemon, per-session HTTP APIs, and multipl
 
 ## Session States
 
-- **Running**: desired record exists and a live PTY plus per-session server are active.
-- **Dormant**: desired record exists but no PTY, no per-session HTTP server, and no session-port listener are active.
+- **Running**: desired record exists and a live PTY plus adapter are active.
+- **Dormant**: desired record exists but no PTY, no adapter, and no session-port listener are active.
 - **Removed**: desired record no longer exists and the daemon no longer reconciles the session.
 
 Dormant sessions MAY have a frozen raw terminal snapshot persisted from a prior graceful shutdown or restart.
@@ -105,14 +106,21 @@ The daemon also exposes session control on the same public port using a resolved
 - `POST /sessions/{key}/clear` — clear screen
 - `POST /sessions/{key}/reset` — reset terminal state
 - `POST /sessions/{key}/resize` — resize terminal
+- `GET /sessions/{key}/ws` — interactive terminal websocket
+- `GET /sessions/{key}/web` — browser session UI
+- `GET /sessions/{key}/token` — local helper token exposure
 
-These routes resolve `{key}` with the shared port-first/name-second rule. WebSocket is not required for this remote programmatic control path.
+These routes resolve `{key}` with the shared port-first/name-second rule. WebSocket is not required for remote programmatic control, but the daemon must provide it for adapter-forwarded interactive clients.
 
-## Session API
+## Session Adapters
 
-Each session has its own HTTP server on the session port.
+Live sessions MAY expose a tiny loopback adapter on the session port.
 
-- Dormant sessions do not expose the session API because they have no live per-session server.
+- The adapter is a dumb forwarder and contains no session business logic.
+- The adapter rewrites the request target to the daemon session route and tunnels the response.
+- For normal HTTP, the adapter MAY close after each request to stay simple.
+- For WebSocket upgrades, the adapter MUST tunnel bytes bidirectionally until close.
+- Dormant sessions do not expose a live adapter.
 
 ### Auth
 
@@ -241,7 +249,7 @@ The MCP server exposes:
 - Daemon route failures are contained as JSON errors.
 - WebSocket disconnects clear interactive ownership.
 - Idle sessions are never auto-closed.
-- Dormant sessions do not allocate PTYs, per-session servers, or in-memory terminal snapshots until explicitly activated.
+- Dormant sessions do not allocate PTYs, adapters, or in-memory terminal snapshots until explicitly activated.
 - Dormant sessions are activated lazily by user interaction or by `resurrect`, not by passive listing.
 
 ## Security Considerations

@@ -31,7 +31,6 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from silc.api.server import create_app
 from silc.core.cleaner import clean_output
 from silc.core.session import SilcSession
 from silc.daemon.events import (
@@ -52,7 +51,10 @@ from silc.daemon.runtime import (
     record_runtime_failure,
     runtime_backoff_expired,
 )
+from silc.daemon.session_adapter import SessionPortAdapter
 from silc.daemon.settings import DaemonSettings
+from silc.stream.config import StreamConfig
+from silc.stream.streaming_service import StreamingService
 from silc.utils.names import generate_name, is_valid_name
 from silc.utils.persistence import (
     DAEMON_LOG,
@@ -220,6 +222,17 @@ def _client_is_local(host: str | None) -> bool:
     return bool(ipv4_mapped and ipv4_mapped.is_loopback)
 
 
+def _request_client_host(request: Request | WebSocket) -> str | None:
+    headers = getattr(request, "headers", None)
+    if headers is not None:
+        forwarded = headers.get("x-silc-client-host") or headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",", 1)[0].strip() or None
+
+    client = request.client
+    return client[0] if client else None
+
+
 class SilcDaemon:
     """Main daemon managing multiple SILC sessions."""
 
@@ -241,7 +254,7 @@ class SilcDaemon:
 
         self.registry = SessionRegistry()
         self.sessions: Dict[int, SilcSession] = {}
-        self.servers: Dict[int, uvicorn.Server] = {}
+        self.servers: Dict[int, object] = {}
         self._session_sockets: Dict[int, socket.socket] = {}
         self.runtime_by_port: Dict[int, SessionRuntime] = {}
         self._running = False
@@ -253,6 +266,9 @@ class SilcDaemon:
         self._daemon_api_app = self._create_daemon_api()
         self._session_tasks: Dict[int, asyncio.Task] = {}
         self._cleanup_tasks: Dict[int, asyncio.Task[None]] = {}
+        self._streaming_services: Dict[int, StreamingService] = {}
+        self._active_session_websockets: Dict[int, WebSocket | None] = {}
+        self._active_session_websocket_locks: Dict[int, asyncio.Lock] = {}
         self._daemon_server: uvicorn.Server | None = None
         self._registry_lock = (
             asyncio.Lock()
@@ -286,8 +302,7 @@ class SilcDaemon:
         if not token:
             return
 
-        client = request.client
-        client_host = client[0] if client else None
+        client_host = _request_client_host(request)
         if _client_is_local(client_host):
             return
 
@@ -347,6 +362,22 @@ class SilcDaemon:
             return bool(session.get_status().get("alive"))
         except Exception:
             return False
+
+    def _get_streaming_service(
+        self, port: int, session: SilcSession
+    ) -> StreamingService:
+        service = self._streaming_services.get(port)
+        if service is None or service.session is not session:
+            service = StreamingService(session)
+            self._streaming_services[port] = service
+        return service
+
+    async def _stop_streaming_service(self, port: int) -> None:
+        service = self._streaming_services.pop(port, None)
+        if service is None:
+            return
+        with contextlib.suppress(Exception):
+            await service.stop_all_streams()
 
     def _resolve_active_session_target(
         self, key: str, *, operation: str
@@ -1040,6 +1071,324 @@ class SilcDaemon:
                     detail=_build_logged_daemon_exception_payload(operation, exc),
                 ) from exc
 
+        @app.get("/sessions/{key}/token")
+        async def session_token(key: str, request: Request) -> dict[str, str | None]:
+            operation = "session_token"
+            try:
+                _entry, runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                _ = runtime
+                return {"token": session.api_token}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.get("/sessions/{key}/web", response_class=HTMLResponse)
+        async def session_web(key: str) -> HTMLResponse:
+            operation = "session_web"
+            try:
+                entry, runtime = self._resolve_session_target(key, operation=operation)
+                session = runtime.session if runtime else None
+                if session is None:
+                    raise HTTPException(status_code=410, detail="Session has ended")
+
+                static_dir = Path(__file__).parent.parent.parent / "static" / "web"
+                index_path = static_dir / "index.html"
+                if index_path.exists():
+                    with open(index_path, "r", encoding="utf-8") as f:
+                        return HTMLResponse(f.read())
+                _ = entry
+                return HTMLResponse("<h1>Web UI not found</h1>")
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.websocket("/sessions/{key}/ws")
+        async def session_websocket(key: str, websocket: WebSocket) -> None:
+            operation = "session_websocket"
+            try:
+                entry, runtime = self._resolve_session_target(key, operation=operation)
+                session = runtime.session if runtime else None
+                if session is None:
+                    await websocket.close(code=4100, reason="Session has ended")
+                    return
+
+                token = session.api_token
+                if token:
+                    client_host = _request_client_host(websocket)
+                    if not _client_is_local(client_host):
+                        provided = websocket.query_params.get("token")
+                        if provided != token:
+                            await websocket.close(code=1008, reason="Invalid API token")
+                            return
+
+                mode = websocket.query_params.get("mode", "interactive")
+                if mode not in {"interactive", "preview"}:
+                    await websocket.close(
+                        code=1002, reason="Unsupported websocket mode"
+                    )
+                    return
+
+                await websocket.accept()
+
+                active_websocket_lock = self._active_session_websocket_locks.setdefault(
+                    entry.port, asyncio.Lock()
+                )
+                active_websocket = self._active_session_websockets.get(entry.port)
+                previous_websocket: WebSocket | None = None
+
+                if mode == "interactive":
+                    async with active_websocket_lock:
+                        previous_websocket = active_websocket
+                        active_websocket = websocket
+                        self._active_session_websockets[entry.port] = websocket
+                        session.tui_active = True
+
+                    if (
+                        previous_websocket is not None
+                        and previous_websocket is not websocket
+                    ):
+                        with contextlib.suppress(RuntimeError):
+                            await previous_websocket.close(
+                                code=4002,
+                                reason="Session claimed by another client",
+                            )
+
+                send_lock = asyncio.Lock()
+
+                async def safe_send_frame(
+                    header: dict[str, object], payload: bytes = b""
+                ) -> None:
+                    async with send_lock:
+                        await websocket.send_bytes(encode_ws_frame(header, payload))
+
+                async def send_output_chunks() -> None:
+                    cursor = session.buffer.cursor
+                    while True:
+                        await session._output_event.wait()
+                        session._output_event.clear()
+
+                        while True:
+                            new_bytes, cursor = session.buffer.get_since(cursor)
+                            if not new_bytes:
+                                break
+                            if active_websocket is not websocket:
+                                return
+                            try:
+                                await safe_send_frame({"type": "output"}, new_bytes)
+                            except Exception:
+                                return
+
+                def title_listener(updated_session: SilcSession) -> None:
+                    if updated_session is not session:
+                        return
+
+                    async def _send_title() -> None:
+                        if active_websocket is not websocket:
+                            return
+                        try:
+                            await safe_send_frame(
+                                {
+                                    "type": "title",
+                                    "title": updated_session.title,
+                                    "title_updated_at": (
+                                        updated_session.title_updated_at.isoformat()
+                                        + "Z"
+                                    ),
+                                }
+                            )
+                        except Exception:
+                            pass
+
+                    asyncio.create_task(_send_title())
+
+                def cwd_listener(updated_session: SilcSession) -> None:
+                    if updated_session is not session:
+                        return
+
+                    async def _send_cwd() -> None:
+                        if active_websocket is not websocket:
+                            return
+                        try:
+                            await safe_send_frame(
+                                {"type": "cwd", "cwd": updated_session.cwd}
+                            )
+                        except Exception:
+                            pass
+
+                    asyncio.create_task(_send_cwd())
+
+                if mode == "interactive":
+                    session.add_title_listener(title_listener)
+                    session.add_cwd_listener(cwd_listener)
+                    sender_task = asyncio.create_task(send_output_chunks())
+                else:
+                    sender_task = None
+
+                try:
+                    while True:
+                        try:
+                            frame = await websocket.receive_bytes()
+                        except WebSocketDisconnect:
+                            raise
+                        except RuntimeError:
+                            await websocket.close(
+                                code=1002, reason="Expected binary websocket frame"
+                            )
+                            return
+
+                        try:
+                            header, payload = decode_ws_frame(frame)
+                        except ValueError:
+                            await websocket.close(
+                                code=1002, reason="Malformed websocket frame"
+                            )
+                            return
+
+                        message_type = header.get("type")
+                        if message_type == "input":
+                            if mode != "interactive":
+                                await websocket.close(
+                                    code=1002,
+                                    reason="Preview websocket is read-only",
+                                )
+                                return
+                            nonewline = bool(header.get("nonewline", False))
+                            text = payload.decode("utf-8", errors="replace")
+
+                            if nonewline:
+                                await session.write_input(text)
+                            else:
+                                text = text.rstrip("\r\n")
+                                newline = "\r\n" if sys.platform == "win32" else "\n"
+                                await session.write_input(text + newline)
+                        elif message_type == "load_history":
+                            await safe_send_frame(
+                                {"type": "history"}, session.buffer.get_bytes()
+                            )
+                        else:
+                            await websocket.close(
+                                code=1002, reason="Unsupported websocket message"
+                            )
+                            return
+                except WebSocketDisconnect:
+                    pass
+                finally:
+                    if mode == "interactive":
+                        session.remove_title_listener(title_listener)
+                        session.remove_cwd_listener(cwd_listener)
+                        async with active_websocket_lock:
+                            if active_websocket is websocket:
+                                active_websocket = None
+                                self._active_session_websockets.pop(entry.port, None)
+                                session.tui_active = False
+                        if sender_task is not None:
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await sender_task
+            except HTTPException:
+                raise
+            except Exception as exc:
+                await websocket.close(code=1011, reason=_exception_detail(exc)[:120])
+                _log_daemon_exception(operation, exc)
+
+        @app.post("/sessions/{key}/stream/start")
+        async def session_stream_start(key: str, request: Request) -> dict[str, str]:
+            operation = "session_stream_start"
+            try:
+                entry, runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                service = self._get_streaming_service(entry.port, session)
+                body = await request.body()
+                payload = body.decode("utf-8", errors="replace")
+                if not payload:
+                    raise HTTPException(status_code=400, detail="Invalid stream config")
+                try:
+                    config = StreamConfig.model_validate_json(body)
+                except AttributeError:
+                    config = StreamConfig.parse_raw(body)
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=400, detail="Invalid stream config"
+                    ) from exc
+                filename = await service.start_stream(config)
+                _ = runtime
+                return {"status": "started", "filename": filename, "mode": config.mode}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/stream/stop")
+        async def session_stream_stop(key: str, request: Request) -> dict[str, str]:
+            operation = "session_stream_stop"
+            try:
+                entry, runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                service = self._get_streaming_service(entry.port, session)
+                filename = ""
+                try:
+                    data = await request.json()
+                    if isinstance(data, dict):
+                        filename = str(data.get("filename", "")).strip()
+                except Exception:
+                    payload = await request.body()
+                    filename = payload.decode("utf-8", errors="replace").strip()
+                if not filename:
+                    raise HTTPException(status_code=400, detail="Missing filename")
+                stopped = await service.stop_stream(filename)
+                if not stopped:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"No active stream found for: {filename}",
+                    )
+                _ = entry, runtime
+                return {"status": "stopped", "filename": filename}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.get("/sessions/{key}/stream/status")
+        async def session_stream_status(
+            key: str, request: Request
+        ) -> dict[str, object]:
+            operation = "session_stream_status"
+            try:
+                entry, runtime, session = self._resolve_active_session_target(
+                    key, operation=operation
+                )
+                self._require_session_token(request, session)
+                service = self._get_streaming_service(entry.port, session)
+                _ = runtime
+                return {"status": "success", "streams": service.get_stream_status()}
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
         @app.post("/sessions/{port}/close")
         async def close_session(port: int):
             """Gracefully close a session."""
@@ -1369,7 +1718,14 @@ class SilcDaemon:
             return False
 
     def _runtime_server_is_alive(self, runtime: SessionRuntime) -> bool:
+        server = runtime.server
         task = runtime.server_task
+        if hasattr(server, "is_serving"):
+            try:
+                if not server.is_serving():
+                    return False
+            except Exception:
+                return False
         return bool(task and not task.done())
 
     async def _cleanup_runtime_generation(
@@ -1405,6 +1761,12 @@ class SilcDaemon:
         if session:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(session.close(), timeout=2.0)
+
+        with contextlib.suppress(Exception):
+            await self._stop_streaming_service(port)
+
+        self._active_session_websockets.pop(port, None)
+        self._active_session_websocket_locks.pop(port, None)
 
         with contextlib.suppress(Exception):
             await self._kill_processes_on_port(port)
@@ -1513,7 +1875,7 @@ class SilcDaemon:
 
         session: SilcSession | None = None
         task: asyncio.Task[None] | None = None
-        server: uvicorn.Server | None = None
+        server: SessionPortAdapter | None = None
 
         try:
             launch_context = self._build_runtime_launch_context(entry, runtime)
@@ -1605,7 +1967,7 @@ class SilcDaemon:
     ) -> SessionRuntime:
         session = runtime.session or self.sessions.get(entry.port)
         if not session:
-            raise RuntimeError("Missing live session for server replacement")
+            raise RuntimeError("Missing live session for adapter replacement")
 
         runtime = self._get_or_create_runtime(entry)
         runtime = bump_runtime_generation(runtime)
@@ -1705,17 +2067,15 @@ class SilcDaemon:
 
     def _create_session_server(
         self, session: SilcSession, is_global: bool = False
-    ) -> uvicorn.Server:
-        """Create uvicorn server for a session."""
-        app = create_app(session)
-        config = uvicorn.Config(
-            app,
-            host="0.0.0.0" if is_global else "127.0.0.1",
-            port=session.port,
-            log_level="info",
-            access_log=True,
+    ) -> SessionPortAdapter:
+        """Create a lightweight adapter for a live session port."""
+
+        del is_global
+        return SessionPortAdapter(
+            session_port=session.port,
+            daemon_host="127.0.0.1",
+            daemon_port=DAEMON_PORT,
         )
-        return uvicorn.Server(config)
 
     def _handle_session_title_change(self, session: SilcSession) -> None:
         """Persist a live title change from a running session."""
@@ -1837,6 +2197,10 @@ class SilcDaemon:
                 _log_daemon_exception(f"{operation}_rollback_session", cleanup_exc)
 
         self._close_session_socket(port)
+        with contextlib.suppress(Exception):
+            await self._stop_streaming_service(port)
+        self._active_session_websockets.pop(port, None)
+        self._active_session_websocket_locks.pop(port, None)
 
         if runtime:
             runtime.session = None
@@ -2069,6 +2433,8 @@ class SilcDaemon:
             )
             self.runtime_by_port.pop(port, None)
             cleanup_session_log(port)
+            with contextlib.suppress(Exception):
+                await self._stop_streaming_service(port)
             return
 
         if entry:
