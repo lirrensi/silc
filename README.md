@@ -2,6 +2,8 @@
 
 (bruh)
 
+(v5 with cool features underway, just a lil longer...)
+
 [![PyPI version](https://badge.fury.io/py/silc.svg)](https://badge.fury.io/py/silc)
 [![Python Version](https://img.shields.io/pypi/pyversions/silc.svg)](https://pypi.org/project/silc/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
