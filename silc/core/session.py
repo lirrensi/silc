@@ -214,11 +214,8 @@ class SilcSession:
         self.last_access = datetime.utcnow()
 
     async def clear_screen(self) -> None:
-        """Clear the terminal screen via PTY and reset SILC's buffered state."""
-        # ANSI escape: ESC[2J = clear screen, ESC[H = home cursor
-        await self.pty.write(b"\x1b[2J\x1b[H")
+        """Clear SILC's buffered terminal state."""
         await self.clear_buffer()
-        await self._wait_for_prompt(timeout=2.0)
         self.last_access = datetime.utcnow()
         self.last_output = datetime.utcnow()
 

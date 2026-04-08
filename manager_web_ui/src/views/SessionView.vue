@@ -610,6 +610,9 @@ async function handleClear(): Promise<void> {
     ],
     160,
   )
+
+  // After clearing the daemon buffer, refresh the terminal display
+  await refreshTerminal()
 }
 
 async function handlePaste(): Promise<void> {
