@@ -9,13 +9,16 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TerminalViewport from '@/components/TerminalViewport.vue'
 import {
+  clearSession,
   closeSession,
   killSession,
   listSessions,
+  resetSession,
   restartSession,
   sendInterrupt,
   sendSigkill,
   sendSigterm,
+  unloadSession,
 } from '@/lib/daemonApi'
 import { connectWebSocket, requestHistoryFrame, sendInputFrame } from '@/lib/websocket'
 import { useTerminalManager } from '@/stores/terminalManager'
@@ -358,6 +361,33 @@ async function handleClose(): Promise<void> {
   }
 }
 
+async function handleUnload(): Promise<void> {
+  const currentPort = port.value
+
+  try {
+    await runOperation('Unload session', 'neutral', [
+      {
+        stage: 'Requesting daemon unload',
+        detail: 'Asking the daemon to release the live runtime while preserving the session record.',
+        run: async () => {
+          await unloadSession(currentPort)
+        },
+      },
+      {
+        stage: 'Refreshing manager state',
+        detail: 'Reconciling the session list so the unloaded shell returns to its dormant state.',
+        run: async () => {
+          const daemonSessions = await listSessions()
+          manager.reconcileSessions(daemonSessions)
+          await router.push('/')
+        },
+      },
+    ])
+  } catch (err) {
+    console.error('Failed to unload session:', err)
+  }
+}
+
 async function handleKill(): Promise<void> {
   const currentPort = port.value
 
@@ -540,6 +570,38 @@ async function handleSigkill(): Promise<void> {
   ])
 }
 
+async function handleClear(): Promise<void> {
+  if (!(await ensureInteractiveSessionReady())) {
+    return
+  }
+
+  await runOperation('Clear terminal', 'info', [
+    {
+      stage: 'Clearing the screen',
+      detail: 'The daemon is being asked to clear the terminal display buffer.',
+      run: async () => {
+        await clearSession(port.value)
+      },
+    },
+  ], 160)
+}
+
+async function handleReset(): Promise<void> {
+  if (!(await ensureInteractiveSessionReady())) {
+    return
+  }
+
+  await runOperation('Reset terminal', 'info', [
+    {
+      stage: 'Resetting terminal state',
+      detail: 'The daemon is rebuilding the terminal state for the current shell.',
+      run: async () => {
+        await resetSession(port.value)
+      },
+    },
+  ], 160)
+}
+
 async function handlePaste(): Promise<void> {
   try {
     if (!(await ensureInteractiveSessionReady())) {
@@ -626,10 +688,18 @@ function sendArrowKey(sequence: string): void {
         </span>
         <span class="truncate text-xs text-[var(--color-text-muted)]">{{ session?.title || '—' }}</span>
       </div>
-      <div class="bar-actions shrink-0 border-l border-[var(--color-border)]">
+      <div class="bar-actions bar-actions-session-lifecycle shrink-0 border-l border-[var(--color-border)]">
+        <button
+          @click="handleUnload"
+          class="bar-button bar-button-lifecycle bar-button-tight text-xs"
+          :title="tip('Unload this session', 'Releases the live shell while keeping the saved session record available.')"
+          :disabled="activeOperation !== null"
+        >
+          Unload
+        </button>
         <button
           @click="handleRestart"
-          class="bar-button bar-button-tight bar-button-info text-xs"
+          class="bar-button bar-button-lifecycle bar-button-tight bar-button-info text-xs"
           :title="tip('Restart the session', 'Recreates the shell and reconnects the browser to it.')"
           :disabled="activeOperation !== null || isRestarting"
         >
@@ -637,17 +707,19 @@ function sendArrowKey(sequence: string): void {
         </button>
         <button
           @click="handleClose"
-          class="bar-button bar-button-tight text-xs"
+          class="bar-button bar-button-lifecycle bar-button-tight text-xs"
           :title="tip('Close this session gracefully', 'Asks the daemon to shut the session down and return home.')"
+          :disabled="activeOperation !== null"
         >
           Close Session
         </button>
         <button
           @click="handleKill"
-          class="bar-button bar-button-tight bar-button-danger text-xs"
+          class="bar-button bar-button-lifecycle bar-button-tight bar-button-danger text-xs"
           :title="tip('Force-kill this session', 'Use when graceful close is not enough or the shell is wedged.')"
+          :disabled="activeOperation !== null"
         >
-          Kill
+          Close Forcefully
         </button>
       </div>
     </div>
@@ -722,6 +794,8 @@ function sendArrowKey(sequence: string): void {
         </div>
         <div class="flex-1"></div>
         <div class="flex items-stretch">
+          <button @click="handleClear" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Clear the terminal', 'Clears the terminal screen without restarting the shell.')" :disabled="controlsDisabled">Clear</button>
+          <button @click="handleReset" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Reset the terminal', 'Resets the terminal state while keeping the current shell session.')" :disabled="controlsDisabled">Reset</button>
           <button @click="handleInterrupt" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGINT', 'Equivalent to Ctrl+C for the foreground process.')" :disabled="controlsDisabled">SIGINT</button>
           <button @click="handleSigterm" class="bar-button bar-button-tight border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGTERM', 'Requests a graceful shutdown from the shell process group.')" :disabled="controlsDisabled">SIGTERM</button>
           <button @click="handleSigkill" class="bar-button bar-button-tight bar-button-danger border-r border-[var(--color-border)] text-xs" :title="tip('Send SIGKILL', 'Forcibly terminates the foreground process immediately.')" :disabled="controlsDisabled">SIGKILL</button>

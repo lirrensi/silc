@@ -1,20 +1,28 @@
 // FILE: manager_web_ui/src/__tests__/SessionView.spec.ts
-// PURPOSE: Guard the interactive session page from inheriting the Home-only selector.
-// OWNS: Session route smoke coverage for selector isolation.
-// DOCS: agent_chat/plan_home_grid_frozen_previews_2026-04-04.md
+// PURPOSE: Verify the session route keeps its command controls and terminal actions wired to the daemon helpers.
+// OWNS: Session route command-label coverage and single-session command dispatch assertions.
+// DOCS: agent_chat/plan_manager_interface_commands_2026-04-08.md
 
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import type { SessionStatus } from '@/types/session'
 import SessionView from '../views/SessionView.vue'
 
 const mockSendInputFrame = vi.hoisted(() => vi.fn())
 const mockPasteClipboardText = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockListSessions = vi.hoisted(() => vi.fn())
-const mockRestartSession = vi.hoisted(() => vi.fn())
+const mockRestartSession = vi.hoisted(() => vi.fn().mockResolvedValue({ port: 1234 }))
 const mockRemoveSession = vi.hoisted(() => vi.fn())
+const mockUnloadSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockClearSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockResetSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockCloseSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockKillSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockSendInterrupt = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockSendSigterm = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockSendSigkill = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 
 const session = {
   status: 'idle' as SessionStatus,
@@ -28,14 +36,17 @@ const session = {
 }
 
 vi.mock('@/lib/daemonApi', () => ({
-  closeSession: vi.fn(),
-  killSession: vi.fn(),
+  clearSession: mockClearSession,
+  closeSession: mockCloseSession,
+  killSession: mockKillSession,
   listSessions: mockListSessions,
   getSettings: vi.fn().mockResolvedValue({ ui: { themePreference: 'system' }, terminal: {} }),
+  resetSession: mockResetSession,
   restartSession: mockRestartSession,
-  sendInterrupt: vi.fn(),
-  sendSigkill: vi.fn(),
-  sendSigterm: vi.fn(),
+  sendInterrupt: mockSendInterrupt,
+  sendSigkill: mockSendSigkill,
+  sendSigterm: mockSendSigterm,
+  unloadSession: mockUnloadSession,
   updateSettings: vi.fn(),
 }))
 
@@ -61,13 +72,36 @@ vi.mock('@/stores/terminalManager', () => ({
   }),
 }))
 
+async function mountView() {
+  const router = createRouter({
+    history: createWebHashHistory(),
+    routes: [
+      { path: '/', component: { template: '<div />' } },
+      { path: '/:port(\\d+)', component: SessionView, props: true },
+    ],
+  })
+
+  await router.push('/1234')
+  await router.isReady()
+
+  return mount(SessionView, {
+    global: {
+      plugins: [createPinia(), router],
+      stubs: {
+        TerminalViewport: true,
+        Teleport: true,
+      },
+    },
+  })
+}
+
 describe('SessionView', () => {
   beforeEach(() => {
     localStorage.clear()
     session.status = 'idle'
     session.ws = null
     mockListSessions.mockResolvedValue([
-        {
+      {
         port: 1234,
         name: 'demo',
         title: 'demo',
@@ -84,6 +118,14 @@ describe('SessionView', () => {
     mockSendInputFrame.mockClear()
     mockPasteClipboardText.mockClear()
     mockRestartSession.mockClear()
+    mockUnloadSession.mockClear()
+    mockClearSession.mockClear()
+    mockResetSession.mockClear()
+    mockCloseSession.mockClear()
+    mockKillSession.mockClear()
+    mockSendInterrupt.mockClear()
+    mockSendSigterm.mockClear()
+    mockSendSigkill.mockClear()
     session.terminal.reset.mockClear()
     session.terminal.scrollToBottom.mockClear()
     mockRemoveSession.mockClear()
@@ -103,26 +145,10 @@ describe('SessionView', () => {
   })
 
   it('does not render the Home grid selector', async () => {
-    const router = createRouter({
-      history: createWebHashHistory(),
-      routes: [{ path: '/:port(\\d+)', component: SessionView, props: true }],
-    })
-
-    await router.push('/1234')
-    await router.isReady()
-
     session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
 
-    const wrapper = mount(SessionView, {
-      global: {
-        plugins: [createPinia(), router],
-        stubs: {
-          TerminalViewport: true,
-          Teleport: true,
-        },
-      },
-    })
+    const wrapper = await mountView()
 
     expect(wrapper.text()).not.toContain('2x2')
     expect(wrapper.text()).not.toContain('3x3')
@@ -130,27 +156,10 @@ describe('SessionView', () => {
   })
 
   it('keeps bottom and arrow actions silent', async () => {
-    const router = createRouter({
-      history: createWebHashHistory(),
-      routes: [{ path: '/:port(\\d+)', component: SessionView, props: true }],
-    })
-
-    await router.push('/1234')
-    await router.isReady()
-
     session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
 
-    const wrapper = mount(SessionView, {
-      global: {
-        plugins: [createPinia(), router],
-        stubs: {
-          TerminalViewport: true,
-          Teleport: true,
-        },
-      },
-    })
-
+    const wrapper = await mountView()
     const buttons = wrapper.findAll('button')
     const bottomButton = buttons.find((button) => button.text() === 'Bottom')
     const upButton = buttons.find((button) => button.text() === '↑')
@@ -168,23 +177,8 @@ describe('SessionView', () => {
   it('pastes clipboard text directly without a modal', async () => {
     session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
-    const router = createRouter({
-      history: createWebHashHistory(),
-      routes: [{ path: '/:port(\\d+)', component: SessionView, props: true }],
-    })
 
-    await router.push('/1234')
-    await router.isReady()
-
-    const wrapper = mount(SessionView, {
-      global: {
-        plugins: [createPinia(), router],
-        stubs: {
-          TerminalViewport: true,
-          Teleport: true,
-        },
-      },
-    })
+    const wrapper = await mountView()
 
     const pasteButton = wrapper.findAll('button').find((button) => button.text() === 'Paste')
     await pasteButton?.trigger('click')
@@ -197,24 +191,7 @@ describe('SessionView', () => {
   it('redirects home when the selected session is no longer in the registry', async () => {
     mockListSessions.mockResolvedValueOnce([])
 
-    const router = createRouter({
-      history: createWebHashHistory(),
-      routes: [{ path: '/:port(\\d+)', component: SessionView, props: true }],
-    })
-
-    await router.push('/1234')
-    await router.isReady()
-
-    const wrapper = mount(SessionView, {
-      global: {
-        plugins: [createPinia(), router],
-        stubs: {
-          TerminalViewport: true,
-          Teleport: true,
-        },
-      },
-    })
-
+    await mountView()
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(mockRemoveSession).toHaveBeenCalledWith(1234)
@@ -253,27 +230,59 @@ describe('SessionView', () => {
       },
     ])
 
-    const router = createRouter({
-      history: createWebHashHistory(),
-      routes: [{ path: '/:port(\\d+)', component: SessionView, props: true }],
-    })
-
-    await router.push('/1234')
-    await router.isReady()
-
-    const wrapper = mount(SessionView, {
-      global: {
-        plugins: [createPinia(), router],
-        stubs: {
-          TerminalViewport: true,
-          Teleport: true,
-        },
-      },
-    })
-
+    const wrapper = await mountView()
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(mockRestartSession).toHaveBeenCalledWith(1234)
     expect(wrapper.text()).not.toContain('Sleeping session')
+  })
+
+  it('renders the requested command labels', async () => {
+    session.status = 'active'
+    session.ws = { readyState: WebSocket.OPEN } as WebSocket
+
+    const wrapper = await mountView()
+    const text = wrapper.text()
+
+    expect(text).toContain('Unload')
+    expect(text).toContain('Restart')
+    expect(text).toContain('Close Session')
+    expect(text).toContain('Close Forcefully')
+    expect(text).toContain('Clear')
+    expect(text).toContain('Reset')
+    expect(text).toContain('SIGINT')
+    expect(text).toContain('SIGTERM')
+    expect(text).toContain('SIGKILL')
+  })
+
+  it('invokes the new single-session command helpers', async () => {
+    session.status = 'active'
+    session.ws = { readyState: WebSocket.OPEN } as WebSocket
+
+    const triggerAction = async (label: string): Promise<void> => {
+      const wrapper = await mountView()
+      await wrapper.findAll('button').find((button) => button.text() === label)?.trigger('click')
+      await flushPromises()
+      await new Promise((resolve) => window.setTimeout(resolve, 260))
+      wrapper.unmount()
+    }
+
+    await triggerAction('Unload')
+    await triggerAction('Clear')
+    await triggerAction('Reset')
+    await triggerAction('Close Session')
+    await triggerAction('Close Forcefully')
+    await triggerAction('SIGINT')
+    await triggerAction('SIGTERM')
+    await triggerAction('SIGKILL')
+
+    expect(mockUnloadSession).toHaveBeenCalledWith(1234)
+    expect(mockClearSession).toHaveBeenCalledWith(1234)
+    expect(mockResetSession).toHaveBeenCalledWith(1234)
+    expect(mockCloseSession).toHaveBeenCalledWith(1234)
+    expect(mockKillSession).toHaveBeenCalledWith(1234)
+    expect(mockSendInterrupt).toHaveBeenCalledWith(1234)
+    expect(mockSendSigterm).toHaveBeenCalledWith(1234)
+    expect(mockSendSigkill).toHaveBeenCalledWith(1234)
   })
 })

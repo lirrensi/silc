@@ -5,12 +5,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  bulkSendSigtermSessions,
   clearSession,
   getDaemonSessionUrl,
   resizeSession,
   sendInterrupt,
   sendSigkill,
   sendSigterm,
+  unloadSession,
 } from '@/lib/daemonApi'
 import { loadHomePreviewSnapshot } from '@/lib/homePreview'
 
@@ -36,6 +38,7 @@ describe('daemon-routed session HTTP clients', () => {
     await sendSigterm(20000)
     await sendSigkill(20000)
     await clearSession(20000)
+    await unloadSession(20000)
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/sessions/20000/resize?rows=24&cols=80'),
@@ -55,6 +58,24 @@ describe('daemon-routed session HTTP clients', () => {
     )
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/sessions/20000/clear'),
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/sessions/20000/unload'),
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('fans out representative bulk commands through daemon session routes', async () => {
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ([{ port: 20000 }]) } as Response)
+
+    await bulkSendSigtermSessions()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, expect.stringContaining('/sessions'))
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('/sessions/20000/sigterm'),
       expect.objectContaining({ method: 'POST' }),
     )
   })

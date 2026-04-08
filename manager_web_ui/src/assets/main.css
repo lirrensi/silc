@@ -109,6 +109,16 @@ button:disabled {
   box-shadow: inset 1px 0 0 color-mix(in srgb, var(--color-bg-primary) 28%, transparent);
 }
 
+.bar-actions-session-lifecycle {
+  gap: 0.35rem;
+  padding-inline: 0.35rem;
+}
+
+.bar-actions-session-lifecycle > * + * {
+  border-left: 0;
+  box-shadow: none;
+}
+
 .bar-button {
   display: inline-flex;
   align-items: center;
@@ -125,6 +135,10 @@ button:disabled {
 
 .bar-button-tight {
   padding: 0 0.4rem;
+}
+
+.bar-button-lifecycle {
+  padding-inline: 0.85rem;
 }
 
 .bar-button:hover {

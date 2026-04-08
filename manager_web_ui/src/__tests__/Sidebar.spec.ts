@@ -35,6 +35,15 @@ vi.mock('@/stores/terminalManager', () => ({
 }))
 
 vi.mock('@/lib/daemonApi', () => ({
+  bulkClearSessions: vi.fn(),
+  bulkCloseSessions: vi.fn(),
+  bulkKillSessions: vi.fn(),
+  bulkResetSessions: vi.fn(),
+  bulkRestartSessions: vi.fn(),
+  bulkSendSigintSessions: vi.fn(),
+  bulkSendSigkillSessions: vi.fn(),
+  bulkSendSigtermSessions: vi.fn(),
+  bulkUnloadSessions: vi.fn(),
   listSessions: vi.fn().mockResolvedValue([]),
   createSession: vi.fn(),
   getDefaults: vi.fn().mockResolvedValue({
@@ -253,6 +262,56 @@ describe('Sidebar', () => {
     expect(document.body.textContent).toContain('PowerShell')
     expect(document.body.textContent).toContain('Bash')
     expect(document.body.textContent).toContain('Default')
+  })
+
+  it('opens the bulk command modal and runs the selected helper', async () => {
+    const { bulkKillSessions, listSessions } = await import('@/lib/daemonApi')
+    const bulkKillSessionsMock = vi.mocked(bulkKillSessions)
+    const listSessionsMock = vi.mocked(listSessions)
+    listSessionsMock.mockResolvedValue([
+      {
+        port: 1101,
+        name: 'alpha',
+        title: 'Bash',
+        session_id: 'sess-1',
+        shell: 'bash',
+        cwd: '/work/alpha',
+        title_updated_at: null,
+        idle_seconds: 0,
+        alive: true,
+        runtime_state: 'running',
+        dormant: false,
+      },
+    ])
+
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(Sidebar, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === 'Bulk Command')?.trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('Bulk Command')
+    expect(document.body.textContent).toContain('Close Forcefully')
+
+    const forcefulButton = [...document.body.querySelectorAll('button')].find((button) => button.textContent?.includes('Close Forcefully'))
+    forcefulButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(bulkKillSessionsMock).toHaveBeenCalled()
+    expect(listSessionsMock).toHaveBeenCalled()
+    expect(document.body.textContent).not.toContain('Apply one command across every listed session.')
   })
 
   it('renders dormant sessions without a status label', async () => {

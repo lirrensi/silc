@@ -1,7 +1,7 @@
 // FILE: manager_web_ui/src/lib/daemonApi.ts
 // PURPOSE: Call daemon HTTP endpoints and define the stable daemon session and settings payload shapes used by the manager UI.
 // OWNS: Daemon base URL helpers, HTTP API calls, and daemon response interfaces.
-// EXPORTS: getDaemonUrl, getSessionHttpUrl, getDaemonSessionUrl, listSessions, createSession, closeSession, killSession, restartSession, renameSession, reorderSessions, getDefaults, getSettings, updateSettings, resizeSession, sendInterrupt, sendSigterm, sendSigkill, getSessionStatus, getSessionOutput, getSessionRawOutput, getSessionSnapshot, getSessionLogs, sendSessionInput, runSessionCommand, clearSession, resetSession.
+// EXPORTS: getDaemonUrl, getSessionHttpUrl, getDaemonSessionUrl, listSessions, createSession, closeSession, killSession, restartSession, renameSession, reorderSessions, getDefaults, getSettings, updateSettings, resizeSession, sendInterrupt, sendSigterm, sendSigkill, getSessionStatus, getSessionOutput, getSessionRawOutput, getSessionSnapshot, getSessionLogs, sendSessionInput, runSessionCommand, clearSession, resetSession, unloadSession, bulkUnloadSessions, bulkRestartSessions, bulkCloseSessions, bulkKillSessions, bulkClearSessions, bulkResetSessions, bulkSendSigintSessions, bulkSendSigtermSessions, bulkSendSigkillSessions.
 // DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md
 
 import type { ThemePresetName } from '@/lib/themePresets'
@@ -169,6 +169,13 @@ export async function closeSession(port: number): Promise<void> {
   }
 }
 
+export async function unloadSession(port: number): Promise<void> {
+  const resp = await fetch(`${getDaemonUrl()}/sessions/${port}/unload`, { method: 'POST' })
+  if (!resp.ok) {
+    throw new Error(`Failed to unload session: HTTP ${resp.status}`)
+  }
+}
+
 export async function killSession(port: number): Promise<void> {
   const resp = await fetch(`${getDaemonUrl()}/sessions/${port}/kill`, { method: 'POST' })
   if (!resp.ok) {
@@ -318,4 +325,59 @@ export async function sendInterrupt(port: number): Promise<void> {
   if (!resp.ok) {
     throw new Error(`Failed to send interrupt: HTTP ${resp.status}`)
   }
+}
+
+async function bulkRunSessionCommand(
+  operationLabel: string,
+  endpoint: string,
+): Promise<void> {
+  const sessions = await listSessions()
+
+  const failures: string[] = []
+  await Promise.all(sessions.map(async (session) => {
+    const resp = await fetch(`${getDaemonUrl()}/sessions/${session.port}/${endpoint}`, { method: 'POST' })
+    if (!resp.ok) {
+      failures.push(`:${session.port} (HTTP ${resp.status})`)
+    }
+  }))
+
+  if (failures.length > 0) {
+    throw new Error(`Failed to ${operationLabel} all sessions: ${failures.join(', ')}`)
+  }
+}
+
+export async function bulkUnloadSessions(): Promise<void> {
+  await bulkRunSessionCommand('unload', 'unload')
+}
+
+export async function bulkRestartSessions(): Promise<void> {
+  await bulkRunSessionCommand('restart', 'restart')
+}
+
+export async function bulkCloseSessions(): Promise<void> {
+  await bulkRunSessionCommand('close', 'close')
+}
+
+export async function bulkKillSessions(): Promise<void> {
+  await bulkRunSessionCommand('forcefully close', 'kill')
+}
+
+export async function bulkClearSessions(): Promise<void> {
+  await bulkRunSessionCommand('clear', 'clear')
+}
+
+export async function bulkResetSessions(): Promise<void> {
+  await bulkRunSessionCommand('reset', 'reset')
+}
+
+export async function bulkSendSigintSessions(): Promise<void> {
+  await bulkRunSessionCommand('send SIGINT to', 'sigint')
+}
+
+export async function bulkSendSigtermSessions(): Promise<void> {
+  await bulkRunSessionCommand('send SIGTERM to', 'sigterm')
+}
+
+export async function bulkSendSigkillSessions(): Promise<void> {
+  await bulkRunSessionCommand('send SIGKILL to', 'sigkill')
 }

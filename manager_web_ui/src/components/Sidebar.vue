@@ -15,7 +15,22 @@ import { useRoute, useRouter } from 'vue-router'
 import packageJson from '../../package.json'
 import SidebarSessionRow from '@/components/SidebarSessionRow.vue'
 import ManagerSettingsModal from '@/components/ManagerSettingsModal.vue'
-import { createSession, getDefaults, listSessions, renameSession, reorderSessions } from '@/lib/daemonApi'
+import {
+  bulkClearSessions,
+  bulkCloseSessions,
+  bulkKillSessions,
+  bulkResetSessions,
+  bulkRestartSessions,
+  bulkSendSigintSessions,
+  bulkSendSigkillSessions,
+  bulkSendSigtermSessions,
+  bulkUnloadSessions,
+  createSession,
+  getDefaults,
+  listSessions,
+  renameSession,
+  reorderSessions,
+} from '@/lib/daemonApi'
 import { useTerminalManager } from '@/stores/terminalManager'
 import { useUiStore } from '@/stores/ui'
 import type { ThemePresetName } from '@/lib/themePresets'
@@ -57,6 +72,9 @@ const showShareDetails = ref(false)
 const isCreatingSession = ref(false)
 const createError = ref('')
 const showSettingsModal = ref(false)
+const showBulkCommandModal = ref(false)
+const isRunningBulkCommand = ref(false)
+const bulkCommandError = ref('')
 const settingsSaveState = ref<'idle' | 'saving' | 'success' | 'failure'>('idle')
 const settingsSaveError = ref('')
 const settingsPreviewSnapshot = ref({
@@ -65,6 +83,17 @@ const settingsPreviewSnapshot = ref({
 })
 let settingsSaveCloseTimer: number | null = null
 const builtVersion = `v${packageJson.version}`
+const bulkCommandActions = [
+  { label: 'Unload', run: bulkUnloadSessions },
+  { label: 'Restart', run: bulkRestartSessions },
+  { label: 'Close Session', run: bulkCloseSessions },
+  { label: 'Close Forcefully', run: bulkKillSessions },
+  { label: 'Clear', run: bulkClearSessions },
+  { label: 'Reset', run: bulkResetSessions },
+  { label: 'SIGINT', run: bulkSendSigintSessions },
+  { label: 'SIGTERM', run: bulkSendSigtermSessions },
+  { label: 'SIGKILL', run: bulkSendSigkillSessions },
+] as const
 
 function selectSession(port: number): void {
   router.push(`/${port}`)
@@ -161,6 +190,40 @@ function openSettingsModal(): void {
   settingsSaveError.value = ''
   showSettingsModal.value = true
   ui.closeMobileNav()
+}
+
+function openBulkCommandModal(): void {
+  bulkCommandError.value = ''
+  showBulkCommandModal.value = true
+  ui.closeMobileNav()
+}
+
+function closeBulkCommandModal(): void {
+  if (isRunningBulkCommand.value) {
+    return
+  }
+
+  bulkCommandError.value = ''
+  showBulkCommandModal.value = false
+}
+
+async function handleBulkCommand(action: (typeof bulkCommandActions)[number]): Promise<void> {
+  if (isRunningBulkCommand.value) {
+    return
+  }
+
+  isRunningBulkCommand.value = true
+  bulkCommandError.value = ''
+
+  try {
+    await action.run()
+    await refreshSessions()
+    showBulkCommandModal.value = false
+  } catch (err) {
+    bulkCommandError.value = err instanceof Error ? err.message : `Failed to run ${action.label}`
+  } finally {
+    isRunningBulkCommand.value = false
+  }
 }
 
 function closeSettingsModal(): void {
@@ -525,6 +588,12 @@ watch(
       </div>
 
       <div v-if="!ui.isSidebarCollapsed" class="border-t border-[var(--color-border)] p-2.5">
+        <button
+          @click="openBulkCommandModal"
+          class="mb-2 w-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-2.5 py-2 text-left text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+        >
+          Bulk Command
+        </button>
         <template v-if="shareMode && shareUrl">
           <button
             class="flex w-full items-center justify-between border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
@@ -642,6 +711,40 @@ watch(
               <button @click="handleCreateNewSession" class="bar-button bar-button-accent text-sm font-medium" :disabled="isCreatingSession">
                 {{ isCreatingSession ? 'Creating...' : 'Create' }}
               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="showBulkCommandModal"
+        class="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--color-backdrop)] px-4"
+        @click.self="closeBulkCommandModal"
+      >
+        <div class="glass-panel w-full max-w-md p-4">
+          <h3 class="mb-2 font-[var(--font-display)] text-2xl text-[var(--color-accent)]">Bulk Command</h3>
+          <p class="mb-4 text-sm text-[var(--color-text-secondary)]">
+            Apply one command across every listed session.
+          </p>
+          <div class="grid gap-2">
+            <button
+              v-for="action in bulkCommandActions"
+              :key="action.label"
+              type="button"
+              class="flex items-center justify-between border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-left text-sm text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+              :disabled="isRunningBulkCommand"
+              @click="handleBulkCommand(action)"
+            >
+              <span>{{ action.label }}</span>
+              <span class="text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-muted)]">All Sessions</span>
+            </button>
+          </div>
+          <p v-if="bulkCommandError" class="mt-3 text-xs text-[var(--color-error)]">{{ bulkCommandError }}</p>
+          <div class="mt-4 flex justify-end">
+            <div class="toolbar-strip">
+              <button @click="closeBulkCommandModal" class="bar-button text-sm" :disabled="isRunningBulkCommand">Cancel</button>
             </div>
           </div>
         </div>
