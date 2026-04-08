@@ -12,8 +12,10 @@ The daemon is the root process for SILC. It:
 - loads persisted records as dormant desired sessions on boot
 - materializes live runtime against persisted records on explicit activation
 - recreates PTYs and lightweight port adapters when they fail
-- performs bounded cleanup, graceful snapshot save, shutdown, and resurrection
+- performs bounded cleanup, graceful snapshot save, shutdown, wake, unload, and resurrection
 - centralizes session-target resolution (port first, then name)
+
+The CLI surfaces daemon control through `silc daemon ...` and session roster access through `silc sessions list`.
 
 There is no separate supervisor process; supervision is an internal daemon concern.
 
@@ -188,13 +190,14 @@ API routes:
 - `POST /settings` — merge shared daemon settings
 - `POST /sessions/{port}/rename` — rename in place
 - `POST /sessions/reorder` — reorder registry order
+- `POST /sessions/{port}/wake` — materialize or re-activate a dormant session
+- `POST /sessions/{port}/unload` — stop live runtime but keep the record dormant
 - `POST /sessions/{port}/close` — remove record and stop reconciling
 - `POST /sessions/{port}/kill` — force kill and remove record
+- `POST /sessions/{port}/sigint` — send SIGINT to the active session
 - `POST /sessions/{port}/restart` — replace PTY/server, preserve record
 - `POST /restart-server` — restart daemon HTTP server only
-- `POST /resurrect` — reload `sessions.json` and materialize desired sessions
 - `POST /shutdown` — graceful shutdown, preserve records
-- `POST /killall` — clear all sessions and session artifacts, keep daemon alive
 - `GET /events` — manager websocket event stream
 
 Session control routes are also available on the daemon port using a shared `{key}` resolver. Lightweight loopback adapters may forward port-based traffic into these daemon routes so client URLs stay stable.
@@ -215,6 +218,7 @@ Session control routes are also available on the daemon port using a shared `{ke
 - Numeric keys are resolved as ports first.
 - Non-numeric keys are resolved by name.
 - All daemon session-control routes use the same resolver.
+- `wake` and `unload` are session lifecycle operations; `wake` materializes a dormant record and `unload` leaves it dormant.
 
 ## Reconciliation Rules
 
@@ -224,6 +228,8 @@ Session control routes are also available on the daemon port using a shared `{ke
 - Stopping/stopped runtimes are skipped.
 - Backoff prevents hot-loop retries after repeated failure.
 - The runtime is updated from live title/cwd callbacks when those values change.
+- `wake` routes to the same materialization path used by resurrection.
+- `unload` routes to the bounded cleanup path without removing the desired record.
 
 ## Events
 
@@ -245,6 +251,5 @@ Important event types:
 ## Shutdown and Hard Exit
 
 - `shutdown` is bounded, saves frozen raw snapshots for live sessions during graceful stop, and preserves records as dormant entries.
-- `killall` is bounded and aggressively removes live runtime plus session records/artifacts without terminating the daemon.
 - On some platforms a delayed hard exit is scheduled so a wedged process does not keep the daemon alive.
 - Signal handlers set the shutdown event and let the normal shutdown path finish.

@@ -37,3 +37,4 @@ docs/CODEMAP.*.md
 
 .kanban
 cancan.lock
+agent_chat/

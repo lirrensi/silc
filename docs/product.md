@@ -165,7 +165,7 @@ curl -H "Authorization: Bearer <your-token>" \
 
 ## CLI Commands
 
-### Daemon Management
+### Primary Commands
 
 | Command | Description |
 |---------|-------------|
@@ -174,18 +174,20 @@ curl -H "Authorization: Bearer <your-token>" \
 | `silc desktop` | Open the session manager in a native desktop window |
 | `silc os-integration install` | Install OS context-menu integration |
 | `silc os-integration uninstall` | Remove OS context-menu integration |
-| `silc list` | List all active sessions |
-| `silc shutdown` | Gracefully shut down daemon, save frozen snapshots, close live sessions, and preserve dormant records |
-| `silc killall` | Clear all current sessions and session artifacts while keeping the daemon running |
-| `silc full-reset` | Stop the daemon and wipe SILC data back to a clean slate |
-| `silc resurrect` | Materialize all persisted sessions from previous state |
-| `silc restart` | Save frozen snapshots, shut down, and immediately start with dormant sessions loaded |
-| `silc restart-server` | Restart daemon HTTP server (sessions survive) |
-| `silc logs [--tail N]` | Show daemon logs |
+| `silc sessions list` | List all active sessions (`silc list` remains a convenience alias) |
+| `silc daemon shutdown` | Gracefully shut down daemon, save frozen snapshots, close live sessions, and preserve dormant records |
+| `silc daemon full-reset` | Stop the daemon and wipe SILC data back to a clean slate |
+| `silc daemon restart` | Save frozen snapshots, shut down, and immediately start with dormant sessions loaded |
+| `silc daemon restart-server` | Restart daemon HTTP server (sessions survive) |
+| `silc daemon logs [--tail N]` | Show daemon logs |
+
+### Session Bulk Wrapper
+
+`silc sessions` mirrors the per-session control surface for many targets at once.
 
 ### Session Commands
 
-All session commands use the syntax `silc <port-or-name> <command>`. You can identify a session by its **port number** (e.g., `20000`) or by its **name** (e.g., `my-project`).
+You can identify a session by its **port number** (e.g., `20000`) or by its **name** (e.g., `my-project`).
 
 | Command | Description |
 |---------|-------------|
@@ -193,27 +195,56 @@ All session commands use the syntax `silc <port-or-name> <command>`. You can ide
 | `silc <port-or-name> out [<lines>]` | Fetch latest terminal output |
 | `silc <port-or-name> in <text...>` | Send raw input to the shell |
 | `silc <port-or-name> status` | Show session status |
-| `silc <port-or-name> interrupt` | Send Ctrl+C to the session |
-| `silc <port-or-name> clear` | Clear the terminal screen |
-| `silc <port-or-name> reset` | Reset terminal state |
-| `silc <port-or-name> resize <rows> <cols>` | Resize terminal dimensions |
+| `silc <port-or-name> wake` | Wake a dormant session |
+| `silc <port-or-name> unload` | Stop a live session but keep its record dormant |
+| `silc <port-or-name> restart` | Restart session with same port/name/cwd/shell |
 | `silc <port-or-name> close` | Gracefully close the session (via daemon) |
 | `silc <port-or-name> kill` | Force kill the session (via daemon) |
-| `silc <port-or-name> restart` | Restart session with same port/name/cwd/shell |
+| `silc <port-or-name> clear` | Clear the terminal screen |
+| `silc <port-or-name> reset` | Reset terminal state |
+| `silc <port-or-name> sigint` | Send Ctrl+C to the session |
+| `silc <port-or-name> sigterm` | Send SIGTERM to the session |
+| `silc <port-or-name> sigkill` | Send SIGKILL to the session |
+| `silc <port-or-name> resize <rows> <cols>` | Resize terminal dimensions |
 | `silc <port-or-name> logs [--tail N]` | Show session logs |
 | `silc <port-or-name> tui` | Launch native TUI client |
 | `silc <port-or-name> web` | Open web UI in browser |
+
+### Bulk Session Control
+
+| Command | Description |
+|---------|-------------|
+| `silc sessions list` | List sessions |
+| `silc sessions wake <targets...|all>` | Wake one or more sessions |
+| `silc sessions unload <targets...|all>` | Unload one or more sessions |
+| `silc sessions restart <targets...|all>` | Restart one or more sessions |
+| `silc sessions close <targets...|all>` | Close one or more sessions |
+| `silc sessions kill <targets...|all>` | Kill one or more sessions |
+| `silc sessions clear <targets...|all>` | Clear one or more sessions |
+| `silc sessions reset <targets...|all>` | Reset one or more sessions |
+| `silc sessions sigint <targets...|all>` | Send SIGINT to one or more sessions |
+| `silc sessions sigterm <targets...|all>` | Send SIGTERM to one or more sessions |
+| `silc sessions sigkill <targets...|all>` | Send SIGKILL to one or more sessions |
+| `silc sessions resurrect` | Alias for `silc sessions wake all` |
 | `silc settings get` | Show daemon-managed settings |
 | `silc settings set <path> <value>` | Merge one setting into daemon-managed settings |
+
+### Compatibility Aliases
+
+- `silc list` aliases `silc sessions list`
+- `silc shutdown`, `silc restart`, `silc restart-server`, `silc full-reset`, and `silc logs` alias `silc daemon ...`
+- `silc resurrect` aliases `silc sessions wake all`
+- `silc killall` is obsolete; use `silc sessions kill <targets...|all>`
+- `silc <port-or-name> interrupt` aliases `silc <port-or-name> sigint`
 
 ### Stream-to-File Commands
 
 | Command | Description |
 |---------|-------------|
-| `silc <port-or-name> stream-file-render [--name <file>] [--sec N]` | Stream rendered output to file |
-| `silc <port-or-name> stream-file-append [--name <file>] [--sec N]` | Append output to file with deduplication |
-| `silc <port-or-name> stream-stop <filename>` | Stop streaming to file |
-| `silc <port-or-name> stream-status` | Show streaming status |
+| `silc sessions <port-or-name> stream-file-render [--name <file>] [--sec N]` | Stream rendered output to file |
+| `silc sessions <port-or-name> stream-file-append [--name <file>] [--sec N]` | Append output to file with deduplication |
+| `silc sessions <port-or-name> stream-stop <filename>` | Stop streaming to file |
+| `silc sessions <port-or-name> stream-status` | Show streaming status |
 
 ### Command Options
 
@@ -235,19 +266,19 @@ All session commands use the syntax `silc <port-or-name> <command>`. You can ide
 
 **Name collision:** If a folder-derived name is already in use, SILC auto-appends a numeric suffix: `myapp-2`, `myapp-3`, etc. Explicit name collisions (via positional argument) still fail with an error.
 
-#### `silc <port-or-name> run`
+#### `silc sessions <port-or-name> run`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `--timeout` | int | 60 | Command timeout in seconds |
 
-#### `silc <port-or-name> out`
+#### `silc sessions <port-or-name> out`
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
 | `lines` | int | 100 | Number of lines to fetch |
 
-#### `silc <port-or-name> resize`
+#### `silc sessions <port-or-name> resize`
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -754,9 +785,9 @@ Configuration is loaded from (highest to lowest priority):
 | **Auto-create session** | `silc start` creates first session automatically |
 | **No expiration** | Sessions stay alive indefinitely until explicitly closed |
 | **Shell exit detection** | Sessions automatically close when shell process exits |
-| **Graceful shutdown** | `silc shutdown` saves frozen snapshots, closes live sessions cleanly, and preserves dormant records |
-| **Session wipe** | `silc killall` clears current sessions and session artifacts without stopping the daemon |
-| **Factory reset** | `silc full-reset` stops the daemon and deletes all SILC data except installed binaries |
+| **Graceful shutdown** | `silc daemon shutdown` saves frozen snapshots, closes live sessions cleanly, and preserves dormant records |
+| **Bulk session wipe** | `silc sessions kill <targets...|all>` clears current sessions and session artifacts without stopping the daemon |
+| **Factory reset** | `silc daemon full-reset` stops the daemon and deletes all SILC data except installed binaries |
 
 ### Command Execution
 
@@ -796,7 +827,7 @@ Configuration is loaded from (highest to lowest priority):
 
 - If an explicit name is already in use, session creation fails with error
 - Folder-derived names auto-append a numeric suffix on collision: `myapp-2`, `myapp-3`, etc.
-- Use `silc list` to see existing session names
+- Use `silc sessions list` to see existing session names
 
 ### Port Conflicts
 
@@ -807,21 +838,21 @@ Configuration is loaded from (highest to lowest priority):
 ### Session Not Responding
 
 **Signals** (require shell to be alive):
-- Use `silc <port> interrupt` to send Ctrl+C
-- Use `silc <port> sigterm` for graceful termination
-- Use `silc <port> sigkill` for force termination
+- Use `silc sessions <port> sigint` to send Ctrl+C
+- Use `silc sessions <port> sigterm` for graceful termination
+- Use `silc sessions <port> sigkill` for force termination
 
 **Lifecycle commands** (always work, managed by daemon):
-- Use `silc <port> close` to gracefully close the session
-- Use `silc <port> kill` to force kill the session
-- Use `silc <port> restart` to restart with same port/name/cwd/shell
-- Use `silc killall` to wipe current sessions and keep the daemon running
+- Use `silc sessions <port> close` to gracefully close the session
+- Use `silc sessions <port> kill` to force kill the session
+- Use `silc sessions <port> restart` to restart with same port/name/cwd/shell
+- Use `silc sessions kill <targets...|all>` to wipe current sessions and keep the daemon running
 
 ### Daemon Not Starting
 
-- Check if daemon is already running: `silc list`
-- Check daemon logs: `silc logs`
-- Clear existing sessions: `silc killall`; stop and reset: `silc full-reset`
+- Check if daemon is already running: `silc sessions list`
+- Check daemon logs: `silc daemon logs`
+- Clear existing sessions: `silc sessions kill <targets...|all>`; stop and reset: `silc daemon full-reset`
 - Retry: `silc start`
 
 ### Command Timeout
@@ -878,12 +909,10 @@ SILC deliberately does NOT:
 | `silc <port-or-name> close` | Gracefully close session |
 | `silc <port-or-name> kill` | Force kill session |
 | `silc <port-or-name> restart` | Restart session (same port/name/cwd/shell) |
-| `silc list` | List all sessions |
-| `silc shutdown` | Stop daemon, save frozen snapshots, preserve dormant records |
-| `silc killall` | Clear sessions and session artifacts |
-| `silc full-reset` | Stop daemon and wipe SILC data |
-| `silc resurrect` | Materialize all persisted sessions from previous state |
-| `silc restart` | Save frozen snapshots, shutdown, and immediately start with dormant sessions |
+| `silc sessions list` | List all sessions |
+| `silc daemon shutdown` | Stop daemon, save frozen snapshots, preserve dormant records |
+| `silc daemon full-reset` | Stop daemon and wipe SILC data |
+| `silc daemon restart` | Save frozen snapshots, shutdown, and immediately start with dormant sessions |
 
 | Port | Purpose |
 |------|---------|
@@ -903,8 +932,8 @@ SILC deliberately does NOT:
 ## Restore Model
 
 - **Daemon boot is lazy** — On startup, SILC restores persisted session identities as dormant records instead of materializing every shell immediately.
-- **Explicit resurrect is eager** — `silc resurrect` materializes all persisted sessions.
-- **Graceful stop captures memory** — `silc shutdown`, `silc restart`, and other graceful daemon exits save one frozen raw terminal snapshot per live session.
+- **Explicit resurrect is eager** — `silc sessions resurrect` materializes all persisted sessions.
+- **Graceful stop captures memory** — `silc daemon shutdown`, `silc daemon restart`, and other graceful daemon exits save one frozen raw terminal snapshot per live session.
 - **Snapshots follow session identity** — Frozen snapshot files are keyed by stable `session_id`, not by port or mutable name.
 - **Dormant means sleeping** — Dormant sessions remain visible in the manager UI but have no live PTY, no live per-session port, and no preview expectation until explicitly activated.
 - **Frozen session memory** — SILC may preserve the latest raw terminal snapshot from a graceful stop, but that snapshot is not a live process continuation.

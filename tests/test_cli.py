@@ -97,10 +97,12 @@ class TestCLIHelp:
     def test_help_no_args(self):
         """Running `silc` with no args shows help."""
         result = run_cli([])
-        # stdout is empty when help goes to stderr in click
         output = result.stdout or result.stderr
         assert result.returncode == 0
-        assert "Usage:" in output or "silc" in output.lower()
+        assert "SILC command tree" in output
+        assert "sessions" in output
+        assert "daemon" in output
+        assert "sigint" in output
 
     def test_help_flag(self):
         """Running `silc --help` shows help."""
@@ -108,8 +110,9 @@ class TestCLIHelp:
         assert result.returncode == 0
         output = result.stdout or result.stderr
         assert "Usage:" in output
-        assert "Commands:" in output or "start" in output.lower()
-        assert "start-enter" in output
+        assert "sessions" in output
+        assert "daemon" in output
+        assert "Legacy aliases remain available" in output
 
     def test_version_not_crash(self):
         """CLI should not crash when invoked."""
@@ -118,31 +121,59 @@ class TestCLIHelp:
         assert "Traceback" not in result.stderr
         assert result.returncode == 0
 
-    def test_help_separates_global_and_resource_commands(self):
-        """`silc --help` separates global and session-scoped commands."""
+    def test_help_shows_canonical_tree(self):
+        """`silc --help` shows the canonical tree and hides legacy names."""
         result = run_cli(["--help"])
         output = result.stdout or result.stderr
 
-        assert "Global Commands:" in output
-        assert "Resource-Dependent Commands:" in output
-        assert "silc <port|name> <command>" in output
-        assert "manager" in output
-        assert "desktop" in output
-        assert "os-integration" in output
-        assert "stream-file-render" in output
+        assert "sessions" in output
+        assert "daemon" in output
+        assert "sigint" in output
+        assert "Legacy aliases remain available" in output
 
     def test_resource_help_uses_selector_usage(self):
-        """`silc <name> --help` explains selector-based session commands."""
+        """`silc <port|name> --help` explains target-based session commands."""
         from click.testing import CliRunner
 
         from silc.__main__ import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["web", "--help"])
+        result = runner.invoke(cli, ["20000", "--help"])
 
         assert result.exit_code == 0
-        assert "<port|name> [OPTIONS] COMMAND [ARGS]..." in result.output
+        assert "Usage: cli 20000 [OPTIONS] COMMAND [ARGS]..." in result.output
         assert "These commands act on an existing session" in result.output
+
+    def test_sessions_help_lists_bulk_and_target_commands(self):
+        """`silc sessions --help` should show bulk session commands."""
+        from click.testing import CliRunner
+
+        from silc.__main__ import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["sessions", "--help"])
+
+        assert result.exit_code == 0
+        assert "list" in result.output
+        assert "wake" in result.output
+        assert "unload" in result.output
+        assert "sigint" in result.output
+        assert "Bulk session commands live here" in result.output
+
+    def test_daemon_help_lists_lifecycle_commands(self):
+        """`silc daemon --help` should show lifecycle commands."""
+        from click.testing import CliRunner
+
+        from silc.__main__ import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["daemon", "--help"])
+
+        assert result.exit_code == 0
+        assert "shutdown" in result.output
+        assert "restart" in result.output
+        assert "restart-server" in result.output
+        assert "logs" in result.output
 
     def test_shutdown_help_mentions_preserved_records(self):
         """`silc shutdown --help` should describe preserved records."""
@@ -157,7 +188,7 @@ class TestCLIHelp:
         assert "preserv" in result.output.lower()
 
     def test_list_handles_missing_idle_seconds(self, monkeypatch):
-        """`silc list` should not crash when idle_seconds is missing."""
+        """`silc sessions list` should not crash when idle_seconds is missing."""
         from click.testing import CliRunner
 
         from silc import __main__ as main_mod
@@ -181,10 +212,14 @@ class TestCLIHelp:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main_mod.cli, ["list"])
+        result = runner.invoke(main_mod.cli, ["sessions", "list"])
 
         assert result.exit_code == 0
         assert "idle: n/a" in result.output
+
+        alias_result = runner.invoke(main_mod.cli, ["list"])
+        assert alias_result.exit_code == 0
+        assert "idle: n/a" in alias_result.output
 
 
 class TestDesktopLauncher:
@@ -1088,7 +1123,7 @@ class TestCLIMiscCommands:
         time.sleep(1)
 
         # Try logs - should gracefully indicate no log
-        result = run_cli(["logs"], timeout=10)
+        result = run_cli(["daemon", "logs"], timeout=10)
         # Should not crash with traceback
         assert "Traceback" not in result.stderr
         # Either shows logs or says no log found
@@ -1390,8 +1425,8 @@ class TestCLISessionCommandsExtended:
             pass
 
     @pytest.mark.asyncio
-    async def test_interrupt_command(self, ensure_daemon_stopped):
-        """`silc <port> interrupt` sends interrupt signal."""
+    async def test_sigint_command(self, ensure_daemon_stopped):
+        """`silc <port> sigint` sends interrupt signal."""
         # Start session
         result = run_cli(["start", "interrupt-test"], timeout=60)
         time.sleep(1)
@@ -1404,11 +1439,14 @@ class TestCLISessionCommandsExtended:
         if port_match:
             port = port_match.group(1)
 
-            # Send interrupt
-            interrupt_result = run_cli([port, "interrupt"], timeout=10)
+            # Send SIGINT
+            interrupt_result = run_cli([port, "sigint"], timeout=10)
 
             # Should succeed
             assert interrupt_result.returncode == 0
+
+            legacy_result = run_cli([port, "interrupt"], timeout=10)
+            assert legacy_result.returncode == 0
 
         # Cleanup
         try:

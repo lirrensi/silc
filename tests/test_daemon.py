@@ -790,11 +790,16 @@ async def test_daemon_creates_session(running_daemon: SilcDaemon) -> None:
 
     # Create session via API
     async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions",
-            json={"name": "test-create-session"},
-            timeout=30.0,
+        print("[test_daemon_creates_session] posting create-session request")
+        resp = await asyncio.wait_for(
+            client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions",
+                json={"name": "test-create-session"},
+                timeout=30.0,
+            ),
+            timeout=60.0,
         )
+        print("[test_daemon_creates_session] create-session response received")
 
     assert resp.status_code == 200
     session_data = resp.json()
@@ -826,10 +831,19 @@ async def test_daemon_creates_session_with_requested_port(
 
     requested_port = 20100
     async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"http://127.0.0.1:{DAEMON_PORT}/sessions",
-            json={"port": requested_port, "name": "test-port-session"},
-            timeout=30.0,
+        print(
+            "[test_daemon_creates_session_with_requested_port] posting create-session request"
+        )
+        resp = await asyncio.wait_for(
+            client.post(
+                f"http://127.0.0.1:{DAEMON_PORT}/sessions",
+                json={"port": requested_port, "name": "test-port-session"},
+                timeout=30.0,
+            ),
+            timeout=60.0,
+        )
+        print(
+            "[test_daemon_creates_session_with_requested_port] create-session response received"
         )
 
     assert resp.status_code == 200

@@ -388,6 +388,83 @@ class SilcDaemon:
             raise HTTPException(status_code=410, detail="Session has ended")
         return entry, runtime, session
 
+    async def _wake_session_target(self, key: str, request: Request) -> dict:
+        operation = "session_wake"
+        async with self._registry_lock:
+            entry, runtime = self._resolve_session_target(key, operation=operation)
+            session = runtime.session if runtime else None
+
+            if session is not None:
+                self._require_session_token(request, session)
+                if self._session_is_alive(session):
+                    return {
+                        "status": "awake",
+                        "port": entry.port,
+                        "name": entry.name,
+                        "title": entry.title,
+                        "shell": entry.shell_type,
+                    }
+
+                await self._cleanup_runtime_generation(
+                    entry.port,
+                    runtime.generation,
+                    remove_record=False,
+                    ignore_generation_mismatch=True,
+                )
+
+            runtime = self._get_or_create_runtime(entry)
+            runtime = await self._realize_runtime(
+                entry, runtime, preserve_session_id=entry.session_id
+            )
+            return {
+                "status": "woken",
+                "port": entry.port,
+                "name": entry.name,
+                "title": runtime.session.title if runtime.session else entry.title,
+                "shell": entry.shell_type,
+            }
+
+    async def _unload_session_target(self, key: str, request: Request) -> dict:
+        operation = "session_unload"
+        async with self._registry_lock:
+            entry, runtime = self._resolve_session_target(key, operation=operation)
+            session = runtime.session if runtime else None
+            if session is not None:
+                self._require_session_token(request, session)
+
+            if runtime is None:
+                return {
+                    "status": "unloaded",
+                    "port": entry.port,
+                    "name": entry.name,
+                    "title": entry.title,
+                    "shell": entry.shell_type,
+                }
+
+            await self._cleanup_runtime_generation(
+                entry.port,
+                runtime.generation,
+                remove_record=False,
+                ignore_generation_mismatch=True,
+            )
+            self.runtime_by_port.pop(entry.port, None)
+            return {
+                "status": "unloaded",
+                "port": entry.port,
+                "name": entry.name,
+                "title": entry.title,
+                "shell": entry.shell_type,
+            }
+
+    async def _sigint_session_target(self, key: str, request: Request) -> dict:
+        operation = "session_sigint"
+        _entry, _runtime, session = self._resolve_active_session_target(
+            key, operation=operation
+        )
+        self._require_session_token(request, session)
+        await session.interrupt()
+        return {"status": "sigint_sent"}
+
     def _create_daemon_api(self) -> FastAPI:
         """Create daemon management API."""
         app = FastAPI(title="Silc Daemon")
@@ -961,16 +1038,50 @@ class SilcDaemon:
                     detail=_build_logged_daemon_exception_payload(operation, exc),
                 ) from exc
 
+        @app.post("/sessions/{key}/wake")
+        async def session_wake(key: str, request: Request) -> dict:
+            operation = "session_wake"
+            try:
+                return await self._wake_session_target(key, request)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/unload")
+        async def session_unload(key: str, request: Request) -> dict:
+            operation = "session_unload"
+            try:
+                return await self._unload_session_target(key, request)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
+        @app.post("/sessions/{key}/sigint")
+        async def session_sigint(key: str, request: Request) -> dict:
+            operation = "session_sigint"
+            try:
+                return await self._sigint_session_target(key, request)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
         @app.post("/sessions/{key}/interrupt")
         async def session_interrupt(key: str, request: Request) -> dict:
             operation = "session_interrupt"
             try:
-                _entry, _runtime, session = self._resolve_active_session_target(
-                    key, operation=operation
-                )
-                self._require_session_token(request, session)
-                await session.interrupt()
-                return {"status": "interrupted"}
+                return await self._sigint_session_target(key, request)
             except HTTPException:
                 raise
             except Exception as exc:
@@ -2005,6 +2116,8 @@ class SilcDaemon:
             if not materialize_missing:
                 return
             runtime = self._get_or_create_runtime(entry)
+        if runtime.state == SessionState.STARTING:
+            return
         if runtime.state in {SessionState.STOPPING, SessionState.STOPPED}:
             return
         if runtime.state == SessionState.BACKOFF and not runtime_backoff_expired(

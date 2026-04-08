@@ -34,15 +34,17 @@ SILC manages shell sessions through a daemon, lightweight per-port adapters, and
 - If the port adapter dies, the daemon recreates it while preserving the record.
 - `close` removes the desired record and stops reconciling the session.
 - `kill` forcefully destroys the session and removes the record.
+- `wake` materializes a dormant record without changing its identity.
+- `unload` stops live runtime but preserves the record as dormant.
 - `restart` replaces the PTY/adapter but preserves the record, port, name, cwd, and shell.
 - If a stored launch cwd is invalid, the new runtime falls back to the user's home directory or the shell default instead of failing the restart.
 - `shutdown` MUST persist a frozen raw terminal snapshot for each live session before stopping runtime when shutdown is graceful.
 - `shutdown` stops live runtime but preserves records as dormant sessions.
-- `killall` removes all current session records and session artifacts while keeping the daemon process alive.
 - `full-reset` is CLI-only, requires typed confirmation, stops the daemon, and deletes all SILC data except the installed binaries.
 - Daemon startup MUST load persisted records without materializing live runtime.
 - Persisted sessions loaded at daemon startup are in a dormant state until explicitly materialized.
-- `resurrect` MUST load persisted records and materialize all desired sessions.
+- `resurrect` is a convenience alias for `wake all`.
+- `killall` is obsolete; bulk `kill` covers the same intent.
 - Sessions do not auto-expire; idle tracking is informational only.
 
 ## Settings Store
@@ -82,13 +84,15 @@ The daemon listens on `19999` and exposes:
 - `POST /settings` — merge new shared settings
 - `POST /sessions/{port}/rename` — rename a session
 - `POST /sessions/reorder` — reorder sessions
+- `POST /sessions/{port}/wake` — materialize a dormant session
+- `POST /sessions/{port}/unload` — stop live runtime but keep the record dormant
 - `POST /sessions/{port}/close` — close session
 - `POST /sessions/{port}/kill` — kill session
+- `POST /sessions/{port}/sigint` — send Ctrl+C
 - `POST /sessions/{port}/restart` — restart session
 - `POST /restart-server` — restart daemon HTTP server only
-- `POST /resurrect` — reload persisted records and reconcile
+- `POST /resurrect` — reload persisted records and reconcile (alias for `wake all`)
 - `POST /shutdown` — graceful daemon shutdown
-- `POST /killall` — clear sessions and session artifacts
 - `GET /events` — binary websocket stream of manager events
 
 The daemon also exposes session control on the same public port using a resolved session key:
@@ -100,7 +104,10 @@ The daemon also exposes session control on the same public port using a resolved
 - `GET /sessions/{key}/logs` — session logs
 - `POST /sessions/{key}/in` — send input
 - `POST /sessions/{key}/run` — run a command
-- `POST /sessions/{key}/interrupt` — send Ctrl+C
+- `POST /sessions/{key}/wake` — wake a dormant session
+- `POST /sessions/{key}/unload` — stop live runtime but keep the record dormant
+- `POST /sessions/{key}/sigint` — send Ctrl+C
+- `POST /sessions/{key}/interrupt` — compatibility alias for `sigint`
 - `POST /sessions/{key}/sigterm` — terminate foreground process tree gently
 - `POST /sessions/{key}/sigkill` — kill foreground process tree forcefully
 - `POST /sessions/{key}/clear` — clear screen
@@ -195,16 +202,20 @@ Dormant sessions do not expose a live websocket endpoint.
 - `silc desktop` opens the manager UI in a native webview.
 - `silc settings get` reads the daemon-managed shared settings.
 - `silc settings set <path> <value>` merges a single setting path into the daemon-managed shared settings.
-- `silc list`, `shutdown`, `killall`, `restart-server`, `resurrect`, and `restart` operate on the daemon.
-- `silc full-reset` is a destructive CLI-only factory reset that prompts for confirmation and wipes SILC data.
+- `silc sessions list` lists the current sessions; `silc list` remains a convenience alias.
+- `silc sessions wake|unload|restart|close|kill|clear|reset|sigint|sigterm|sigkill` apply those operations to many targets, including `all`.
+- `silc sessions resurrect` is an alias for `silc sessions wake all`.
+- `silc daemon logs`, `silc daemon shutdown`, `silc daemon restart`, `silc daemon restart-server`, and `silc daemon full-reset` own daemon lifecycle and log access.
+- `silc daemon full-reset` is a destructive CLI-only factory reset that prompts for confirmation and wipes SILC data.
+- `silc killall` is obsolete; use `silc sessions kill <targets...|all>` instead.
 - Normal daemon startup loads persisted sessions as dormant records.
-- `silc resurrect` materializes all persisted sessions.
-- `silc restart` performs a graceful shutdown, captures frozen raw snapshots, and starts again with dormant sessions loaded.
+- `silc daemon restart` performs a graceful shutdown, captures frozen raw snapshots, and starts again with dormant sessions loaded.
 - Session-targeted commands accept either a port or a resolved name.
-- Session-targeted commands wake dormant sessions synchronously before continuing, except `restart`, `close`, and `kill`.
+- Session-targeted commands wake dormant sessions synchronously before continuing, except `unload`, `close`, and `kill`.
+- Canonical signal commands are `sigint`, `sigterm`, and `sigkill`; `interrupt` remains a compatibility alias.
 - Selecting a dormant session in the manager UI wakes it before the interactive view continues.
 - `silc tui` launches the native TUI binary and asks before taking over an active interactive client.
-- `silc full-reset` is not exposed through the daemon API.
+- `silc daemon full-reset` is not exposed through the daemon API.
 
 ## Snapshot Persistence
 

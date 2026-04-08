@@ -32,33 +32,47 @@ Does not own:
 silc
 ├── start [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]
 ├── start-enter [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]
+├── list
 ├── manager [--share]
 ├── desktop [--share]
+├── sessions
+│   ├── list
+│   ├── wake <targets...|all>
+│   ├── unload <targets...|all>
+│   ├── restart <targets...|all>
+│   ├── close <targets...|all>
+│   ├── kill <targets...|all>
+│   ├── clear <targets...|all>
+│   ├── reset <targets...|all>
+│   ├── sigint <targets...|all>
+│   ├── sigterm <targets...|all>
+│   ├── sigkill <targets...|all>
+│   └── resurrect
+├── daemon
+│   ├── logs [--tail]
+│   ├── shutdown
+│   ├── restart
+│   ├── restart-server
+│   └── full-reset
 ├── mcp
-├── list
-├── shutdown
-├── killall
-├── full-reset
-├── restart-server
-├── resurrect
-├── restart
-├── logs [--tail]
+├── settings get|set
 ├── os-integration install|uninstall
-├── daemon (hidden)
-├── desktop-window (hidden)
-├── open (deprecated session command)
 └── <port|name>
     ├── run <command...> [--timeout]
     ├── out [lines]
     ├── in <text...>
     ├── status
-    ├── interrupt
-    ├── clear
-    ├── reset
-    ├── resize <rows> <cols>
+    ├── wake
+    ├── unload
+    ├── restart
     ├── close
     ├── kill
-    ├── restart
+    ├── clear
+    ├── reset
+    ├── sigint
+    ├── sigterm
+    ├── sigkill
+    ├── resize <rows> <cols>
     ├── logs [--tail]
     ├── tui
     ├── web
@@ -74,6 +88,7 @@ silc
 - Numeric selectors become `port`-bound groups.
 - Valid names are resolved through the daemon (`GET /resolve/{name}`).
 - Invalid names are rejected before any request is sent.
+- Bulk session commands accept multiple selectors or the reserved `all` selector.
 
 ## `silc start`
 
@@ -114,13 +129,14 @@ Notes:
 
 ## Daemon Control
 
-- `list` prints active sessions from the daemon registry.
-- `shutdown` gracefully stops the daemon but preserves records.
-- `killall` removes all sessions and session artifacts while keeping the daemon alive.
-- `full-reset` is a CLI-only factory reset that prompts for typed confirmation, stops the daemon, and deletes SILC data.
-- `restart-server` restarts the daemon HTTP server only.
-- `resurrect` reloads persisted session records and reconciles them.
-- `restart` performs a full daemon restart while preserving share mode.
+- `sessions list` prints active sessions from the daemon registry; `list` remains a compatibility alias.
+- `daemon logs` tails the daemon log file.
+- `daemon shutdown` gracefully stops the daemon but preserves records.
+- `daemon restart` performs a full daemon restart while preserving share mode.
+- `daemon restart-server` restarts the daemon HTTP server only.
+- `daemon full-reset` is a CLI-only factory reset that prompts for typed confirmation, stops the daemon, and deletes SILC data.
+
+Legacy aliases remain available but are omitted from the canonical tree.
 
 ## Settings Commands
 
@@ -131,17 +147,18 @@ Notes:
 
 ## Session Commands
 
-- `run` posts JSON `{command, timeout}` to `/run` on the port adapter, which forwards to the daemon.
-- `out` reads rendered output from `/out`.
-- `in` posts raw input bytes to `/in`.
-- `status` reads `/status` and prints session metadata.
-- `interrupt`, `clear`, `reset`, `resize` map directly to the adapter surface.
-- `close`, `kill`, `restart` call daemon lifecycle endpoints.
-- `logs` reads the daemon-maintained session log file.
-- `web` opens the per-port session UI.
-- `start-enter` starts a session and immediately launches the native TUI.
-- `tui` launches the native TUI binary.
-- All session-targeted commands first wake dormant sessions synchronously, except `close`, `kill`, and `restart`.
+- `sessions <port|name> run` posts JSON `{command, timeout}` to `/run` on the port adapter, which forwards to the daemon.
+- `sessions <port|name> out` reads rendered output from `/out`.
+- `sessions <port|name> in` posts raw input bytes to `/in`.
+- `sessions <port|name> status` reads `/status` and prints session metadata.
+- `sessions <port|name> wake` activates a dormant session without changing its record.
+- `sessions <port|name> unload` stops the live runtime but keeps the session record dormant.
+- `sessions <port|name> restart` replaces the runtime while preserving the record.
+- `sessions <port|name> close`, `kill`, `sigint`, `sigterm`, `sigkill`, `clear`, `reset`, and `resize` map directly to the adapter surface or daemon lifecycle.
+- `sessions <port|name> logs` reads the daemon-maintained session log file.
+- `sessions <port|name> web` opens the per-port session UI.
+- `sessions <port|name> tui` launches the native TUI binary.
+- All session-targeted commands wake dormant sessions synchronously before continuing, except `unload`, `close`, and `kill`.
 
 ## Stream Commands
 

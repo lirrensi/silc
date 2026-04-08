@@ -6,15 +6,15 @@ This document describes the FastAPI HTTP/WebSocket server. Complete enough to re
 
 ## Overview
 
-The API server exposes session operations via:
+The session API exposes session operations via:
 
 - **REST API** — HTTP endpoints for command execution, output retrieval
 - **WebSocket** — Real-time terminal output streaming
 - **Static files** — Web UI serving
 
-Each running session gets its own FastAPI app instance bound to its port.
+The daemon is the real HTTP owner for session-control routes. Live session ports are lightweight adapters that forward requests to the daemon-backed session routes.
 
-Dormant sessions do not have a per-session FastAPI app until they are materialized.
+Dormant sessions do not expose a live adapter, websocket, or snapshot endpoint until they are materialized.
 
 The daemon may expose session-control HTTP routes on its own public port, but it does not need to proxy WebSocket for non-interactive command execution.
 

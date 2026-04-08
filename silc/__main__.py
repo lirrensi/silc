@@ -4,7 +4,7 @@
 # PURPOSE: Define the SILC command-line entrypoint and top-level command routing.
 # OWNS: CLI bootstrap, daemon launch flow, and top-level command groups.
 # EXPORTS: cli - root Click command group for all SILC commands.
-# DOCS: agent_chat/plan_daemon_settings_store_2026-04-08.md
+# DOCS: docs/spec.md, docs/arch_cli.md, docs/arch_daemon.md
 
 from __future__ import annotations
 
@@ -339,6 +339,121 @@ def _is_valid_name(s: str) -> bool:
     return validate(s)
 
 
+def _render_root_help() -> str:
+    return "\n".join(
+        [
+            "Usage: silc [OPTIONS] COMMAND [ARGS]...",
+            "",
+            "SILC command tree",
+            "",
+            "silc",
+            "├── start [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]",
+            "├── list",
+            "├── manager [--share]",
+            "├── desktop [--share]",
+            "├── settings get|set",
+            "├── sessions",
+            "│   ├── list",
+            "│   ├── wake <targets...|all>",
+            "│   ├── unload <targets...|all>",
+            "│   ├── restart <targets...|all>",
+            "│   ├── close <targets...|all>",
+            "│   ├── kill <targets...|all>",
+            "│   ├── clear <targets...|all>",
+            "│   ├── reset <targets...|all>",
+            "│   ├── sigint <targets...|all>",
+            "│   ├── sigterm <targets...|all>",
+            "│   ├── sigkill <targets...|all>",
+            "│   ├── resurrect",
+            "│   └── <port|name> [run|out|in|status|wake|unload|sigint|sigterm|sigkill|clear|reset|resize|close|kill|restart|logs|tui|web|stream-file-render|stream-file-append|stream-stop|stream-status]",
+            "├── daemon",
+            "│   ├── shutdown",
+            "│   ├── restart",
+            "│   ├── restart-server",
+            "│   ├── full-reset",
+            "│   └── logs [--tail N]",
+            "├── mcp",
+            "└── os-integration install|uninstall",
+            "",
+            "Legacy aliases remain available for compatibility but are omitted here.",
+        ]
+    )
+
+
+def _send_session_signal(port: int, endpoint: str, success_text: str) -> None:
+    if not _ensure_warm_session(port):
+        return
+    try:
+        resp = requests.post(f"http://127.0.0.1:{port}/{endpoint}", timeout=5)
+        if resp.status_code == 410:
+            click.echo(f"❌ Session on port {port} has ended", err=True)
+            return
+        resp.raise_for_status()
+        click.echo(success_text)
+    except requests.RequestException:
+        click.echo(f"❌ Session on port {port} does not exist", err=True)
+
+
+def _list_daemon_sessions() -> list[dict[str, object]]:
+    try:
+        resp = requests.get(_daemon_url("/sessions"), timeout=5)
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload if isinstance(payload, list) else []
+    except requests.RequestException as exc:
+        raise click.ClickException(f"SILC daemon is not running: {exc}") from exc
+
+
+def _resolve_bulk_session_targets(targets: tuple[str, ...]) -> list[int]:
+    normalized = [target.strip() for target in targets if target and target.strip()]
+    if not normalized:
+        raise click.UsageError("Provide one or more targets or 'all'.")
+
+    if len(normalized) == 1 and normalized[0].lower() == "all":
+        sessions = _list_daemon_sessions()
+        return [int(session["port"]) for session in sessions if "port" in session]
+
+    if any(target.lower() == "all" for target in normalized):
+        raise click.UsageError("Use either 'all' or explicit targets, not both.")
+
+    resolved: list[int] = []
+    seen: set[int] = set()
+    for target in normalized:
+        port = int(target) if target.isdigit() else _resolve_name(target)
+        if port in seen:
+            continue
+        seen.add(port)
+        resolved.append(port)
+    return resolved
+
+
+def _bulk_session_endpoint_action(
+    targets: tuple[str, ...], endpoint: str, success_text: str
+) -> None:
+    ports = _resolve_bulk_session_targets(targets)
+    if not ports:
+        click.echo("No sessions matched")
+        return
+
+    failures: list[str] = []
+
+    for port in ports:
+        try:
+            resp = requests.post(
+                _daemon_url(f"/sessions/{port}/{endpoint}"), timeout=10
+            )
+            if resp.status_code in {404, 410}:
+                failures.append(f"port {port}: {_get_error_detail(resp)}")
+                continue
+            resp.raise_for_status()
+            click.echo(success_text.format(port=port))
+        except requests.RequestException as exc:
+            failures.append(f"port {port}: {exc}")
+
+    if failures:
+        raise click.ClickException("Some targets failed:\n" + "\n".join(failures))
+
+
 SESSION_REGISTRY: dict[int, SilcSession] = {}
 
 
@@ -358,19 +473,23 @@ class SessionGroup(click.Group):
         return super().invoke(ctx)
 
     def format_usage(self, ctx, formatter):
-        root_name = ctx.find_root().info_name or "silc"
-        formatter.write_usage(root_name, "<port|name> [OPTIONS] COMMAND [ARGS]...")
+        formatter.write_usage(ctx.command_path, "[OPTIONS] COMMAND [ARGS]...")
 
     def format_help_text(self, ctx, formatter):
         formatter.write_paragraph()
         formatter.write_text(
             "These commands act on an existing session. "
-            "Target it with `silc <port> <command>` or `silc <name> <command>`."
+            "Target it with `silc <port|name> <command>`."
         )
 
 
 class SilcCLI(click.Group):
     port_subcommands = click.Group()
+
+    def get_help(self, ctx):
+        if self is globals().get("cli"):
+            return _render_root_help()
+        return super().get_help(ctx)
 
     def _command_rows(self, ctx, command_names: list[str]) -> list[tuple[str, str]]:
         rows: list[tuple[str, str]] = []
@@ -391,6 +510,10 @@ class SilcCLI(click.Group):
         return rows
 
     def get_command(self, ctx, cmd_name):
+        # Only the root CLI resolves bare selectors into session-target groups.
+        if self is not globals().get("cli"):
+            return super().get_command(ctx, cmd_name)
+
         # First check if it's a registered command (not a session name)
         if cmd_name in self.commands:
             return super().get_command(ctx, cmd_name)
@@ -408,11 +531,17 @@ class SilcCLI(click.Group):
 
     def format_help_text(self, ctx, formatter):
         formatter.write_paragraph()
-        formatter.write_text(
-            "Use global commands directly. "
-            "Use `silc <port|name> <command>` for commands that operate on a "
-            "specific session resource."
-        )
+        if self is globals().get("sessions"):
+            formatter.write_text(
+                "Bulk session commands live here. Use `silc sessions list` for "
+                "the roster and `silc sessions <targets...|all> <command>` for bulk "
+                "control."
+            )
+        else:
+            formatter.write_text(
+                "Use the canonical namespaces for bulk session commands and "
+                "daemon lifecycle control."
+            )
 
     def format_commands(self, ctx, formatter):
         global_rows = self._command_rows(ctx, self.list_commands(ctx))
@@ -423,9 +552,15 @@ class SilcCLI(click.Group):
                 formatter.write_dl(global_rows)
 
         if resource_rows:
-            with formatter.section("Resource-Dependent Commands"):
+            section_title = (
+                "Session Target Commands"
+                if self is globals().get("sessions")
+                else "Resource-Dependent Commands"
+            )
+            with formatter.section(section_title):
                 formatter.write_text(
-                    "Prefix these with a session selector: `silc <port|name> <command>`"
+                    "Prefix these with a session selector: "
+                    "`silc <port|name> <command>` or `silc sessions <port|name> <command>`"
                 )
                 formatter.write_paragraph()
                 formatter.write_dl(resource_rows)
@@ -436,7 +571,17 @@ class SilcCLI(click.Group):
 def cli(ctx: click.Context) -> None:
     """SILC CLI commands."""
     if ctx.invoked_subcommand is None:
-        click.echo(ctx.get_help())
+        click.echo(ctx.command.get_help(ctx))
+
+
+@cli.group(name="sessions", cls=SilcCLI)
+def sessions() -> None:
+    """Bulk wrapper for session-targeted commands."""
+
+
+@cli.group(name="daemon")
+def daemon() -> None:
+    """Daemon lifecycle commands and daemon logs."""
 
 
 @cli.command()
@@ -738,7 +883,7 @@ def _silc_subcommand_command(*args: str) -> list[str]:
 
 def _start_detached_daemon(*, share: bool = False) -> None:
     """Start daemon in background (detached)."""
-    cmd = _silc_subcommand_command("daemon")
+    cmd = _silc_subcommand_command("daemon-run")
     if share:
         cmd.extend(["--host", "0.0.0.0", "--share-mode"])
     _spawn_detached_process(cmd, "daemon_stderr.log")
@@ -809,7 +954,7 @@ def _ensure_manager_ready(share: bool) -> tuple[str, dict[str, object]] | None:
     return manager_url, defaults
 
 
-@cli.command(name="daemon", hidden=True)
+@cli.command(name="daemon-run", hidden=True)
 @click.option("--host", type=str, default="127.0.0.1")
 @click.option("--share-mode", is_flag=True, default=False)
 def run_as_daemon(host: str, share_mode: bool) -> None:
@@ -1009,20 +1154,56 @@ def reset(ctx: click.Context) -> None:
 
 @cli.port_subcommands.command()
 @click.pass_context
-def interrupt(ctx: click.Context) -> None:
-    """Send interrupt signal (Ctrl+C) to the session."""
+def wake(ctx: click.Context) -> None:
+    """Wake the session if it is dormant."""
+
     port = ctx.parent.params["port"] if ctx.parent else 0
-    if not _ensure_warm_session(port):
-        return
-    try:
-        resp = requests.post(f"http://127.0.0.1:{port}/interrupt", timeout=5)
-        if resp.status_code == 410:
-            click.echo(f"❌ Session on port {port} has ended", err=True)
-            return
-        resp.raise_for_status()
-        click.echo("✨ Interrupt signal sent")
-    except requests.RequestException:
-        click.echo(f"❌ Session on port {port} does not exist", err=True)
+    _bulk_session_endpoint_action(
+        (str(port),), "wake", "✨ Session on port {port} woken"
+    )
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+def unload(ctx: click.Context) -> None:
+    """Unload the live session while preserving the record."""
+
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    _bulk_session_endpoint_action(
+        (str(port),), "unload", "✨ Session on port {port} unloaded"
+    )
+
+
+@cli.port_subcommands.command(name="sigint")
+@click.pass_context
+def sigint(ctx: click.Context) -> None:
+    """Send SIGINT (Ctrl+C) to the session."""
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    _send_session_signal(port, "sigint", "✨ SIGINT sent")
+
+
+@cli.port_subcommands.command(name="interrupt", hidden=True)
+@click.pass_context
+def interrupt(ctx: click.Context) -> None:
+    """Compatibility alias for SIGINT."""
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    _send_session_signal(port, "sigint", "✨ SIGINT sent")
+
+
+@cli.port_subcommands.command(name="sigterm")
+@click.pass_context
+def sigterm(ctx: click.Context) -> None:
+    """Send SIGTERM to the session foreground process tree."""
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    _send_session_signal(port, "sigterm", "✨ SIGTERM sent")
+
+
+@cli.port_subcommands.command(name="sigkill")
+@click.pass_context
+def sigkill(ctx: click.Context) -> None:
+    """Send SIGKILL to the session foreground process tree."""
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    _send_session_signal(port, "sigkill", "✨ SIGKILL sent")
 
 
 @cli.port_subcommands.command()
@@ -1131,6 +1312,140 @@ def list_sessions() -> None:
 
     except requests.RequestException:
         click.echo("SILC daemon is not running")
+
+
+@sessions.command(name="list")
+def sessions_list() -> None:
+    """Alias for `silc list`."""
+
+    list_sessions()
+
+
+@sessions.command(name="wake")
+@click.argument("targets", nargs=-1)
+def sessions_wake(targets: tuple[str, ...]) -> None:
+    """Wake one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(targets, "wake", "✨ Session on port {port} woken")
+
+
+@sessions.command(name="unload")
+@click.argument("targets", nargs=-1)
+def sessions_unload(targets: tuple[str, ...]) -> None:
+    """Unload one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(
+        targets, "unload", "✨ Session on port {port} unloaded"
+    )
+
+
+@sessions.command(name="restart")
+@click.argument("targets", nargs=-1)
+def sessions_restart(targets: tuple[str, ...]) -> None:
+    """Restart one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(
+        targets, "restart", "✨ Session on port {port} restarted"
+    )
+
+
+@sessions.command(name="close")
+@click.argument("targets", nargs=-1)
+def sessions_close(targets: tuple[str, ...]) -> None:
+    """Close one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(targets, "close", "✨ Session on port {port} closed")
+
+
+@sessions.command(name="kill")
+@click.argument("targets", nargs=-1)
+def sessions_kill(targets: tuple[str, ...]) -> None:
+    """Force kill one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(targets, "kill", "💀 Session on port {port} killed")
+
+
+@sessions.command(name="clear")
+@click.argument("targets", nargs=-1)
+def sessions_clear(targets: tuple[str, ...]) -> None:
+    """Clear one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(targets, "clear", "✨ Session on port {port} cleared")
+
+
+@sessions.command(name="reset")
+@click.argument("targets", nargs=-1)
+def sessions_reset(targets: tuple[str, ...]) -> None:
+    """Reset one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(targets, "reset", "✨ Session on port {port} reset")
+
+
+@sessions.command(name="sigint")
+@click.argument("targets", nargs=-1)
+def sessions_sigint(targets: tuple[str, ...]) -> None:
+    """Send SIGINT to one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(targets, "sigint", "✨ SIGINT sent to port {port}")
+
+
+@sessions.command(name="sigterm")
+@click.argument("targets", nargs=-1)
+def sessions_sigterm(targets: tuple[str, ...]) -> None:
+    """Send SIGTERM to one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(targets, "sigterm", "✨ SIGTERM sent to port {port}")
+
+
+@sessions.command(name="sigkill")
+@click.argument("targets", nargs=-1)
+def sessions_sigkill(targets: tuple[str, ...]) -> None:
+    """Send SIGKILL to one or more sessions, or all sessions."""
+
+    _bulk_session_endpoint_action(targets, "sigkill", "✨ SIGKILL sent to port {port}")
+
+
+@sessions.command(name="resurrect")
+def sessions_resurrect() -> None:
+    """Alias for `silc sessions wake all`."""
+
+    _bulk_session_endpoint_action(("all",), "wake", "✨ Session on port {port} woken")
+
+
+@daemon.command(name="logs")
+@click.option("--tail", default=100, help="Number of lines to show from end")
+def daemon_logs_group(tail: int) -> None:
+    """Show daemon logs."""
+
+    daemon_logs(tail)
+
+
+@daemon.command(name="shutdown")
+def daemon_shutdown() -> None:
+    """Alias for daemon shutdown."""
+
+    shutdown()
+
+
+@daemon.command(name="restart")
+def daemon_restart() -> None:
+    """Alias for daemon restart."""
+
+    restart()
+
+
+@daemon.command(name="restart-server")
+def daemon_restart_server() -> None:
+    """Alias for daemon HTTP server restart."""
+
+    restart_server()
+
+
+@daemon.command(name="full-reset")
+def daemon_full_reset() -> None:
+    """Alias for destructive daemon reset."""
+
+    full_reset()
 
 
 @cli.command()
@@ -1402,9 +1717,9 @@ def desktop_window(url: str) -> None:
     webview.start()
 
 
-@cli.command()
+@cli.command(name="logs")
 @click.option("--tail", default=100, help="Number of lines to show from end")
-def logs(tail: int) -> None:
+def daemon_logs(tail: int) -> None:
     """Show daemon logs."""
     from silc.utils.persistence import DAEMON_LOG
 
@@ -1519,10 +1834,10 @@ def web(ctx: click.Context) -> None:
     click.echo(web_url)
 
 
-@cli.port_subcommands.command()
+@cli.port_subcommands.command(name="logs")
 @click.pass_context
 @click.option("--tail", default=100, help="Number of lines to show from end")
-def logs(ctx: click.Context, tail: int) -> None:
+def session_logs(ctx: click.Context, tail: int) -> None:
     """Show session logs."""
     port = ctx.parent.params["port"] if ctx.parent else 0
     if not _ensure_warm_session(port):
