@@ -16,6 +16,7 @@ import os
 import shutil
 import signal
 import socket
+import struct
 import sys
 import traceback
 import uuid
@@ -233,6 +234,32 @@ def _request_client_host(request: Request | WebSocket) -> str | None:
     return client[0] if client else None
 
 
+def decode_ws_frame(frame: bytes) -> tuple[dict[str, object], bytes]:
+    """Decode a websocket frame using the shared SILC binary envelope."""
+
+    if len(frame) < 4:
+        raise ValueError("frame too short")
+
+    header_length = struct.unpack(">I", frame[:4])[0]
+    if len(frame) < 4 + header_length:
+        raise ValueError("frame truncated")
+
+    header_bytes = frame[4 : 4 + header_length]
+    payload = frame[4 + header_length :]
+
+    try:
+        header = json.loads(header_bytes.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("invalid frame header encoding") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError("invalid frame header json") from exc
+
+    if not isinstance(header, dict):
+        raise ValueError("frame header must be object")
+
+    return header, payload
+
+
 class SilcDaemon:
     """Main daemon managing multiple SILC sessions."""
 
@@ -273,6 +300,63 @@ class SilcDaemon:
         self._registry_lock = (
             asyncio.Lock()
         )  # Serialize registry mutations and persistence
+
+    def _is_active_session_websocket(self, port: int, websocket: WebSocket) -> bool:
+        return self._active_session_websockets.get(port) is websocket
+
+    async def _claim_active_session_websocket(
+        self, port: int, websocket: WebSocket, session: SilcSession
+    ) -> WebSocket | None:
+        active_websocket_lock = self._active_session_websocket_locks.setdefault(
+            port, asyncio.Lock()
+        )
+        async with active_websocket_lock:
+            previous_websocket = self._active_session_websockets.get(port)
+            self._active_session_websockets[port] = websocket
+            session.tui_active = True
+            return previous_websocket
+
+    async def _release_active_session_websocket(
+        self, port: int, websocket: WebSocket, session: SilcSession
+    ) -> None:
+        active_websocket_lock = self._active_session_websocket_locks.get(port)
+        if active_websocket_lock is None:
+            if self._active_session_websockets.get(port) is websocket:
+                self._active_session_websockets.pop(port, None)
+                session.tui_active = False
+            return
+
+        async with active_websocket_lock:
+            if self._active_session_websockets.get(port) is websocket:
+                self._active_session_websockets.pop(port, None)
+                session.tui_active = False
+
+    async def _close_tracked_session_websocket(
+        self,
+        port: int,
+        *,
+        code: int = 1001,
+        reason: str = "Session ended",
+    ) -> None:
+        active_websocket_lock = self._active_session_websocket_locks.get(port)
+        if active_websocket_lock is None:
+            tracked_websocket = self._active_session_websockets.pop(port, None)
+        else:
+            async with active_websocket_lock:
+                tracked_websocket = self._active_session_websockets.pop(port, None)
+
+        runtime = self.runtime_by_port.get(port)
+        tracked_session = self.sessions.get(port) or (
+            runtime.session if runtime else None
+        )
+        if tracked_session is not None:
+            tracked_session.tui_active = False
+
+        if tracked_websocket is None:
+            return
+
+        with contextlib.suppress(Exception):
+            await tracked_websocket.close(code=code, reason=reason)
 
     def _resolve_session_target(self, key: str, *, operation: str) -> tuple:
         normalized_key = key.strip()
@@ -1252,18 +1336,12 @@ class SilcDaemon:
 
                 await websocket.accept()
 
-                active_websocket_lock = self._active_session_websocket_locks.setdefault(
-                    entry.port, asyncio.Lock()
-                )
-                active_websocket = self._active_session_websockets.get(entry.port)
                 previous_websocket: WebSocket | None = None
 
                 if mode == "interactive":
-                    async with active_websocket_lock:
-                        previous_websocket = active_websocket
-                        active_websocket = websocket
-                        self._active_session_websockets[entry.port] = websocket
-                        session.tui_active = True
+                    previous_websocket = await self._claim_active_session_websocket(
+                        entry.port, websocket, session
+                    )
 
                     if (
                         previous_websocket is not None
@@ -1276,68 +1354,126 @@ class SilcDaemon:
                             )
 
                 send_lock = asyncio.Lock()
+                send_queue: asyncio.Queue[tuple[dict[str, object], bytes]] = (
+                    asyncio.Queue(maxsize=16)
+                )
+                event_loop = asyncio.get_running_loop()
+                connection_closed = False
 
                 async def safe_send_frame(
                     header: dict[str, object], payload: bytes = b""
                 ) -> None:
+                    if connection_closed:
+                        raise RuntimeError("websocket already closing")
+                    if mode == "interactive" and not self._is_active_session_websocket(
+                        entry.port, websocket
+                    ):
+                        raise RuntimeError(
+                            "websocket no longer owns interactive session"
+                        )
                     async with send_lock:
+                        if connection_closed:
+                            raise RuntimeError("websocket already closing")
+                        if (
+                            mode == "interactive"
+                            and not self._is_active_session_websocket(
+                                entry.port, websocket
+                            )
+                        ):
+                            raise RuntimeError(
+                                "websocket no longer owns interactive session"
+                            )
                         await websocket.send_bytes(encode_ws_frame(header, payload))
+
+                def enqueue_send_frame(
+                    header: dict[str, object], payload: bytes = b""
+                ) -> None:
+                    if connection_closed:
+                        return
+                    if mode == "interactive" and not self._is_active_session_websocket(
+                        entry.port, websocket
+                    ):
+                        return
+
+                    def _queue_frame() -> None:
+                        if connection_closed:
+                            return
+                        try:
+                            send_queue.put_nowait((header, payload))
+                        except asyncio.QueueFull:
+                            with contextlib.suppress(asyncio.QueueEmpty):
+                                send_queue.get_nowait()
+                            with contextlib.suppress(asyncio.QueueFull):
+                                send_queue.put_nowait((header, payload))
+
+                    with contextlib.suppress(RuntimeError):
+                        event_loop.call_soon_threadsafe(_queue_frame)
 
                 async def send_output_chunks() -> None:
                     cursor = session.buffer.cursor
                     while True:
-                        await session._output_event.wait()
+                        queue_task = asyncio.create_task(send_queue.get())
+                        output_task = asyncio.create_task(session._output_event.wait())
+
+                        try:
+                            done, pending = await asyncio.wait(
+                                {queue_task, output_task},
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                        except asyncio.CancelledError:
+                            queue_task.cancel()
+                            output_task.cancel()
+                            with contextlib.suppress(Exception):
+                                await asyncio.gather(
+                                    queue_task, output_task, return_exceptions=True
+                                )
+                            raise
+
+                        for pending_task in pending:
+                            pending_task.cancel()
+                        with contextlib.suppress(Exception):
+                            await asyncio.gather(*pending, return_exceptions=True)
+
+                        if queue_task in done:
+                            try:
+                                header, payload = queue_task.result()
+                                await safe_send_frame(header, payload)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:
+                                return
+                            continue
+
                         session._output_event.clear()
 
                         while True:
                             new_bytes, cursor = session.buffer.get_since(cursor)
                             if not new_bytes:
                                 break
-                            if active_websocket is not websocket:
-                                return
                             try:
                                 await safe_send_frame({"type": "output"}, new_bytes)
+                            except asyncio.CancelledError:
+                                raise
                             except Exception:
                                 return
 
                 def title_listener(updated_session: SilcSession) -> None:
                     if updated_session is not session:
                         return
-
-                    async def _send_title() -> None:
-                        if active_websocket is not websocket:
-                            return
-                        try:
-                            await safe_send_frame(
-                                {
-                                    "type": "title",
-                                    "title": updated_session.title,
-                                    "title_updated_at": (
-                                        updated_session.title_updated_at.isoformat()
-                                        + "Z"
-                                    ),
-                                }
-                            )
-                        except Exception:
-                            pass
-
-                    asyncio.create_task(_send_title())
+                    enqueue_send_frame(
+                        {
+                            "type": "title",
+                            "title": updated_session.title,
+                            "title_updated_at": (
+                                updated_session.title_updated_at.isoformat() + "Z"
+                            ),
+                        }
+                    )
 
                 def cwd_listener(updated_session: SilcSession) -> None:
                     if updated_session is not session:
                         return
-
-                    async def _send_cwd() -> None:
-                        if active_websocket is not websocket:
-                            return
-                        try:
-                            await safe_send_frame(
-                                {"type": "cwd", "cwd": updated_session.cwd}
-                            )
-                        except Exception:
-                            pass
-
-                    asyncio.create_task(_send_cwd())
+                    enqueue_send_frame({"type": "cwd", "cwd": updated_session.cwd})
 
                 if mode == "interactive":
                     session.add_title_listener(title_listener)
@@ -1395,17 +1531,17 @@ class SilcDaemon:
                 except WebSocketDisconnect:
                     pass
                 finally:
+                    connection_closed = True
                     if mode == "interactive":
                         session.remove_title_listener(title_listener)
                         session.remove_cwd_listener(cwd_listener)
-                        async with active_websocket_lock:
-                            if active_websocket is websocket:
-                                active_websocket = None
-                                self._active_session_websockets.pop(entry.port, None)
-                                session.tui_active = False
                         if sender_task is not None:
+                            sender_task.cancel()
                             with contextlib.suppress(asyncio.CancelledError):
                                 await sender_task
+                        await self._release_active_session_websocket(
+                            entry.port, websocket, session
+                        )
             except HTTPException:
                 raise
             except Exception as exc:
@@ -1831,13 +1967,25 @@ class SilcDaemon:
     def _runtime_server_is_alive(self, runtime: SessionRuntime) -> bool:
         server = runtime.server
         task = runtime.server_task
-        if hasattr(server, "is_serving"):
+        if task:
             try:
-                if not server.is_serving():
+                if not task.done():
+                    return True
+            except Exception:
+                return False
+            if task.cancelled():
+                return False
+            try:
+                if task.exception() is not None:
                     return False
             except Exception:
                 return False
-        return bool(task and not task.done())
+        if hasattr(server, "is_serving"):
+            try:
+                return bool(server.is_serving())
+            except Exception:
+                return False
+        return False
 
     async def _cleanup_runtime_generation(
         self,
@@ -1876,7 +2024,9 @@ class SilcDaemon:
         with contextlib.suppress(Exception):
             await self._stop_streaming_service(port)
 
-        self._active_session_websockets.pop(port, None)
+        await self._close_tracked_session_websocket(
+            port, code=1012, reason="Session runtime stopped"
+        )
         self._active_session_websocket_locks.pop(port, None)
 
         with contextlib.suppress(Exception):
@@ -2312,7 +2462,9 @@ class SilcDaemon:
         self._close_session_socket(port)
         with contextlib.suppress(Exception):
             await self._stop_streaming_service(port)
-        self._active_session_websockets.pop(port, None)
+        await self._close_tracked_session_websocket(
+            port, code=1011, reason="Session startup failed"
+        )
         self._active_session_websocket_locks.pop(port, None)
 
         if runtime:

@@ -1,5 +1,11 @@
 """Smoke test for session token enforcement on the session API."""
 
+# FILE: tests/test_session_auth.py
+# PURPOSE: Cover session auth and targeted websocket cleanup behavior for session and daemon APIs.
+# OWNS: Token enforcement smoke tests plus focused websocket regression tests.
+# EXPORTS: pytest test cases only.
+# DOCS: agent_chat/plan_daemon_websocket_cleanup_2026-04-08.md
+
 from __future__ import annotations
 
 import asyncio
@@ -8,11 +14,14 @@ import datetime as dt
 import json
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from types import SimpleNamespace
 
 import pytest
 import requests
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 import silc.daemon.manager as manager_module
 import tests.test_daemon as test_daemon_module
@@ -20,6 +29,7 @@ from silc.api.server import create_app
 from silc.core.raw_buffer import RawByteBuffer
 from silc.daemon import kill_daemon
 from silc.daemon.manager import DAEMON_PORT, SilcDaemon
+from silc.daemon.runtime import SessionState
 from tests.test_daemon import _shutdown_daemon, wait_for_daemon_start
 
 
@@ -113,6 +123,88 @@ class _WsSession:
 
     def get_snapshot_bytes(self) -> bytes:
         return self.buffer.get_bytes()
+
+
+class _BlockingOutputEvent:
+    def __init__(self) -> None:
+        import threading
+
+        self.started = threading.Event()
+        self.cancelled = threading.Event()
+
+    async def wait(self) -> None:
+        self.started.set()
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+    def clear(self) -> None:
+        return None
+
+    def set(self) -> None:
+        return None
+
+
+class _DaemonWsSession(_WsSession):
+    def __init__(self, port: int, name: str, session_id: str) -> None:
+        super().__init__()
+        self.port = port
+        self.name = name
+        self.session_id = session_id
+        self.closed = False
+        self.write_input_calls: list[str] = []
+
+    async def close(self) -> None:
+        self.closed = True
+
+    async def write_input(self, text: str) -> None:
+        self.write_input_calls.append(text)
+
+
+class _TrackedWebSocket:
+    def __init__(self) -> None:
+        self.closed = False
+        self.close_calls: list[tuple[int, str]] = []
+
+    async def close(self, code: int = 1000, reason: str | None = None) -> None:
+        self.closed = True
+        self.close_calls.append((code, reason or ""))
+
+
+def _register_daemon_ws_session(
+    daemon: SilcDaemon,
+    *,
+    port: int,
+    name: str = "daemon-ws",
+    session_id: str = "sess-daemon-ws",
+) -> tuple[object, _DaemonWsSession]:
+    entry = daemon.registry.add(port, name, session_id, "bash", title=name)
+    session = _DaemonWsSession(port, name, session_id)
+    runtime = SimpleNamespace(
+        generation=1,
+        session=session,
+        state=SessionState.RUNNING,
+        server=None,
+        server_task=None,
+        socket=None,
+    )
+    daemon.runtime_by_port[port] = runtime
+    daemon.sessions[port] = session
+    return entry, session
+
+
+def _run_with_timeout(callback, *, timeout: float = 2.0):
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(callback)
+        try:
+            return future.result(timeout=timeout)
+        except FutureTimeoutError as exc:
+            raise AssertionError(
+                f"operation timed out after {timeout} seconds"
+            ) from exc
 
 
 @pytest.mark.asyncio
@@ -276,3 +368,152 @@ def test_session_status_exposes_tui_active_flag() -> None:
     resp = client.get("/status")
     assert resp.status_code == 200
     assert resp.json()["tui_active"] is True
+
+
+def test_daemon_websocket_disconnect_does_not_hang_cleanup() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry, session = _register_daemon_ws_session(daemon, port=_pick_free_session_port())
+
+    def connect_receive_and_disconnect() -> tuple[dict[str, object], bytes]:
+        with TestClient(daemon._create_daemon_api()) as client:
+            with client.websocket_connect(f"/sessions/{entry.port}/ws") as websocket:
+                session.push_output(b"daemon-output")
+                frame = websocket.receive_bytes()
+                return manager_module.decode_ws_frame(frame)
+
+    header, payload = _run_with_timeout(connect_receive_and_disconnect)
+
+    assert header["type"] == "output"
+    assert payload == b"daemon-output"
+    assert daemon._active_session_websockets.get(entry.port) is None
+    assert session.tui_active is False
+
+
+def test_daemon_websocket_replacement_closes_previous_connection() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry, session = _register_daemon_ws_session(
+        daemon,
+        port=_pick_free_session_port(),
+        name="replace-ws",
+        session_id="sess-replace",
+    )
+
+    def replace_connection() -> tuple[bool, bool]:
+        with TestClient(daemon._create_daemon_api()) as client:
+            with client.websocket_connect(f"/sessions/{entry.port}/ws") as first:
+                assert session.tui_active is True
+                with client.websocket_connect(f"/sessions/{entry.port}/ws") as second:
+                    with pytest.raises(WebSocketDisconnect):
+                        first.receive_bytes()
+                    second.send_bytes(
+                        manager_module.encode_ws_frame(
+                            {"type": "input", "nonewline": True}, b"pwd"
+                        )
+                    )
+                    assert session.write_input_calls == ["pwd"]
+                    return (
+                        session.tui_active,
+                        daemon._active_session_websockets.get(entry.port) is not None,
+                    )
+
+    tui_active_during_replacement, has_active_socket = _run_with_timeout(
+        replace_connection
+    )
+
+    assert tui_active_during_replacement is True
+    assert has_active_socket is True
+    assert daemon._active_session_websockets.get(entry.port) is None
+    assert session.tui_active is False
+
+
+def test_daemon_websocket_disconnect_cancels_blocked_sender_task() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry, session = _register_daemon_ws_session(
+        daemon,
+        port=_pick_free_session_port(),
+        name="blocked-sender",
+        session_id="sess-blocked-sender",
+    )
+    blocking_event = _BlockingOutputEvent()
+    session._output_event = blocking_event
+
+    def connect_and_disconnect() -> None:
+        with TestClient(daemon._create_daemon_api()) as client:
+            with client.websocket_connect(f"/sessions/{entry.port}/ws"):
+                assert session.tui_active is True
+
+    _run_with_timeout(connect_and_disconnect)
+
+    assert blocking_event.started.wait(timeout=1.0)
+    assert blocking_event.cancelled.wait(timeout=1.0)
+    assert daemon._active_session_websockets.get(entry.port) is None
+    assert session.tui_active is False
+
+
+def test_daemon_websocket_queues_title_and_cwd_updates() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry, session = _register_daemon_ws_session(
+        daemon,
+        port=_pick_free_session_port(),
+        name="listener-queue",
+        session_id="sess-listener-queue",
+    )
+
+    def receive_listener_updates() -> list[dict[str, object]]:
+        with TestClient(daemon._create_daemon_api()) as client:
+            with client.websocket_connect(f"/sessions/{entry.port}/ws") as websocket:
+                session.title = "Queued title"
+                session.title_updated_at = dt.datetime.utcnow()
+                for listener in list(session._title_listeners):
+                    listener(session)
+
+                session.cwd = "/tmp/queued"
+                for listener in list(session._cwd_listeners):
+                    listener(session)
+
+                title_frame = manager_module.decode_ws_frame(websocket.receive_bytes())[
+                    0
+                ]
+                cwd_frame = manager_module.decode_ws_frame(websocket.receive_bytes())[0]
+                return [title_frame, cwd_frame]
+
+    frames = _run_with_timeout(receive_listener_updates)
+
+    assert frames[0]["type"] == "title"
+    assert frames[0]["title"] == "Queued title"
+    assert str(frames[0]["title_updated_at"]).endswith("Z")
+    assert frames[1] == {"type": "cwd", "cwd": "/tmp/queued"}
+    assert daemon._active_session_websockets.get(entry.port) is None
+    assert session.tui_active is False
+
+
+@pytest.mark.asyncio
+async def test_cleanup_runtime_generation_closes_tracked_websocket() -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry, session = _register_daemon_ws_session(
+        daemon,
+        port=_pick_free_session_port(),
+        name="cleanup-ws",
+        session_id="sess-cleanup-ws",
+    )
+    tracked_websocket = _TrackedWebSocket()
+    daemon._active_session_websockets[entry.port] = tracked_websocket  # type: ignore[assignment]
+    daemon._active_session_websocket_locks[entry.port] = asyncio.Lock()
+    session.tui_active = True
+
+    async def _noop_kill_processes(*args, **kwargs) -> None:
+        return None
+
+    daemon._kill_processes_on_port = _noop_kill_processes  # type: ignore[method-assign]
+    daemon._close_session_socket = lambda *args, **kwargs: None  # type: ignore[method-assign]
+
+    runtime = daemon.runtime_by_port[entry.port]
+    await daemon._cleanup_runtime_generation(
+        entry.port, runtime.generation, remove_record=False
+    )
+
+    assert tracked_websocket.closed is True
+    assert tracked_websocket.close_calls == [(1012, "Session runtime stopped")]
+    assert daemon._active_session_websockets.get(entry.port) is None
+    assert entry.port not in daemon._active_session_websocket_locks
+    assert session.tui_active is False

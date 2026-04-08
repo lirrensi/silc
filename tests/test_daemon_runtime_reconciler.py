@@ -270,6 +270,37 @@ async def test_lazy_reconcile_does_not_materialize_missing_runtime() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reconcile_does_not_respawn_adapter_during_startup_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    daemon = SilcDaemon(enable_hard_exit=False)
+    entry = daemon.registry.add(20010, "startup-race", "sess-race", "bash")
+    runtime = create_runtime_for_record(entry, state=SessionState.RUNNING)
+    runtime.session = _FakeSession(entry.port, entry.name, session_id=entry.session_id)
+    runtime.server = SimpleNamespace(is_serving=lambda: False)
+    runtime.server_task = SimpleNamespace(
+        done=lambda: False,
+        cancelled=lambda: False,
+        exception=lambda: None,
+    )
+    daemon.runtime_by_port[entry.port] = runtime
+
+    called = {"ensure_runtime_server": False}
+
+    async def fail_ensure_runtime_server(*args, **kwargs):
+        called["ensure_runtime_server"] = True
+        raise AssertionError("startup reconcile must not respawn adapter")
+
+    monkeypatch.setattr(daemon, "_ensure_runtime_server", fail_ensure_runtime_server)
+
+    await daemon._reconcile_record(entry)
+
+    assert called["ensure_runtime_server"] is False
+    assert daemon.runtime_by_port[entry.port].server is runtime.server
+    assert daemon.runtime_by_port[entry.port].server_task is runtime.server_task
+
+
+@pytest.mark.asyncio
 async def test_idle_time_does_not_delete_desired_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
