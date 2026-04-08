@@ -361,7 +361,6 @@ def _render_root_help() -> str:
             "│   ├── close <targets...|all>",
             "│   ├── kill <targets...|all>",
             "│   ├── clear <targets...|all>",
-            "│   ├── reset <targets...|all>",
             "│   ├── sigint <targets...|all>",
             "│   ├── sigterm <targets...|all>",
             "│   ├── sigkill <targets...|all>",
@@ -384,7 +383,6 @@ def _render_root_help() -> str:
             "│   ├── close",
             "│   ├── kill",
             "│   ├── clear",
-            "│   ├── reset",
             "│   ├── sigint",
             "│   ├── sigterm",
             "│   ├── sigkill",
@@ -1146,7 +1144,7 @@ def status(ctx: click.Context) -> None:
 @cli.port_subcommands.command()
 @click.pass_context
 def clear(ctx: click.Context) -> None:
-    """Clear the session terminal."""
+    """Clear the session output/history."""
     port = ctx.parent.params["port"] if ctx.parent else 0
     if not _ensure_warm_session(port):
         return
@@ -1156,25 +1154,7 @@ def clear(ctx: click.Context) -> None:
             click.echo(f"❌ Session on port {port} has ended", err=True)
             return
         resp.raise_for_status()
-        click.echo("✨ Terminal cleared")
-    except requests.RequestException:
-        click.echo(f"❌ Session on port {port} does not exist", err=True)
-
-
-@cli.port_subcommands.command()
-@click.pass_context
-def reset(ctx: click.Context) -> None:
-    """Reset the session terminal."""
-    port = ctx.parent.params["port"] if ctx.parent else 0
-    if not _ensure_warm_session(port):
-        return
-    try:
-        resp = requests.post(f"http://127.0.0.1:{port}/reset", timeout=5)
-        if resp.status_code == 410:
-            click.echo(f"❌ Session on port {port} has ended", err=True)
-            return
-        resp.raise_for_status()
-        click.echo("✨ Terminal reset")
+        click.echo("✨ Session cleared")
     except requests.RequestException:
         click.echo(f"❌ Session on port {port} does not exist", err=True)
 
@@ -1403,14 +1383,6 @@ def sessions_clear(targets: tuple[str, ...]) -> None:
     """Clear one or more sessions, or all sessions."""
 
     _bulk_session_endpoint_action(targets, "clear", "✨ Session on port {port} cleared")
-
-
-@sessions.command(name="reset")
-@click.argument("targets", nargs=-1)
-def sessions_reset(targets: tuple[str, ...]) -> None:
-    """Reset one or more sessions, or all sessions."""
-
-    _bulk_session_endpoint_action(targets, "reset", "✨ Session on port {port} reset")
 
 
 @sessions.command(name="sigint")

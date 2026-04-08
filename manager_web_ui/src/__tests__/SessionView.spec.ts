@@ -17,7 +17,6 @@ const mockRestartSession = vi.hoisted(() => vi.fn().mockResolvedValue({ port: 12
 const mockRemoveSession = vi.hoisted(() => vi.fn())
 const mockUnloadSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockClearSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
-const mockResetSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockCloseSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockKillSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockSendInterrupt = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
@@ -41,7 +40,6 @@ vi.mock('@/lib/daemonApi', () => ({
   killSession: mockKillSession,
   listSessions: mockListSessions,
   getSettings: vi.fn().mockResolvedValue({ ui: { themePreference: 'system' }, terminal: {} }),
-  resetSession: mockResetSession,
   restartSession: mockRestartSession,
   sendInterrupt: mockSendInterrupt,
   sendSigkill: mockSendSigkill,
@@ -120,7 +118,6 @@ describe('SessionView', () => {
     mockRestartSession.mockClear()
     mockUnloadSession.mockClear()
     mockClearSession.mockClear()
-    mockResetSession.mockClear()
     mockCloseSession.mockClear()
     mockKillSession.mockClear()
     mockSendInterrupt.mockClear()
@@ -249,7 +246,6 @@ describe('SessionView', () => {
     expect(text).toContain('Close Session')
     expect(text).toContain('Close Forcefully')
     expect(text).toContain('Clear')
-    expect(text).toContain('Reset')
     expect(text).toContain('SIGINT')
     expect(text).toContain('SIGTERM')
     expect(text).toContain('SIGKILL')
@@ -269,7 +265,6 @@ describe('SessionView', () => {
 
     await triggerAction('Unload')
     await triggerAction('Clear')
-    await triggerAction('Reset')
     await triggerAction('Close Session')
     await triggerAction('Close Forcefully')
     await triggerAction('SIGINT')
@@ -278,7 +273,6 @@ describe('SessionView', () => {
 
     expect(mockUnloadSession).toHaveBeenCalledWith(1234)
     expect(mockClearSession).toHaveBeenCalledWith(1234)
-    expect(mockResetSession).toHaveBeenCalledWith(1234)
     expect(mockCloseSession).toHaveBeenCalledWith(1234)
     expect(mockKillSession).toHaveBeenCalledWith(1234)
     expect(mockSendInterrupt).toHaveBeenCalledWith(1234)

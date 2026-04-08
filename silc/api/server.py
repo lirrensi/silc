@@ -259,12 +259,6 @@ def create_app(session: SilcSession) -> FastAPI:
         await session.clear_screen()
         return {"status": "cleared"}
 
-    @app.post("/reset", dependencies=[Depends(_require_token)])
-    async def reset_terminal() -> dict:
-        _check_alive()
-        await session.reset_terminal()
-        return {"status": "reset"}
-
     @app.post("/resize", dependencies=[Depends(_require_token)])
     async def resize(rows: int, cols: int) -> dict:
         _check_alive()

@@ -43,7 +43,6 @@ silc
 │   ├── close <targets...|all>
 │   ├── kill <targets...|all>
 │   ├── clear <targets...|all>
-│   ├── reset <targets...|all>
 │   ├── sigint <targets...|all>
 │   ├── sigterm <targets...|all>
 │   ├── sigkill <targets...|all>
@@ -68,7 +67,6 @@ silc
     ├── close
     ├── kill
     ├── clear
-    ├── reset
     ├── sigint
     ├── sigterm
     ├── sigkill
@@ -154,7 +152,7 @@ Legacy aliases remain available but are omitted from the canonical tree.
 - `sessions <port|name> wake` activates a dormant session without changing its record.
 - `sessions <port|name> unload` stops the live runtime but keeps the session record dormant.
 - `sessions <port|name> restart` replaces the runtime while preserving the record.
-- `sessions <port|name> close`, `kill`, `sigint`, `sigterm`, `sigkill`, `clear`, `reset`, and `resize` map directly to the adapter surface or daemon lifecycle.
+- `sessions <port|name> close`, `kill`, `sigint`, `sigterm`, `sigkill`, `clear`, and `resize` map directly to the adapter surface or daemon lifecycle.
 - `sessions <port|name> logs` reads the daemon-maintained session log file.
 - `sessions <port|name> web` opens the per-port session UI.
 - `sessions <port|name> tui` launches the native TUI binary.

@@ -214,31 +214,10 @@ class SilcSession:
         self.last_access = datetime.utcnow()
 
     async def clear_screen(self) -> None:
-        """Send a clear-screen sequence and refresh the prompt."""
-        newline = "\r\n" if sys.platform == "win32" else "\n"
-        sequence = f"\x1b[2J\x1b[H{newline}"
-        self.buffer.clear()
-        self._snapshot_cache = None
-        self._snapshot_dirty = True
-        self._status_tail_text = ""
-        self._status_last_line = ""
-        self._status_waiting_for_input = False
-        await self.pty.write(sequence.encode("utf-8", errors="replace"))
-        await self._wait_for_prompt(timeout=2.0)
-        self.last_access = datetime.utcnow()
-        self.last_output = datetime.utcnow()
-
-    async def reset_terminal(self) -> None:
-        """Reset the terminal state and clear any buffered output."""
-        newline = "\r\n" if sys.platform == "win32" else "\n"
-        sequence = f"\x1bc{newline}"
-        self.buffer.clear()
-        self._snapshot_cache = None
-        self._snapshot_dirty = True
-        self._status_tail_text = ""
-        self._status_last_line = ""
-        self._status_waiting_for_input = False
-        await self.pty.write(sequence.encode("utf-8", errors="replace"))
+        """Clear the terminal screen via PTY and reset SILC's buffered state."""
+        # ANSI escape: ESC[2J = clear screen, ESC[H = home cursor
+        await self.pty.write(b"\x1b[2J\x1b[H")
+        await self.clear_buffer()
         await self._wait_for_prompt(timeout=2.0)
         self.last_access = datetime.utcnow()
         self.last_output = datetime.utcnow()

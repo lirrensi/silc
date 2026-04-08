@@ -550,8 +550,7 @@ silc <port-or-name> in <text>    # Send raw input (fire-and-forget, no wait)
 silc <port-or-name> out [lines]  # View output (default: last 100 lines)
 silc <port-or-name> status       # Show session status (alive, idle, waiting_for_input)
 silc <port-or-name> interrupt    # Send Ctrl+C to running process
-silc <port-or-name> clear        # Clear terminal screen
-silc <port-or-name> reset        # Reset terminal state
+silc <port-or-name> clear        # Clear session output/history
 silc <port-or-name> resize       # Resize terminal (default: 30x120)
 silc <port-or-name> resize --rows 40 --cols 150
 silc <port-or-name> close        # Gracefully close session

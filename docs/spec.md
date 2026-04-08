@@ -110,8 +110,7 @@ The daemon also exposes session control on the same public port using a resolved
 - `POST /sessions/{key}/interrupt` — compatibility alias for `sigint`
 - `POST /sessions/{key}/sigterm` — terminate foreground process tree gently
 - `POST /sessions/{key}/sigkill` — kill foreground process tree forcefully
-- `POST /sessions/{key}/clear` — clear screen
-- `POST /sessions/{key}/reset` — reset terminal state
+- `POST /sessions/{key}/clear` — clear session output/history
 - `POST /sessions/{key}/resize` — resize terminal
 - `GET /sessions/{key}/ws` — interactive terminal websocket
 - `GET /sessions/{key}/web` — browser session UI
@@ -148,8 +147,7 @@ Live sessions MAY expose a tiny loopback adapter on the session port.
 - `POST /interrupt` — send Ctrl+C
 - `POST /sigterm` — terminate foreground process tree gently
 - `POST /sigkill` — kill foreground process tree forcefully
-- `POST /clear` — clear screen
-- `POST /reset` — reset terminal state
+- `POST /clear` — clear session output/history
 - `POST /resize?rows=&cols=` — resize terminal
 - `GET /token` — expose current token to local helpers
 - `GET /web` — static per-session web UI
@@ -203,7 +201,7 @@ Dormant sessions do not expose a live websocket endpoint.
 - `silc settings get` reads the daemon-managed shared settings.
 - `silc settings set <path> <value>` merges a single setting path into the daemon-managed shared settings.
 - `silc sessions list` lists the current sessions; `silc list` remains a convenience alias.
-- `silc sessions wake|unload|restart|close|kill|clear|reset|sigint|sigterm|sigkill` apply those operations to many targets, including `all`.
+- `silc sessions wake|unload|restart|close|kill|clear|sigint|sigterm|sigkill` apply those operations to many targets, including `all`.
 - `silc sessions resurrect` is an alias for `silc sessions wake all`.
 - `silc daemon logs`, `silc daemon shutdown`, `silc daemon restart`, `silc daemon restart-server`, and `silc daemon full-reset` own daemon lifecycle and log access.
 - `silc daemon full-reset` is a destructive CLI-only factory reset that prompts for confirmation and wipes SILC data.

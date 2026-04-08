@@ -1,7 +1,7 @@
 // FILE: manager_web_ui/src/lib/daemonApi.ts
 // PURPOSE: Call daemon HTTP endpoints and define the stable daemon session and settings payload shapes used by the manager UI.
 // OWNS: Daemon base URL helpers, HTTP API calls, and daemon response interfaces.
-// EXPORTS: getDaemonUrl, getSessionHttpUrl, getDaemonSessionUrl, listSessions, createSession, closeSession, killSession, restartSession, renameSession, reorderSessions, getDefaults, getSettings, updateSettings, resizeSession, sendInterrupt, sendSigterm, sendSigkill, getSessionStatus, getSessionOutput, getSessionRawOutput, getSessionSnapshot, getSessionLogs, sendSessionInput, runSessionCommand, clearSession, resetSession, unloadSession, bulkUnloadSessions, bulkRestartSessions, bulkCloseSessions, bulkKillSessions, bulkClearSessions, bulkResetSessions, bulkSendSigintSessions, bulkSendSigtermSessions, bulkSendSigkillSessions.
+// EXPORTS: getDaemonUrl, getSessionHttpUrl, getDaemonSessionUrl, listSessions, createSession, closeSession, killSession, restartSession, renameSession, reorderSessions, getDefaults, getSettings, updateSettings, resizeSession, sendInterrupt, sendSigterm, sendSigkill, getSessionStatus, getSessionOutput, getSessionRawOutput, getSessionSnapshot, getSessionLogs, sendSessionInput, runSessionCommand, clearSession, unloadSession, bulkUnloadSessions, bulkRestartSessions, bulkCloseSessions, bulkKillSessions, bulkClearSessions, bulkSendSigintSessions, bulkSendSigtermSessions, bulkSendSigkillSessions.
 // DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md
 
 import type { ThemePresetName } from '@/lib/themePresets'
@@ -291,13 +291,6 @@ export async function clearSession(port: number): Promise<void> {
   }
 }
 
-export async function resetSession(port: number): Promise<void> {
-  const resp = await fetch(`${getDaemonSessionUrl(port)}/reset`, { method: 'POST' })
-  if (!resp.ok) {
-    throw new Error(`Failed to reset session: HTTP ${resp.status}`)
-  }
-}
-
 export async function resizeSession(port: number, rows: number, cols: number): Promise<void> {
   const url = `${getDaemonSessionUrl(port)}/resize?rows=${rows}&cols=${cols}`
   const resp = await fetch(url, { method: 'POST' })
@@ -364,10 +357,6 @@ export async function bulkKillSessions(): Promise<void> {
 
 export async function bulkClearSessions(): Promise<void> {
   await bulkRunSessionCommand('clear', 'clear')
-}
-
-export async function bulkResetSessions(): Promise<void> {
-  await bulkRunSessionCommand('reset', 'reset')
 }
 
 export async function bulkSendSigintSessions(): Promise<void> {

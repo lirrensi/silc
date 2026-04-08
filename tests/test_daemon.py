@@ -134,9 +134,6 @@ class _RouteTestSession(_EventTestSession):
     async def clear_screen(self) -> None:
         self.signal_calls.append("clear")
 
-    async def reset_terminal(self) -> None:
-        self.signal_calls.append("reset")
-
     def resize(self, rows: int, cols: int) -> None:
         self.resize_calls.append((rows, cols))
 

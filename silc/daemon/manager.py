@@ -1228,24 +1228,6 @@ class SilcDaemon:
                     detail=_build_logged_daemon_exception_payload(operation, exc),
                 ) from exc
 
-        @app.post("/sessions/{key}/reset")
-        async def session_reset(key: str, request: Request) -> dict:
-            operation = "session_reset"
-            try:
-                _entry, _runtime, session = self._resolve_active_session_target(
-                    key, operation=operation
-                )
-                self._require_session_token(request, session)
-                await session.reset_terminal()
-                return {"status": "reset"}
-            except HTTPException:
-                raise
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=500,
-                    detail=_build_logged_daemon_exception_payload(operation, exc),
-                ) from exc
-
         @app.post("/sessions/{key}/resize")
         async def session_resize(
             key: str, request: Request, rows: int, cols: int

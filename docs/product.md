@@ -200,8 +200,7 @@ You can identify a session by its **port number** (e.g., `20000`) or by its **na
 | `silc <port-or-name> restart` | Restart session with same port/name/cwd/shell |
 | `silc <port-or-name> close` | Gracefully close the session (via daemon) |
 | `silc <port-or-name> kill` | Force kill the session (via daemon) |
-| `silc <port-or-name> clear` | Clear the terminal screen |
-| `silc <port-or-name> reset` | Reset terminal state |
+| `silc <port-or-name> clear` | Clear session output/history |
 | `silc <port-or-name> sigint` | Send Ctrl+C to the session |
 | `silc <port-or-name> sigterm` | Send SIGTERM to the session |
 | `silc <port-or-name> sigkill` | Send SIGKILL to the session |
@@ -221,7 +220,6 @@ You can identify a session by its **port number** (e.g., `20000`) or by its **na
 | `silc sessions close <targets...|all>` | Close one or more sessions |
 | `silc sessions kill <targets...|all>` | Kill one or more sessions |
 | `silc sessions clear <targets...|all>` | Clear one or more sessions |
-| `silc sessions reset <targets...|all>` | Reset one or more sessions |
 | `silc sessions sigint <targets...|all>` | Send SIGINT to one or more sessions |
 | `silc sessions sigterm <targets...|all>` | Send SIGTERM to one or more sessions |
 | `silc sessions sigkill <targets...|all>` | Send SIGKILL to one or more sessions |
@@ -307,8 +305,7 @@ The API is exposed by the FastAPI server. All endpoints (except `/web`) require 
 | `POST` | `/interrupt` | Send Ctrl+C (SIGINT) to foreground process |
 | `POST` | `/sigterm` | Send SIGTERM to foreground process group |
 | `POST` | `/sigkill` | Send SIGKILL to foreground process group |
-| `POST` | `/clear` | Clear the terminal screen |
-| `POST` | `/reset` | Reset terminal state |
+| `POST` | `/clear` | Clear session output/history |
 | `POST` | `/resize` | Resize PTY dimensions |
 | `POST` | `/settings` | Merge new daemon-managed settings |
 | `GET` | `/token` | Return the current session token |

@@ -1502,34 +1502,6 @@ class TestCLISessionCommandsExtended:
             pass
 
     @pytest.mark.asyncio
-    async def test_reset_command(self, ensure_daemon_stopped):
-        """`silc <port> reset` resets terminal."""
-        # Start session
-        result = run_cli(["start", "reset-test"], timeout=60)
-        time.sleep(1)
-
-        # Get session port
-        list_result = run_cli(["list"], timeout=10)
-        list_output = list_result.stdout or list_result.stderr
-
-        port_match = re.search(r"port:\s*(\d+)", list_output)
-        if port_match:
-            port = port_match.group(1)
-
-            # Reset terminal
-            reset_result = run_cli([port, "reset"], timeout=10)
-
-            # Should succeed
-            assert reset_result.returncode == 0
-            assert "reset" in reset_result.stdout.lower()
-
-        # Cleanup
-        try:
-            run_cli(["killall"], timeout=10)
-        except subprocess.TimeoutExpired:
-            pass
-
-    @pytest.mark.asyncio
     async def test_session_logs_command(self, ensure_daemon_stopped):
         """`silc <port> logs` shows session logs."""
         # Start session

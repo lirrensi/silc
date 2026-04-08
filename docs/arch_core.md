@@ -101,7 +101,7 @@ current_run_cmd: str | None
 - `write_input()` writes raw bytes to the PTY.
 - `interrupt()` sends Ctrl+C.
 - `send_sigterm()` and `send_sigkill()` delegate to the PTY process-group helpers.
-- `clear_screen()` and `reset_terminal()` send terminal control sequences and wait for prompt settlement.
+- `clear_screen()` clears SILC's buffered terminal state without injecting control sequences into the PTY.
 - `resize()` updates PTY and renderer geometry.
 
 ## Status Model

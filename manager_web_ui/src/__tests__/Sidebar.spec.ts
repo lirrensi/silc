@@ -38,7 +38,6 @@ vi.mock('@/lib/daemonApi', () => ({
   bulkClearSessions: vi.fn(),
   bulkCloseSessions: vi.fn(),
   bulkKillSessions: vi.fn(),
-  bulkResetSessions: vi.fn(),
   bulkRestartSessions: vi.fn(),
   bulkSendSigintSessions: vi.fn(),
   bulkSendSigkillSessions: vi.fn(),

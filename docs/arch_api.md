@@ -291,11 +291,7 @@ For session lifecycle operations (close, kill, restart), use the daemon API inst
 
 ### `POST /clear`
 
-Clear terminal screen.
-
-### `POST /reset`
-
-Reset terminal state.
+Clear session output/history.
 
 ### `POST /resize`
 
