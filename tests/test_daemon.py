@@ -300,27 +300,35 @@ def test_settings_routes_merge_and_persist(
 
     get_resp = client.get("/settings")
     assert get_resp.status_code == 200
-    assert get_resp.json()["ui"]["themePreference"] == "system"
+    assert get_resp.json()["ui"]["managerTheme"] == "amoled"
+    assert get_resp.json()["ui"]["themePreference"] == "dark"
 
     post_resp = client.post(
         "/settings",
-        json={"ui": {"themePreference": "dark"}, "terminal": {"fontSize": 18}},
+        json={
+            "ui": {"managerTheme": "vercel"},
+            "terminal": {"themePreset": "tokyo-night", "fontSize": 18},
+        },
     )
     assert post_resp.status_code == 200
     payload = post_resp.json()
-    assert payload["ui"]["themePreference"] == "dark"
+    assert payload["ui"]["managerTheme"] == "vercel"
+    assert payload["ui"]["themePreference"] == "light"
+    assert payload["terminal"]["themePreset"] == "tokyo-night"
+    assert payload["terminal"]["theme"] == "dark"
     assert payload["terminal"]["fontSize"] == 18
     assert payload["terminal"]["cursorBlink"] is True
 
     persisted = persistence.read_settings_json()
-    assert persisted["ui"]["themePreference"] == "dark"
+    assert persisted["ui"]["managerTheme"] == "vercel"
+    assert persisted["terminal"]["themePreset"] == "tokyo-night"
     assert persisted["terminal"]["fontSize"] == 18
 
     daemon_reload = SilcDaemon(enable_hard_exit=False)
     reload_client = TestClient(daemon_reload._create_daemon_api())
     reload_resp = reload_client.get("/settings")
     assert reload_resp.status_code == 200
-    assert reload_resp.json()["ui"]["themePreference"] == "dark"
+    assert reload_resp.json()["ui"]["managerTheme"] == "vercel"
 
 
 @pytest.mark.asyncio

@@ -46,6 +46,8 @@ SILC manages shell sessions through a daemon, per-session HTTP APIs, and multipl
 - The daemon MUST expose `POST /settings` to merge a supplied JSON object into the stored settings.
 - Merging MUST be recursive for nested objects and MUST replace non-object leaf values.
 - Unknown top-level or nested keys MAY be preserved so the settings document can be extended without a migration.
+- Manager chrome settings MUST use `ui.managerTheme` and terminal palette settings MUST use `terminal.themePreset` as canonical keys.
+- The daemon SHOULD keep legacy aliases such as `ui.themePreference` and `terminal.theme` readable for compatibility.
 - Manager UI clients MUST treat daemon settings as the source of truth.
 - Session web pages MAY attempt to read daemon settings for appearance defaults.
 - If a session web page cannot read settings for any reason, it MUST fall back to built-in defaults.

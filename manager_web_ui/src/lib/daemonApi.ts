@@ -4,6 +4,8 @@
 // EXPORTS: getDaemonUrl, listSessions, createSession, closeSession, killSession, restartSession, renameSession, reorderSessions, getDefaults, getSettings, updateSettings.
 // DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md
 
+import type { ThemePresetName } from '@/lib/themePresets'
+
 function getPageProtocol(): string {
   return window.location.protocol === 'https:' ? 'https:' : 'http:'
 }
@@ -51,10 +53,12 @@ export interface DaemonDefaults {
 }
 
 export interface DaemonUiSettings {
+  managerTheme?: ThemePresetName
   themePreference?: 'light' | 'dark' | 'system'
 }
 
 export interface DaemonTerminalSettings {
+  themePreset?: ThemePresetName
   theme?: 'light' | 'dark'
   cols?: number
   rows?: number

@@ -1,7 +1,7 @@
 // FILE: manager_web_ui/src/__tests__/Sidebar.spec.ts
-// PURPOSE: Verify sidebar session creation hints, rename prompt flow, and drag reorder wiring.
-// OWNS: Sidebar component interaction coverage for rename and reorder actions.
-// DOCS: agent_chat/plan_manager_qol_2026-04-05.md
+// PURPOSE: Verify sidebar session creation hints, rename prompt flow, settings access, and drag reorder wiring.
+// OWNS: Sidebar component interaction coverage for rename, settings, and reorder actions.
+// DOCS: agent_chat/plan_web_manager_settings_cog_2026-04-08.md
 
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
@@ -138,6 +138,30 @@ describe('Sidebar', () => {
 
     expect(wrapper.find('[title="Expand sidebar"]').exists()).toBe(true)
     expect(wrapper.find('[title="Create new session"]').exists()).toBe(true)
+  })
+
+  it('opens the settings modal from the header cog', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(Sidebar, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    await flushPromises()
+    await wrapper.find('[title="Open settings"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('Manager appearance')
+    expect(document.body.textContent).toContain('Manager theme preset')
+    expect(document.body.textContent).toContain('Terminal theme preset')
   })
 
   it('restores the sidebar width from localStorage', async () => {

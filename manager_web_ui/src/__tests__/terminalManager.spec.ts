@@ -72,7 +72,7 @@ vi.mock('@xterm/addon-webgl', () => ({
 
 vi.mock('@/lib/daemonApi', () => ({
   resizeSession: mocks.resizeSession,
-  getSettings: vi.fn().mockResolvedValue({ ui: { themePreference: 'system' }, terminal: {} }),
+  getSettings: vi.fn().mockResolvedValue({ ui: { managerTheme: 'amoled' }, terminal: {} }),
   updateSettings: vi.fn(),
 }))
 
@@ -85,7 +85,6 @@ vi.mock('@/lib/terminalRenderer', () => ({
 
 vi.mock('@/lib/themes', () => ({
   DEFAULT_TERMINAL_DEFAULTS: {
-    theme: 'dark',
     cols: 120,
     rows: 30,
     scrollback: 5000,
@@ -94,7 +93,10 @@ vi.mock('@/lib/themes', () => ({
     lineHeight: 1.05,
     cursorBlink: true,
   },
-  getTerminalTheme: vi.fn(() => ({ background: '#000' })),
+}))
+
+vi.mock('@/lib/themePresets', () => ({
+  getTerminalThemePreset: vi.fn(() => ({ background: '#000' })),
 }))
 
 import { useTerminalManager } from '../stores/terminalManager'

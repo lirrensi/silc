@@ -175,7 +175,12 @@ button:disabled {
 
 .icon-button {
   width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
   padding: 0;
+  flex: none;
+  justify-content: center;
+  align-items: center;
 }
 
 .toolbar-label {

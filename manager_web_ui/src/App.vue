@@ -31,14 +31,6 @@ watch(
   },
 )
 
-watch(
-  () => ui.resolvedTheme,
-  (theme) => {
-    manager.applyTheme(theme)
-  },
-  { immediate: true },
-)
-
 onMounted(() => {
   startDaemonEvents()
 })

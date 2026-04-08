@@ -1,9 +1,16 @@
+"""Persistence and daemon settings normalization tests."""
+
+# FILE: tests/test_persistence.py
+# PURPOSE: Verify persistence helpers and daemon settings normalization round-trips.
+# OWNS: Log rotation, session artifact cleanup, settings read/write, and merge helpers.
+# DOCS: agent_chat/plan_theme_preset_allowlist_sync_2026-04-08.md
+
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from silc.daemon.settings import build_path_update, deep_merge_settings
+from silc.daemon.settings import DaemonSettings, build_path_update, deep_merge_settings
 from silc.utils import persistence
 
 
@@ -114,6 +121,55 @@ def test_settings_json_round_trip(
 
     assert settings_file.exists()
     assert persistence.read_settings_json() == payload
+
+
+@pytest.mark.parametrize(
+    ("preset", "legacy_mode"),
+    [
+        ("github", "light"),
+        ("vercel", "light"),
+        ("solarized", "light"),
+        ("oc-2", "dark"),
+        ("amoled", "dark"),
+        ("dracula", "dark"),
+        ("nord", "dark"),
+        ("gruvbox", "dark"),
+        ("catppuccin", "dark"),
+        ("tokyo-night", "dark"),
+        ("rose-pine", "dark"),
+        ("one-dark", "dark"),
+        ("monokai", "dark"),
+        ("everforest", "dark"),
+    ],
+)
+def test_daemon_settings_preserve_catalog_presets(
+    preset: str, legacy_mode: str
+) -> None:
+    loaded = DaemonSettings.load(
+        {
+            "ui": {"managerTheme": preset},
+            "terminal": {"themePreset": preset},
+        }
+    ).to_dict()
+
+    assert loaded["ui"]["managerTheme"] == preset
+    assert loaded["ui"]["themePreference"] == legacy_mode
+    assert loaded["terminal"]["themePreset"] == preset
+    assert loaded["terminal"]["theme"] == legacy_mode
+
+
+def test_legacy_theme_aliases_normalize_to_canonical_modes() -> None:
+    loaded = DaemonSettings.load(
+        {
+            "ui": {"themePreference": "light"},
+            "terminal": {"theme": "dark"},
+        }
+    ).to_dict()
+
+    assert loaded["ui"]["managerTheme"] == "github"
+    assert loaded["ui"]["themePreference"] == "light"
+    assert loaded["terminal"]["themePreset"] == "amoled"
+    assert loaded["terminal"]["theme"] == "dark"
 
 
 def test_settings_helpers_deep_merge_nested_values() -> None:

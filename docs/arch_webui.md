@@ -219,11 +219,12 @@ setWs(port, ws | null): void
 
 ### UI Preferences Store
 
-Shared app settings for chrome and terminal defaults.
+Shared app settings for chrome and terminal presets/defaults.
 
 **State:**
 ```typescript
-themePreference: 'light' | 'dark' | 'system'
+managerTheme: 'github' | 'amoled' | 'dracula' | 'nord' | 'gruvbox' | 'catppuccin'
+terminalThemePreset: 'github' | 'amoled' | 'dracula' | 'nord' | 'gruvbox' | 'catppuccin'
 resolvedTheme: 'light' | 'dark'
 homeGridDensity: '2x2' | '3x3' | '4x4'
 isSidebarCollapsed: boolean
@@ -233,7 +234,7 @@ sidebarWidth: number
 **Behavior:**
 - Hydrates from daemon-owned settings when available.
 - Falls back to cached browser state and built-in defaults when the daemon cannot be reached.
-- Applies the manager theme to the document and provides the resolved xterm theme to terminal instances.
+- Applies the manager theme preset to the document and provides the resolved xterm theme preset to terminal instances.
 - Treats daemon settings as the source of truth for shared preferences.
 
 ---

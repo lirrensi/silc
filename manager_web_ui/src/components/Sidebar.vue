@@ -1,8 +1,8 @@
 <!-- FILE: manager_web_ui/src/components/Sidebar.vue -->
-<!-- PURPOSE: Render the manager sidebar, session creation controls, and session rename/reorder actions. -->
-<!-- OWNS: Sidebar layout, session creation modal, live session list controls, and share/defaults UI. -->
+<!-- PURPOSE: Render the manager sidebar, session creation controls, settings access, and session rename/reorder actions. -->
+<!-- OWNS: Sidebar layout, session creation modal, settings modal trigger, live session list controls, and share/defaults UI. -->
 <!-- EXPORTS: SidebarPanel - manager sidebar component. -->
-<!-- DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md, agent_chat/plan_manager_qol_2026-04-05.md -->
+<!-- DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md, agent_chat/plan_manager_qol_2026-04-05.md, agent_chat/plan_web_manager_settings_polish_2026-04-08.md -->
 
 <script setup lang="ts">
 
@@ -14,9 +14,11 @@ import QRCode from 'qrcode'
 import { useRoute, useRouter } from 'vue-router'
 import packageJson from '../../package.json'
 import SidebarSessionRow from '@/components/SidebarSessionRow.vue'
+import ManagerSettingsModal from '@/components/ManagerSettingsModal.vue'
 import { createSession, getDefaults, listSessions, renameSession, reorderSessions } from '@/lib/daemonApi'
 import { useTerminalManager } from '@/stores/terminalManager'
 import { useUiStore } from '@/stores/ui'
+import type { ThemePresetName } from '@/lib/themePresets'
 import type { DaemonShellOption } from '@/lib/daemonApi'
 import type { Session } from '@/types/session'
 
@@ -54,6 +56,14 @@ const shareQrCode = ref('')
 const showShareDetails = ref(false)
 const isCreatingSession = ref(false)
 const createError = ref('')
+const showSettingsModal = ref(false)
+const settingsSaveState = ref<'idle' | 'saving' | 'success' | 'failure'>('idle')
+const settingsSaveError = ref('')
+const settingsPreviewSnapshot = ref({
+  managerThemePreset: ui.managerThemePreset,
+  terminalThemePreset: ui.terminalThemePreset,
+})
+let settingsSaveCloseTimer: number | null = null
 const builtVersion = `v${packageJson.version}`
 
 function selectSession(port: number): void {
@@ -138,6 +148,74 @@ function openHome(): void {
   ui.closeMobileNav()
 }
 
+function openSettingsModal(): void {
+  if (settingsSaveCloseTimer !== null) {
+    window.clearTimeout(settingsSaveCloseTimer)
+    settingsSaveCloseTimer = null
+  }
+  settingsPreviewSnapshot.value = {
+    managerThemePreset: ui.managerThemePreset,
+    terminalThemePreset: ui.terminalThemePreset,
+  }
+  settingsSaveState.value = 'idle'
+  settingsSaveError.value = ''
+  showSettingsModal.value = true
+  ui.closeMobileNav()
+}
+
+function closeSettingsModal(): void {
+  if (settingsSaveCloseTimer !== null) {
+    window.clearTimeout(settingsSaveCloseTimer)
+    settingsSaveCloseTimer = null
+  }
+  ui.previewAppearanceSettings(settingsPreviewSnapshot.value)
+  settingsSaveState.value = 'idle'
+  settingsSaveError.value = ''
+  showSettingsModal.value = false
+}
+
+function handlePreviewAppearanceSettings(payload: {
+  managerThemePreset?: ThemePresetName
+  terminalThemePreset?: ThemePresetName
+}): void {
+  ui.previewAppearanceSettings(payload)
+}
+
+async function handleSaveAppearanceSettings(payload: {
+  managerThemePreset: ThemePresetName
+  terminalThemePreset: ThemePresetName
+  fontSize: number
+  lineHeight: number
+}): Promise<void> {
+  if (settingsSaveState.value === 'saving') {
+    return
+  }
+
+  if (settingsSaveCloseTimer !== null) {
+    window.clearTimeout(settingsSaveCloseTimer)
+    settingsSaveCloseTimer = null
+  }
+
+  settingsSaveState.value = 'saving'
+  settingsSaveError.value = ''
+
+  try {
+    await ui.setAppearanceSettings(payload)
+    settingsPreviewSnapshot.value = {
+      managerThemePreset: payload.managerThemePreset,
+      terminalThemePreset: payload.terminalThemePreset,
+    }
+    settingsSaveState.value = 'success'
+    settingsSaveCloseTimer = window.setTimeout(() => {
+      settingsSaveCloseTimer = null
+      closeSettingsModal()
+    }, 250)
+  } catch (err) {
+    settingsSaveState.value = 'failure'
+    settingsSaveError.value = err instanceof Error ? err.message : 'Failed to save settings'
+  }
+}
+
 function toggleShareDetails(): void {
   showShareDetails.value = !showShareDetails.value
 }
@@ -209,6 +287,10 @@ function stopResize(): void {
 onUnmounted(() => {
   document.removeEventListener('mousemove', handleResize)
   document.removeEventListener('mouseup', stopResize)
+  if (settingsSaveCloseTimer !== null) {
+    window.clearTimeout(settingsSaveCloseTimer)
+    settingsSaveCloseTimer = null
+  }
 })
 
 async function fetchSessions(): Promise<void> {
@@ -303,6 +385,32 @@ watch(
             <span class="ml-2 normal-case tracking-normal text-[var(--color-text-secondary)]">{{ sessions.length }}</span>
           </p>
         </div>
+
+        <button
+          @click="openSettingsModal"
+          class="bar-button icon-button bar-button-tight border border-[var(--color-border)] bg-[var(--color-bg-secondary)]"
+          title="Open settings"
+          aria-label="Open settings"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" class="toolbar-icon" aria-hidden="true">
+            <path d="M6.25 2.5h3.5l.35 1.45a4.9 4.9 0 0 1 1.1.45l1.34-.75 2 2-1.01 1.27c.16.35.29.72.38 1.1L15.5 8l-.1 2-1.45.35a4.9 4.9 0 0 1-.45 1.1l.75 1.34-2 2-1.27-1.01a5.7 5.7 0 0 1-1.1.38L9.75 15.5h-3.5l-.35-1.45a4.9 4.9 0 0 1-1.1-.45l-1.34.75-2-2 1.01-1.27a5.7 5.7 0 0 1-.38-1.1L.5 10l.1-2 1.45-.35a4.9 4.9 0 0 1 .45-1.1L1.75 5.2l2-2 1.27 1.01a5.7 5.7 0 0 1 1.1-.38L6.25 2.5Z" />
+            <circle cx="8" cy="8" r="2.1" />
+          </svg>
+        </button>
+      </div>
+
+      <div v-else class="flex items-center justify-center gap-2 border-t border-[var(--color-border)] px-1 py-2">
+        <button
+          @click="openSettingsModal"
+          class="bar-button icon-button border border-[var(--color-border)] bg-[var(--color-bg-secondary)]"
+          title="Open settings"
+          aria-label="Open settings"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" class="toolbar-icon" aria-hidden="true">
+            <path d="M6.25 2.5h3.5l.35 1.45a4.9 4.9 0 0 1 1.1.45l1.34-.75 2 2-1.01 1.27c.16.35.29.72.38 1.1L15.5 8l-.1 2-1.45.35a4.9 4.9 0 0 1-.45 1.1l.75 1.34-2 2-1.27-1.01a5.7 5.7 0 0 1-1.1.38L9.75 15.5h-3.5l-.35-1.45a4.9 4.9 0 0 1-1.1-.45l-1.34.75-2-2 1.01-1.27a5.7 5.7 0 0 1-.38-1.1L.5 10l.1-2 1.45-.35a4.9 4.9 0 0 1 .45-1.1L1.75 5.2l2-2 1.27 1.01a5.7 5.7 0 0 1 1.1-.38L6.25 2.5Z" />
+            <circle cx="8" cy="8" r="2.1" />
+          </svg>
+        </button>
       </div>
 
       <div :class="ui.isSidebarCollapsed ? 'flex flex-col' : 'grid h-9 grid-cols-5 border-t border-[var(--color-border)]'">
@@ -539,4 +647,17 @@ watch(
         </div>
       </div>
     </Teleport>
+
+    <ManagerSettingsModal
+      :open="showSettingsModal"
+      :manager-theme-preset="ui.managerThemePreset"
+      :terminal-theme-preset="ui.terminalThemePreset"
+      :font-size="ui.terminalDefaults.fontSize"
+      :line-height="ui.terminalDefaults.lineHeight"
+      :save-state="settingsSaveState"
+      :save-error="settingsSaveError"
+      @close="closeSettingsModal"
+      @preview="handlePreviewAppearanceSettings"
+      @save="handleSaveAppearanceSettings"
+    />
 </template>

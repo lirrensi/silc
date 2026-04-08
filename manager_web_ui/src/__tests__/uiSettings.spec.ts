@@ -1,7 +1,7 @@
 // FILE: manager_web_ui/src/__tests__/uiSettings.spec.ts
-// PURPOSE: Verify daemon settings hydration, browser fallback, and theme write-through behavior.
+// PURPOSE: Verify daemon settings hydration, browser fallback, and appearance write-through behavior.
 // OWNS: UI store settings loading and local fallback coverage.
-// DOCS: agent_chat/plan_daemon_settings_store_2026-04-08.md
+// DOCS: agent_chat/plan_web_manager_settings_polish_2026-04-08.md
 
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -38,18 +38,17 @@ describe('useUiStore daemon settings', () => {
     })
   })
 
-  it('hydrates theme and terminal defaults from the daemon', async () => {
+  it('hydrates appearance settings from canonical daemon keys', async () => {
     mockGetSettings.mockResolvedValue({
-      ui: { themePreference: 'dark' },
+      ui: { managerTheme: 'dracula' },
       terminal: {
-        theme: 'light',
+        themePreset: 'nord',
+        fontSize: 18,
+        lineHeight: 1.2,
         cols: 132,
         rows: 40,
         scrollback: 9000,
         fontFamily: 'Fira Code',
-        fontSize: 18,
-        lineHeight: 1.2,
-        cursorBlink: false,
       },
     })
 
@@ -57,44 +56,111 @@ describe('useUiStore daemon settings', () => {
     ui.initTheme()
     await ui.loadDaemonSettings()
 
-    expect(ui.themePreference).toBe('dark')
+    expect(ui.managerThemePreset).toBe('dracula')
+    expect(ui.terminalThemePreset).toBe('nord')
     expect(ui.resolvedTheme).toBe('dark')
     expect(ui.terminalDefaults).toMatchObject({
-      theme: 'light',
       cols: 132,
       rows: 40,
       scrollback: 9000,
       fontFamily: 'Fira Code',
       fontSize: 18,
       lineHeight: 1.2,
-      cursorBlink: false,
+      cursorBlink: true,
     })
   })
 
-  it('keeps browser theme fallback when the daemon is offline', async () => {
-    localStorage.setItem('silc-manager-theme', 'light')
+  it('keeps browser fallback when the daemon is offline', async () => {
+    localStorage.setItem('silc.managerThemePreset', 'catppuccin')
     mockGetSettings.mockRejectedValue(new Error('offline'))
 
     const ui = useUiStore()
     ui.initTheme()
     await ui.loadDaemonSettings()
 
-    expect(ui.resolvedTheme).toBe('light')
+    expect(ui.managerThemePreset).toBe('catppuccin')
+    expect(ui.resolvedTheme).toBe('dark')
     expect(ui.terminalDefaults).toMatchObject(DEFAULT_TERMINAL_DEFAULTS)
   })
 
-  it('writes theme updates back to the daemon', async () => {
-    mockGetSettings.mockResolvedValue({ ui: { themePreference: 'system' }, terminal: {} })
+  it('reads legacy keys and writes canonical payloads back to the daemon', async () => {
+    mockGetSettings.mockResolvedValue({
+      ui: { themePreference: 'dark' },
+      terminal: { theme: 'light', fontSize: 17, lineHeight: 1.15 },
+    })
     mockUpdateSettings.mockResolvedValue({})
 
     const ui = useUiStore()
     ui.initTheme()
-    ui.setTheme('dark')
+    await ui.loadDaemonSettings()
 
-    await Promise.resolve()
-    await Promise.resolve()
+    expect(ui.managerThemePreset).toBe('amoled')
+    expect(ui.terminalThemePreset).toBe('github')
 
-    expect(mockUpdateSettings).toHaveBeenCalledWith({ ui: { themePreference: 'dark' } })
-    expect(localStorage.getItem('silc-manager-theme')).toBe('dark')
+    await ui.setAppearanceSettings({
+      managerThemePreset: 'nord',
+      terminalThemePreset: 'gruvbox',
+      fontSize: 19,
+      lineHeight: 1.25,
+    })
+
+    expect(mockUpdateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ui: {
+          managerTheme: 'nord',
+          themePreference: 'dark',
+        },
+        terminal: expect.objectContaining({
+          themePreset: 'gruvbox',
+          theme: 'dark',
+          fontSize: 19,
+          lineHeight: 1.25,
+        }),
+      }),
+    )
+    expect(localStorage.getItem('silc.managerThemePreset')).toBe('nord')
+  })
+
+  it('previews appearance settings without persisting them', async () => {
+    mockGetSettings.mockResolvedValue({
+      ui: { managerTheme: 'github' },
+      terminal: { themePreset: 'amoled', fontSize: 16, lineHeight: 1.1 },
+    })
+
+    const ui = useUiStore()
+    ui.initTheme()
+    await ui.loadDaemonSettings()
+
+    ui.previewAppearanceSettings({ managerThemePreset: 'nord', terminalThemePreset: 'gruvbox' })
+
+    expect(ui.managerThemePreset).toBe('nord')
+    expect(ui.terminalThemePreset).toBe('gruvbox')
+    expect(mockUpdateSettings).not.toHaveBeenCalled()
+    expect(localStorage.getItem('silc.managerThemePreset')).toBe('github')
+  })
+
+  it('keeps the local appearance update when the daemon write fails', async () => {
+    mockGetSettings.mockResolvedValue({
+      ui: { managerTheme: 'github' },
+      terminal: { themePreset: 'amoled', fontSize: 16, lineHeight: 1.1 },
+    })
+    mockUpdateSettings.mockRejectedValue(new Error('daemon offline'))
+
+    const ui = useUiStore()
+    ui.initTheme()
+    await ui.loadDaemonSettings()
+
+    await expect(ui.setAppearanceSettings({
+      managerThemePreset: 'nord',
+      terminalThemePreset: 'gruvbox',
+      fontSize: 19,
+      lineHeight: 1.25,
+    })).rejects.toThrow('daemon offline')
+
+    expect(ui.managerThemePreset).toBe('nord')
+    expect(ui.terminalThemePreset).toBe('gruvbox')
+    expect(ui.terminalDefaults.fontSize).toBe(19)
+    expect(ui.terminalDefaults.lineHeight).toBe(1.25)
+    expect(localStorage.getItem('silc.managerThemePreset')).toBe('nord')
   })
 })

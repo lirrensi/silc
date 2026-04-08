@@ -10,7 +10,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { Terminal } from '@xterm/xterm'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { loadHomePreviewSnapshot } from '@/lib/homePreview'
-import { getTerminalTheme } from '@/lib/themes'
+import { getTerminalThemePreset } from '@/lib/themePresets'
 import { useUiStore } from '@/stores/ui'
 
 const props = defineProps<{
@@ -52,7 +52,7 @@ function createTerminal(): void {
     fontFamily: 'Menlo, Monaco, "Courier New", monospace',
     fontSize: 14,
     lineHeight: 1,
-    theme: getTerminalTheme(ui.resolvedTheme),
+    theme: getTerminalThemePreset(ui.terminalThemePreset),
   })
 
   fitAddon = new FitAddon()
@@ -178,10 +178,10 @@ onUnmounted(() => {
 })
 
 watch(
-  () => ui.resolvedTheme,
+  () => ui.terminalThemePreset,
   (theme) => {
     if (terminal) {
-      terminal.options.theme = getTerminalTheme(theme)
+      terminal.options.theme = getTerminalThemePreset(theme)
       fitTerminal()
     }
   },

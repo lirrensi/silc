@@ -106,18 +106,163 @@
                 const httpBaseUrl = `${httpProtocol}//${host}:${port}`;
                 const daemonBaseUrl = `${httpProtocol}//${host}:${daemonPort}`;
 
-                const LIGHT_THEME = {
-                    background: "#fffbf5",
-                    foreground: "#1f2937",
-                    cursor: "#d97706",
-                    selectionBackground: "#d9770633",
+                const TERMINAL_THEME_PRESETS = {
+                    github: {
+                        background: "#fffbf5",
+                        foreground: "#1f2937",
+                        cursor: "#d97706",
+                        selectionBackground: "#d9770633",
+                        black: "#1f2937",
+                        red: "#c2410c",
+                        green: "#3f6212",
+                        yellow: "#b45309",
+                        blue: "#1d4ed8",
+                        magenta: "#9d174d",
+                        cyan: "#0f766e",
+                        white: "#f8fafc",
+                        brightBlack: "#6b7280",
+                        brightRed: "#ea580c",
+                        brightGreen: "#65a30d",
+                        brightYellow: "#d97706",
+                        brightBlue: "#2563eb",
+                        brightMagenta: "#be185d",
+                        brightCyan: "#0d9488",
+                        brightWhite: "#ffffff",
+                    },
+                    amoled: {
+                        background: "#05070a",
+                        foreground: "#f3f4f6",
+                        cursor: "#fb923c",
+                        selectionBackground: "#fb923c33",
+                        black: "#111827",
+                        red: "#f87171",
+                        green: "#4ade80",
+                        yellow: "#fbbf24",
+                        blue: "#60a5fa",
+                        magenta: "#fb7185",
+                        cyan: "#22d3ee",
+                        white: "#f9fafb",
+                        brightBlack: "#6b7280",
+                        brightRed: "#fca5a5",
+                        brightGreen: "#86efac",
+                        brightYellow: "#fcd34d",
+                        brightBlue: "#93c5fd",
+                        brightMagenta: "#fda4af",
+                        brightCyan: "#67e8f9",
+                        brightWhite: "#ffffff",
+                    },
+                    dracula: {
+                        background: "#282a36",
+                        foreground: "#f8f8f2",
+                        cursor: "#ff79c6",
+                        selectionBackground: "#bd93f933",
+                        black: "#21222c",
+                        red: "#ff5555",
+                        green: "#50fa7b",
+                        yellow: "#f1fa8c",
+                        blue: "#6272a4",
+                        magenta: "#ff79c6",
+                        cyan: "#8be9fd",
+                        white: "#f8f8f2",
+                        brightBlack: "#6272a4",
+                        brightRed: "#ff6e6e",
+                        brightGreen: "#69ff94",
+                        brightYellow: "#ffffa5",
+                        brightBlue: "#d6acff",
+                        brightMagenta: "#ff92df",
+                        brightCyan: "#a4ffff",
+                        brightWhite: "#ffffff",
+                    },
+                    nord: {
+                        background: "#2e3440",
+                        foreground: "#eceff4",
+                        cursor: "#88c0d0",
+                        selectionBackground: "#88c0d033",
+                        black: "#3b4252",
+                        red: "#bf616a",
+                        green: "#a3be8c",
+                        yellow: "#ebcb8b",
+                        blue: "#81a1c1",
+                        magenta: "#b48ead",
+                        cyan: "#88c0d0",
+                        white: "#eceff4",
+                        brightBlack: "#4c566a",
+                        brightRed: "#d08770",
+                        brightGreen: "#8fbcbb",
+                        brightYellow: "#f0dfaf",
+                        brightBlue: "#5e81ac",
+                        brightMagenta: "#c895bf",
+                        brightCyan: "#8fbcbb",
+                        brightWhite: "#ffffff",
+                    },
+                    gruvbox: {
+                        background: "#282828",
+                        foreground: "#fbf1c7",
+                        cursor: "#fe8019",
+                        selectionBackground: "#fabd2f33",
+                        black: "#3c3836",
+                        red: "#cc241d",
+                        green: "#98971a",
+                        yellow: "#d79921",
+                        blue: "#458588",
+                        magenta: "#b16286",
+                        cyan: "#689d6a",
+                        white: "#ebdbb2",
+                        brightBlack: "#928374",
+                        brightRed: "#fb4934",
+                        brightGreen: "#b8bb26",
+                        brightYellow: "#fabd2f",
+                        brightBlue: "#83a598",
+                        brightMagenta: "#d3869b",
+                        brightCyan: "#8ec07c",
+                        brightWhite: "#fbf1c7",
+                    },
+                    catppuccin: {
+                        background: "#1e1e2e",
+                        foreground: "#cdd6f4",
+                        cursor: "#f5c2e7",
+                        selectionBackground: "#cba6f733",
+                        black: "#45475a",
+                        red: "#f38ba8",
+                        green: "#a6e3a1",
+                        yellow: "#f9e2af",
+                        blue: "#89b4fa",
+                        magenta: "#cba6f7",
+                        cyan: "#94e2d5",
+                        white: "#cdd6f4",
+                        brightBlack: "#585b70",
+                        brightRed: "#eba0ac",
+                        brightGreen: "#a6e3a1",
+                        brightYellow: "#f9e2af",
+                        brightBlue: "#b4befe",
+                        brightMagenta: "#f5c2e7",
+                        brightCyan: "#94e2d5",
+                        brightWhite: "#ffffff",
+                    },
                 };
 
-                const DARK_THEME = {
-                    background: "#1f232b",
-                    foreground: "#f3f4f6",
-                    cursor: "#f97316",
-                    selectionBackground: "#f9731644",
+                const resolveThemePreset = (settings) => {
+                    const terminal = isPlainObject(settings) && isPlainObject(settings.terminal)
+                        ? settings.terminal
+                        : null;
+
+                    if (!terminal) {
+                        return "amoled";
+                    }
+
+                    if (typeof terminal.themePreset === "string" && terminal.themePreset in TERMINAL_THEME_PRESETS) {
+                        return terminal.themePreset;
+                    }
+
+                    if (terminal.theme === "light") {
+                        return "github";
+                    }
+
+                    if (terminal.theme === "dark") {
+                        return "amoled";
+                    }
+
+                    return "amoled";
                 };
 
                 const isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -155,11 +300,8 @@
                     if (Number.isFinite(terminal.lineHeight)) options.lineHeight = terminal.lineHeight;
                     if (typeof terminal.cursorBlink === "boolean") options.cursorBlink = terminal.cursorBlink;
 
-                    if (terminal.theme === "light") {
-                        options.theme = LIGHT_THEME;
-                    } else if (terminal.theme === "dark") {
-                        options.theme = DARK_THEME;
-                    }
+                    const preset = resolveThemePreset(settings);
+                    options.theme = TERMINAL_THEME_PRESETS[preset];
 
                     return options;
                 };

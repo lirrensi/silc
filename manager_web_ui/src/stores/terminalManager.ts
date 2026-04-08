@@ -23,8 +23,9 @@ import {
   forceTerminalRedraw,
   refreshRendererAfterSwap,
 } from '@/lib/terminalRenderer'
-import { DEFAULT_TERMINAL_DEFAULTS, getTerminalTheme } from '@/lib/themes'
-import type { ResolvedTheme, TerminalDefaults } from '@/lib/themes'
+import { DEFAULT_TERMINAL_DEFAULTS } from '@/lib/themes'
+import { getTerminalThemePreset, type ThemePresetName } from '@/lib/themePresets'
+import type { TerminalDefaults } from '@/lib/themes'
 import { sendInputFrame } from '@/lib/websocketFrame'
 import type { DaemonSession, Session, SessionStatus } from '@/types/session'
 
@@ -37,12 +38,12 @@ type RendererType = Session['rendererType']
 export const useTerminalManager = defineStore('terminalManager', () => {
   const sessions = ref<Map<number, Session>>(new Map())
   const focusedPort = ref<number | null>(null)
-  const currentTheme = ref<ResolvedTheme>('dark')
+  const currentTheme = ref<ThemePresetName>('amoled')
   const terminalDefaults = ref<TerminalDefaults>({ ...DEFAULT_TERMINAL_DEFAULTS })
   const lastAppliedRendererType = new Map<number, RendererType>()
   const historyRefreshWaiters = new Map<number, Array<() => void>>()
 
-  function createManagedTerminal(theme: ResolvedTheme): {
+  function createManagedTerminal(theme: ThemePresetName): {
     terminal: Terminal
     fitAddon: FitAddon
   } {
@@ -52,7 +53,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       scrollback: terminalDefaults.value.scrollback,
       convertEol: true,
       allowProposedApi: true,
-      theme: getTerminalTheme(theme),
+      theme: getTerminalThemePreset(theme),
       fontFamily: terminalDefaults.value.fontFamily,
       fontSize: terminalDefaults.value.fontSize,
       lineHeight: terminalDefaults.value.lineHeight,
@@ -804,9 +805,9 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     sessions.value = orderedSessions
   }
 
-  function applyTheme(theme: ResolvedTheme): void {
+  function applyTheme(theme: ThemePresetName): void {
     currentTheme.value = theme
-    const terminalTheme = getTerminalTheme(theme)
+    const terminalTheme = getTerminalThemePreset(theme)
 
     for (const session of sessions.value.values()) {
       if (session.terminalDisposed || !session.terminal) {
