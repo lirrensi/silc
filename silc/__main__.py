@@ -348,6 +348,7 @@ def _render_root_help() -> str:
             "",
             "silc",
             "├── start [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]",
+            "├── start-enter [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]",
             "├── list",
             "├── manager [--share]",
             "├── desktop [--share]",
@@ -365,7 +366,6 @@ def _render_root_help() -> str:
             "│   ├── sigterm <targets...|all>",
             "│   ├── sigkill <targets...|all>",
             "│   ├── resurrect",
-            "│   └── <port|name> [run|out|in|status|wake|unload|sigint|sigterm|sigkill|clear|reset|resize|close|kill|restart|logs|tui|web|stream-file-render|stream-file-append|stream-stop|stream-status]",
             "├── daemon",
             "│   ├── shutdown",
             "│   ├── restart",
@@ -373,6 +373,29 @@ def _render_root_help() -> str:
             "│   ├── full-reset",
             "│   └── logs [--tail N]",
             "├── mcp",
+            "├── <port|name>",
+            "│   ├── run <command...> [--timeout]",
+            "│   ├── out [lines]",
+            "│   ├── in <text...>",
+            "│   ├── status",
+            "│   ├── wake",
+            "│   ├── unload",
+            "│   ├── restart",
+            "│   ├── close",
+            "│   ├── kill",
+            "│   ├── clear",
+            "│   ├── reset",
+            "│   ├── sigint",
+            "│   ├── sigterm",
+            "│   ├── sigkill",
+            "│   ├── resize <rows> <cols>",
+            "│   ├── logs [--tail]",
+            "│   ├── tui",
+            "│   ├── web",
+            "│   ├── stream-file-render",
+            "│   ├── stream-file-append",
+            "│   ├── stream-stop",
+            "│   └── stream-status",
             "└── os-integration install|uninstall",
             "",
             "Legacy aliases remain available for compatibility but are omitted here.",
@@ -534,7 +557,7 @@ class SilcCLI(click.Group):
         if self is globals().get("sessions"):
             formatter.write_text(
                 "Bulk session commands live here. Use `silc sessions list` for "
-                "the roster and `silc sessions <targets...|all> <command>` for bulk "
+                "the roster and `silc sessions <command> <targets...|all>` for bulk "
                 "control."
             )
         else:
@@ -545,7 +568,11 @@ class SilcCLI(click.Group):
 
     def format_commands(self, ctx, formatter):
         global_rows = self._command_rows(ctx, self.list_commands(ctx))
-        resource_rows = self._resource_command_rows(ctx)
+        resource_rows = (
+            []
+            if self is globals().get("sessions")
+            else self._resource_command_rows(ctx)
+        )
 
         if global_rows:
             with formatter.section("Global Commands"):
@@ -1285,6 +1312,11 @@ def restart_session(ctx: click.Context) -> None:
 @cli.command(name="list")
 def list_sessions() -> None:
     """List all active sessions."""
+    _list_sessions_helper()
+
+
+def _list_sessions_helper() -> None:
+    """Render the daemon session roster for root and sessions aliases."""
     try:
         resp = requests.get(_daemon_url("/sessions"), timeout=5)
         sessions = resp.json()
@@ -1318,7 +1350,7 @@ def list_sessions() -> None:
 def sessions_list() -> None:
     """Alias for `silc list`."""
 
-    list_sessions()
+    _list_sessions_helper()
 
 
 @sessions.command(name="wake")
@@ -1409,48 +1441,37 @@ def sessions_sigkill(targets: tuple[str, ...]) -> None:
 def sessions_resurrect() -> None:
     """Alias for `silc sessions wake all`."""
 
+    _resurrect_bulk_sessions_helper()
+
+
+def _resurrect_bulk_sessions_helper() -> None:
+    """Wake all persisted sessions through the bulk sessions surface."""
+
     _bulk_session_endpoint_action(("all",), "wake", "✨ Session on port {port} woken")
 
 
-@daemon.command(name="logs")
-@click.option("--tail", default=100, help="Number of lines to show from end")
-def daemon_logs_group(tail: int) -> None:
-    """Show daemon logs."""
+def _daemon_logs_helper(tail: int) -> None:
+    """Show daemon log tail for canonical and compatibility commands."""
 
-    daemon_logs(tail)
+    from silc.utils.persistence import DAEMON_LOG
 
+    if not DAEMON_LOG.exists():
+        click.echo("No daemon log found")
+        return
 
-@daemon.command(name="shutdown")
-def daemon_shutdown() -> None:
-    """Alias for daemon shutdown."""
-
-    shutdown()
-
-
-@daemon.command(name="restart")
-def daemon_restart() -> None:
-    """Alias for daemon restart."""
-
-    restart()
+    try:
+        content = DAEMON_LOG.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        if tail > 0:
+            lines = lines[-tail:]
+        for line in lines:
+            click.echo(line)
+    except Exception as e:
+        click.echo(f"Error reading daemon log: {e}", err=True)
 
 
-@daemon.command(name="restart-server")
-def daemon_restart_server() -> None:
-    """Alias for daemon HTTP server restart."""
-
-    restart_server()
-
-
-@daemon.command(name="full-reset")
-def daemon_full_reset() -> None:
-    """Alias for destructive daemon reset."""
-
-    full_reset()
-
-
-@cli.command()
-def shutdown() -> None:
-    """Gracefully shutdown daemon, closing live sessions but preserving records."""
+def _shutdown_daemon_helper() -> None:
+    """Gracefully stop the daemon while preserving desired session records."""
 
     try:
         # Daemon side is bounded (~30s), but give a small cushion.
@@ -1464,7 +1485,6 @@ def shutdown() -> None:
         click.echo("SILC daemon is no longer running")
         return
 
-    # If the daemon is wedged, enforce a hard stop.
     click.echo("⚠️  Shutdown timed out; forcing hard stop", err=True)
     kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
     _wait_for_daemon_stop(timeout=5)
@@ -1472,60 +1492,9 @@ def shutdown() -> None:
     click.echo("SILC daemon is no longer running")
 
 
-@cli.command()
-def killall() -> None:
-    """Remove all sessions and session artifacts, but keep the daemon running."""
+def _restart_server_helper() -> None:
+    """Restart only the daemon HTTP server process surface."""
 
-    try:
-        resp = requests.post(_daemon_url("/killall"), timeout=5)
-        resp.raise_for_status()
-        click.echo("💀 SILC sessions cleared")
-        return
-    except requests.RequestException:
-        if _daemon_port_open():
-            click.echo("Error: Failed to clear sessions", err=True)
-            sys.exit(1)
-
-    from silc.utils.persistence import remove_session_artifacts
-
-    remove_session_artifacts()
-    click.echo("💀 SILC session artifacts cleared")
-
-
-@cli.command(name="full-reset")
-def full_reset() -> None:
-    """Factory reset SILC by wiping data and stopping the daemon."""
-
-    confirmation = click.prompt(
-        "Type FULL RESET to delete all SILC data", default="", show_default=False
-    )
-    if confirmation.strip() != "FULL RESET":
-        click.echo("Aborted.")
-        return
-
-    try:
-        requests.post(_daemon_url("/killall"), timeout=5)
-    except requests.RequestException:
-        pass
-
-    try:
-        requests.post(_daemon_url("/shutdown"), timeout=35)
-    except requests.RequestException:
-        pass
-
-    if not _wait_for_daemon_stop(timeout=15):
-        kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
-        _wait_for_daemon_stop(timeout=5)
-
-    from silc.utils.persistence import purge_silc_data
-
-    purge_silc_data()
-    click.echo("💥 SILC full reset complete")
-
-
-@cli.command(name="restart-server")
-def restart_server() -> None:
-    """Restart the daemon HTTP server (sessions survive)."""
     try:
         resp = requests.post(_daemon_url("/restart-server"), timeout=5)
         resp.raise_for_status()
@@ -1534,9 +1503,9 @@ def restart_server() -> None:
         click.echo(f"❌ Failed to restart server: {e}", err=True)
 
 
-@cli.command()
-def resurrect() -> None:
-    """Restore sessions from previous state."""
+def _resurrect_helper() -> None:
+    """Restore daemon-managed sessions from persisted desired state."""
+
     try:
         resp = requests.post(_daemon_url("/resurrect"), timeout=30)
         resp.raise_for_status()
@@ -1571,19 +1540,17 @@ def resurrect() -> None:
         click.echo(f"❌ Failed to resurrect: {e}", err=True)
 
 
-@cli.command()
-def restart() -> None:
-    """Shutdown daemon and immediately restart (resurrects sessions)."""
+def _restart_daemon_helper() -> None:
+    """Gracefully restart the daemon while preserving sessions and share mode."""
+
     defaults = _get_daemon_defaults(timeout=2)
     share_mode = bool(defaults.get("share_mode"))
 
-    # Graceful shutdown
     try:
         requests.post(_daemon_url("/shutdown"), timeout=35)
     except requests.RequestException:
         pass
 
-    # Wait for daemon to stop
     if not _wait_for_daemon_stop(timeout=30):
         click.echo("⚠️  Shutdown timed out; forcing hard stop", err=True)
         kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
@@ -1591,7 +1558,6 @@ def restart() -> None:
 
     click.echo("✨ Daemon stopped, restarting...")
 
-    # Start new daemon
     _start_detached_daemon(share=share_mode)
     started = _wait_for_daemon_start_with_logs(timeout=15)
 
@@ -1601,6 +1567,124 @@ def restart() -> None:
         return
 
     click.echo("✨ Daemon restarted (sessions resurrected from previous state)")
+
+
+def _full_reset_helper() -> None:
+    """Perform the destructive factory reset flow after command dispatch."""
+
+    confirmation = click.prompt(
+        "Type FULL RESET to delete all SILC data", default="", show_default=False
+    )
+    if confirmation.strip() != "FULL RESET":
+        click.echo("Aborted.")
+        return
+
+    try:
+        requests.post(_daemon_url("/killall"), timeout=5)
+    except requests.RequestException:
+        pass
+
+    try:
+        requests.post(_daemon_url("/shutdown"), timeout=35)
+    except requests.RequestException:
+        pass
+
+    if not _wait_for_daemon_stop(timeout=15):
+        kill_daemon(port=DAEMON_PORT, force=True, timeout=2.0)
+        _wait_for_daemon_stop(timeout=5)
+
+    from silc.utils.persistence import purge_silc_data
+
+    purge_silc_data()
+    click.echo("💥 SILC full reset complete")
+
+
+@daemon.command(name="logs")
+@click.option("--tail", default=100, help="Number of lines to show from end")
+def daemon_logs_group(tail: int) -> None:
+    """Show daemon logs."""
+
+    _daemon_logs_helper(tail)
+
+
+@daemon.command(name="shutdown")
+def daemon_shutdown() -> None:
+    """Alias for daemon shutdown."""
+
+    _shutdown_daemon_helper()
+
+
+@daemon.command(name="restart")
+def daemon_restart() -> None:
+    """Alias for daemon restart."""
+
+    _restart_daemon_helper()
+
+
+@daemon.command(name="restart-server")
+def daemon_restart_server() -> None:
+    """Alias for daemon HTTP server restart."""
+
+    _restart_server_helper()
+
+
+@daemon.command(name="full-reset")
+def daemon_full_reset() -> None:
+    """Alias for destructive daemon reset."""
+
+    _full_reset_helper()
+
+
+@cli.command(hidden=True)
+def shutdown() -> None:
+    """Gracefully shutdown daemon, closing live sessions but preserving records."""
+
+    _shutdown_daemon_helper()
+
+
+@cli.command(hidden=True)
+def killall() -> None:
+    """Remove all sessions and session artifacts, but keep the daemon running."""
+
+    try:
+        resp = requests.post(_daemon_url("/killall"), timeout=5)
+        resp.raise_for_status()
+        click.echo("💀 SILC sessions cleared")
+        return
+    except requests.RequestException:
+        if _daemon_port_open():
+            click.echo("Error: Failed to clear sessions", err=True)
+            sys.exit(1)
+
+    from silc.utils.persistence import remove_session_artifacts
+
+    remove_session_artifacts()
+    click.echo("💀 SILC session artifacts cleared")
+
+
+@cli.command(name="full-reset", hidden=True)
+def full_reset() -> None:
+    """Factory reset SILC by wiping data and stopping the daemon."""
+
+    _full_reset_helper()
+
+
+@cli.command(name="restart-server", hidden=True)
+def restart_server() -> None:
+    """Restart the daemon HTTP server (sessions survive)."""
+    _restart_server_helper()
+
+
+@cli.command(hidden=True)
+def resurrect() -> None:
+    """Restore sessions from previous state."""
+    _resurrect_helper()
+
+
+@cli.command(hidden=True)
+def restart() -> None:
+    """Shutdown daemon and immediately restart (resurrects sessions)."""
+    _restart_daemon_helper()
 
 
 def _warn_share_mode() -> None:
@@ -1717,25 +1801,11 @@ def desktop_window(url: str) -> None:
     webview.start()
 
 
-@cli.command(name="logs")
+@cli.command(name="logs", hidden=True)
 @click.option("--tail", default=100, help="Number of lines to show from end")
 def daemon_logs(tail: int) -> None:
     """Show daemon logs."""
-    from silc.utils.persistence import DAEMON_LOG
-
-    if not DAEMON_LOG.exists():
-        click.echo("No daemon log found")
-        return
-
-    try:
-        content = DAEMON_LOG.read_text(encoding="utf-8")
-        lines = content.splitlines()
-        if tail > 0:
-            lines = lines[-tail:]
-        for line in lines:
-            click.echo(line)
-    except Exception as e:
-        click.echo(f"Error reading daemon log: {e}", err=True)
+    _daemon_logs_helper(tail)
 
 
 def _tui_dist_dir() -> Path | None:

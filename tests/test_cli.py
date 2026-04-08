@@ -144,8 +144,8 @@ class TestCLIHelp:
         assert "Usage: cli 20000 [OPTIONS] COMMAND [ARGS]..." in result.output
         assert "These commands act on an existing session" in result.output
 
-    def test_sessions_help_lists_bulk_and_target_commands(self):
-        """`silc sessions --help` should show bulk session commands."""
+    def test_sessions_help_is_bulk_only(self):
+        """`silc sessions --help` should show only bulk session commands."""
         from click.testing import CliRunner
 
         from silc.__main__ import cli
@@ -159,6 +159,8 @@ class TestCLIHelp:
         assert "unload" in result.output
         assert "sigint" in result.output
         assert "Bulk session commands live here" in result.output
+        assert "Session Target Commands" not in result.output
+        assert "silc sessions <port|name> <command>" not in result.output
 
     def test_daemon_help_lists_lifecycle_commands(self):
         """`silc daemon --help` should show lifecycle commands."""
@@ -1063,22 +1065,21 @@ class TestCLIMiscCommands:
     """Tests for miscellaneous CLI commands."""
 
     def test_help_shows_all_commands(self):
-        """Help should list all major commands."""
+        """Help should show the canonical tree and hide obsolete root aliases."""
         result = run_cli(["--help"])
         assert result.returncode == 0
         output = result.stdout or result.stderr
 
-        # Check for major commands
-        expected_commands = [
-            "start",
-            "list",
-            "shutdown",
-            "killall",
-            "full-reset",
-            "logs",
-        ]
+        expected_commands = ["start", "start-enter", "list", "sessions", "daemon"]
         for cmd in expected_commands:
             assert cmd in output.lower(), f"Command '{cmd}' not in help output"
+
+        assert "├── daemon" in output
+        assert "│   ├── shutdown" in output
+        assert "│   ├── restart" in output
+        assert "│   ├── restart-server" in output
+        assert "│   └── logs" in output
+        assert "killall" not in output.lower()
 
     def test_full_reset_requires_confirmation(self, monkeypatch):
         """`silc full-reset` should require typed confirmation."""
@@ -1114,7 +1115,7 @@ class TestCLIMiscCommands:
         assert "full reset complete" in result.output.lower()
 
     def test_logs_without_daemon(self):
-        """`silc logs` without daemon should not crash."""
+        """`silc daemon logs` without daemon should not crash."""
         # First ensure daemon is not running
         try:
             run_cli(["killall"], timeout=10)
@@ -1133,6 +1134,24 @@ class TestCLIMiscCommands:
             or "log" in output.lower()
             or result.returncode == 0
         )
+
+    def test_hidden_root_daemon_alias_still_functions(self, monkeypatch):
+        """Hidden root aliases should remain callable for compatibility."""
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        calls: list[str] = []
+
+        monkeypatch.setattr(
+            main_mod, "_restart_server_helper", lambda: calls.append("restart-server")
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["restart-server"])
+
+        assert result.exit_code == 0
+        assert calls == ["restart-server"]
 
     def test_mcp_command_exists(self):
         """`silc mcp --help` should show MCP command help."""
