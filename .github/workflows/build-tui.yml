@@ -13,6 +13,9 @@ jobs:
   build-app:
     name: Build packaged app on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      NUITKA_CACHE_DIR: ${{ github.workspace }}/.cache/nuitka
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
     strategy:
       fail-fast: false
       matrix:
@@ -76,6 +79,16 @@ jobs:
             ~/.cargo/git
             tui_client/target
           key: ${{ runner.os }}-cargo-${{ matrix.rust_target }}-${{ hashFiles('tui_client/Cargo.lock') }}
+
+      - name: Cache Nuitka compile artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.cache/nuitka
+            ${{ github.workspace }}/.cache/ccache
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('main.py', 'silc/**/*.py', 'scripts/build_nuitka.py') }}
+          restore-keys: |
+            ${{ runner.os }}-nuitka-
 
       - name: Build Nuitka binary
         shell: bash
