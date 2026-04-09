@@ -57,6 +57,16 @@ function summarizeCommand(commandText: string): string {
   return commandText.replace(/\s+/g, ' ').trim().slice(0, 72)
 }
 
+async function copyCommand(commandText: string | null | undefined): Promise<void> {
+  const text = commandText?.trim()
+  if (!text || !navigator.clipboard?.writeText) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch (err) {
+    console.error('Failed to copy session command:', err)
+  }
+}
+
 const commandSummary = computed(() => {
   const text = session.value?.command?.text?.trim()
   return text ? summarizeCommand(text) : ''
@@ -82,8 +92,13 @@ const commandSummary = computed(() => {
         <span class="truncate text-xs text-[var(--color-text-muted)]">{{ session?.title || '—' }}</span>
         <span
           v-if="commandSummary"
-          class="truncate text-xs text-[var(--color-text-muted)]"
-          :title="session?.command?.text || undefined"
+          class="truncate cursor-copy text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+          :title="session?.command?.text ? `Click to copy command: ${session.command.text}` : undefined"
+          role="button"
+          tabindex="0"
+          @click="copyCommand(session?.command?.text)"
+          @keydown.enter.prevent="copyCommand(session?.command?.text)"
+          @keydown.space.prevent="copyCommand(session?.command?.text)"
         >
           {{ commandSummary }}
         </span>

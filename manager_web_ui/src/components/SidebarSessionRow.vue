@@ -77,6 +77,17 @@ function handleSelect(): void {
 function handleRename(): void {
   emit('rename')
 }
+
+async function copyCommand(event: MouseEvent | KeyboardEvent): Promise<void> {
+  const text = props.session.command?.text?.trim()
+  if (!text || !navigator.clipboard?.writeText) return
+  event.stopPropagation()
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch (err) {
+    console.error('Failed to copy sidebar session command:', err)
+  }
+}
 </script>
 
 <template>
@@ -126,7 +137,16 @@ function handleRename(): void {
           <span class="shrink-0 uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{{ shellLabel }}</span>
         </div>
         <div class="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">{{ sessionTitle }}</div>
-        <div v-if="sessionCommand" class="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">
+        <div
+          v-if="sessionCommand"
+          class="mt-1 truncate cursor-copy text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+          :title="props.session.command?.text ? `Click to copy command: ${props.session.command.text}` : undefined"
+          role="button"
+          tabindex="0"
+          @click="copyCommand"
+          @keydown.enter.prevent="copyCommand"
+          @keydown.space.prevent="copyCommand"
+        >
           {{ sessionCommand }}
         </div>
       </div>

@@ -12,6 +12,8 @@ import packageJson from '../../package.json'
 import Sidebar from '../components/Sidebar.vue'
 import SidebarSessionRow from '../components/SidebarSessionRow.vue'
 
+const mockClipboardWriteText = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+
 type MockSession = {
   port: number
   name: string
@@ -129,6 +131,11 @@ describe('Sidebar', () => {
         dispatchEvent: vi.fn(),
       })),
     })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: mockClipboardWriteText },
+    })
+    mockClipboardWriteText.mockClear()
   })
 
   it('renders a collapsed icon rail', async () => {
@@ -150,6 +157,19 @@ describe('Sidebar', () => {
 
     expect(wrapper.find('[title="Expand sidebar"]').exists()).toBe(true)
     expect(wrapper.find('[title="Create new session"]').exists()).toBe(true)
+  })
+
+  it('copies a session command from the sidebar row without selecting it', async () => {
+    const wrapper = mount(SidebarSessionRow, {
+      props: {
+        session: mockTerminalManager.sessionList[0] as any,
+      },
+    })
+
+    await wrapper.get('[role="button"][title^="Click to copy command:"]').trigger('click')
+
+    expect(mockClipboardWriteText).toHaveBeenCalledWith('echo alpha')
+    expect(wrapper.emitted('select')).toBeFalsy()
   })
 
   it('opens the settings modal from the header cog', async () => {
@@ -484,6 +504,8 @@ describe('Sidebar', () => {
 
     expect(mockTerminalManager.applySessionOrder).toHaveBeenCalledWith([1103, 1101, 1102])
     expect(reorderSessionsMock).toHaveBeenCalledWith([1103, 1101, 1102])
-    expect(mockTerminalManager.reconcileSessions.mock.calls[0][0].map((session: { port: number }) => session.port)).toEqual([1103, 1101, 1102])
+    const reconcileCalls = mockTerminalManager.reconcileSessions.mock.calls
+    const lastReconcileArg = reconcileCalls[reconcileCalls.length - 1]?.[0]
+    expect(lastReconcileArg.map((session: { port: number }) => session.port)).toEqual([1103, 1101, 1102])
   })
 })

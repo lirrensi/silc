@@ -23,6 +23,7 @@ const mockSendInterrupt = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockSendSigterm = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockSendSigkill = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockApplyMeasuredFit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockClipboardWriteText = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 
 const session = {
   status: 'idle' as SessionStatus,
@@ -146,6 +147,11 @@ describe('SessionView', () => {
         dispatchEvent: vi.fn(),
       })),
     })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: mockClipboardWriteText },
+    })
+    mockClipboardWriteText.mockClear()
   })
 
   it('does not render the Home grid selector', async () => {
@@ -260,6 +266,20 @@ describe('SessionView', () => {
     expect(text).toContain('SIGTERM')
     expect(text).toContain('SIGKILL')
     expect(text).toContain('npm run dev')
+  })
+
+  it('copies the session command from the header when clicked', async () => {
+    session.status = 'active'
+    session.ws = { readyState: WebSocket.OPEN } as WebSocket
+    session.command = { text: 'npm run dev', source: 'shell', start_ts: '2026-04-09T00:00:00Z' }
+
+    const { wrapper } = await mountView()
+    const command = wrapper.findAll('[role="button"]').find((node) => node.text() === 'npm run dev')
+
+    expect(command).toBeTruthy()
+    await command?.trigger('click')
+
+    expect(mockClipboardWriteText).toHaveBeenCalledWith('npm run dev')
   })
 
   it('invokes the new single-session command helpers', async () => {

@@ -28,6 +28,17 @@ function liveCommand(): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, 48)
 }
 
+async function copyCommand(event: MouseEvent | KeyboardEvent): Promise<void> {
+  const text = session.value?.command?.text?.trim()
+  if (!text || !navigator.clipboard?.writeText) return
+  event.stopPropagation()
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch (err) {
+    console.error('Failed to copy session command:', err)
+  }
+}
+
 function handleClick(): void {
   router.push(`/${props.port}`)
 }
@@ -56,7 +67,16 @@ function statusColor(status: string): string {
             </div>
             <p class="mt-1 text-xs font-mono text-[var(--color-text-muted)]">:{{ port }}</p>
             <p class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">{{ liveTitle() }}</p>
-            <p v-if="liveCommand()" class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" :title="session?.command?.text || undefined">
+            <p
+              v-if="liveCommand()"
+              class="mt-0.5 truncate cursor-copy text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+              :title="session?.command?.text ? `Click to copy command: ${session.command.text}` : undefined"
+              role="button"
+              tabindex="0"
+              @click="copyCommand"
+              @keydown.enter.prevent="copyCommand"
+              @keydown.space.prevent="copyCommand"
+            >
               {{ liveCommand() }}
             </p>
           </div>
@@ -77,7 +97,16 @@ function statusColor(status: string): string {
         </div>
         <div class="absolute left-0 right-0 top-[2.5rem] z-10 px-3 text-[11px] text-[var(--color-text-secondary)]">
           <div class="truncate text-[11px] font-medium text-[var(--color-text-muted)]">{{ liveTitle() }}</div>
-          <div v-if="liveCommand()" class="truncate text-[11px] text-[var(--color-text-muted)]" :title="session?.command?.text || undefined">
+          <div
+            v-if="liveCommand()"
+            class="truncate cursor-copy text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+            :title="session?.command?.text ? `Click to copy command: ${session.command.text}` : undefined"
+            role="button"
+            tabindex="0"
+            @click="copyCommand"
+            @keydown.enter.prevent="copyCommand"
+            @keydown.space.prevent="copyCommand"
+          >
             {{ liveCommand() }}
           </div>
         </div>

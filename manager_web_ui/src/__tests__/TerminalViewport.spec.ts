@@ -104,7 +104,7 @@ describe('TerminalViewport', () => {
       force: true,
       reason: 'takeover-preconnect',
     })
-    expect(mocks.connectWebSocket).toHaveBeenCalledWith(20000, { force: true })
+    expect(mocks.connectWebSocket).toHaveBeenCalledWith(20000)
     expect(mocks.requestHistoryFrame).toHaveBeenCalledWith(session.ws)
     expect(wrapper.find('.terminal-host').classes()).toContain('terminal-host--restoring')
 

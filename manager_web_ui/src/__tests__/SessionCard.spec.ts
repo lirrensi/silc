@@ -4,9 +4,11 @@
 
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import SessionCard from '../components/SessionCard.vue'
+
+const mockClipboardWriteText = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 
 vi.mock('@/stores/terminalManager', () => ({
     useTerminalManager: () => ({
@@ -23,6 +25,14 @@ vi.mock('@/stores/terminalManager', () => ({
 }))
 
 describe('SessionCard', () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: mockClipboardWriteText },
+    })
+    mockClipboardWriteText.mockClear()
+  })
+
   it('renders dormant cards without a status label', async () => {
     const router = createRouter({
       history: createWebHashHistory(),
@@ -44,5 +54,31 @@ describe('SessionCard', () => {
     expect(wrapper.text()).not.toContain('sleeping')
     expect(wrapper.text()).toContain('npm run dev')
     expect(wrapper.find('.session-card').classes()).toContain('grayscale')
+  })
+
+  it('copies the command without triggering card navigation', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }, { path: '/:port', component: { template: '<div />' } }],
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(SessionCard, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+      props: {
+        port: 22001,
+      },
+    })
+
+    const command = wrapper.findAll('[role="button"]').find((node) => node.text() === 'npm run dev')
+    expect(command).toBeTruthy()
+    await command?.trigger('click')
+
+    expect(mockClipboardWriteText).toHaveBeenCalledWith('npm run dev')
+    expect(router.currentRoute.value.path).toBe('/')
   })
 })
