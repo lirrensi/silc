@@ -1,5 +1,15 @@
+/*
+FILE: manager_web_ui/src/assets/main.css
+PURPOSE: Define shared global styles and Tailwind source discovery for manager and standalone session web builds.
+OWNS: Shared CSS variables, global element styles, reusable utility-adjacent classes, Tailwind source hints
+EXPORTS: Global stylesheet for Vite entrypoints
+DOCS: agent_chat/plan_session_web_tailwind_sources_2026-04-09.md
+*/
 @import "tailwindcss";
 @import "@xterm/xterm/css/xterm.css";
+@source "../**/*.{vue,ts,js,tsx,jsx}";
+@source "../../index.html";
+@source "../../web/index.html";
 
 :root {
   --font-ui: "Avenir Next", "Segoe UI", sans-serif;
