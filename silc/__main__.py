@@ -914,8 +914,8 @@ def _start_detached_daemon(*, share: bool = False) -> None:
     _spawn_detached_process(cmd, "daemon_stderr.log")
 
 
-def _launch_desktop_webview(manager_url: str) -> None:
-    """Open the manager UI in a detached native window."""
+def _launch_webview_window(url: str, title: str) -> None:
+    """Open a URL in a detached native webview window."""
 
     try:
         import webview  # noqa: F401
@@ -924,8 +924,43 @@ def _launch_desktop_webview(manager_url: str) -> None:
             "pywebview is required for the desktop command. Install pywebview and try again."
         ) from exc
 
-    cmd = _silc_subcommand_command("desktop-window", "--url", manager_url)
+    webview.create_window(title, url)
+    webview.start()
+
+
+def _launch_desktop_webview(url: str, title: str) -> None:
+    """Open a URL in a detached native window."""
+
+    try:
+        import webview  # noqa: F401
+    except ImportError as exc:
+        raise click.ClickException(
+            "pywebview is required for the desktop command. Install pywebview and try again."
+        ) from exc
+
+    cmd = _silc_subcommand_command("desktop-window", "--url", url, "--title", title)
     _spawn_detached_process(cmd, "desktop_stderr.log")
+
+
+def _session_web_url(port: int) -> str | None:
+    """Build the local session web URL for a warm session."""
+
+    if not _ensure_warm_session(port):
+        return None
+
+    token = _fetch_session_token(port)
+    query = f"?{urlencode({'token': token})}" if token else ""
+    return f"http://127.0.0.1:{port}/web{query}"
+
+
+def _open_session_webview(port: int) -> None:
+    """Open a session web surface in a detached native window."""
+
+    web_url = _session_web_url(port)
+    if not web_url:
+        return
+
+    _launch_desktop_webview(web_url, f"SILC Session {port}")
 
 
 def _ensure_manager_ready(share: bool) -> tuple[str, dict[str, object]] | None:
@@ -1716,7 +1751,7 @@ def desktop(share: bool) -> None:
         share_url = defaults.get("manager_url") if defaults else None
         if isinstance(share_url, str) and share_url:
             click.echo(f"📱 Scan/share this LAN URL: {share_url}")
-    _launch_desktop_webview(manager_url)
+    _launch_desktop_webview(manager_url, "SILC Manager")
     click.echo(f"✨ Opening desktop manager at {manager_url}")
 
 
@@ -1759,18 +1794,11 @@ def uninstall() -> None:
 
 @cli.command(name="desktop-window", hidden=True)
 @click.option("--url", required=True, type=str)
-def desktop_window(url: str) -> None:
-    """Internal: launch the manager UI in a native window."""
+@click.option("--title", default="SILC Manager", type=str)
+def desktop_window(url: str, title: str) -> None:
+    """Internal: launch a web UI in a native window."""
 
-    try:
-        import webview
-    except ImportError as exc:
-        raise click.ClickException(
-            "pywebview is required for the desktop window. Install pywebview and try again."
-        ) from exc
-
-    webview.create_window("SILC Manager", url)
-    webview.start()
+    _launch_webview_window(url, title)
 
 
 @cli.command(name="logs", hidden=True)
@@ -1866,14 +1894,21 @@ def tui(ctx: click.Context) -> None:
 def web(ctx: click.Context) -> None:
     """Open the web UI in a browser."""
     port = ctx.parent.params["port"] if ctx.parent else 0
-    if not _ensure_warm_session(port):
+    web_url = _session_web_url(port)
+    if not web_url:
         return
-    token = _fetch_session_token(port)
-    query = f"?{urlencode({'token': token})}" if token else ""
-    web_url = f"http://127.0.0.1:{port}/web{query}"
     webbrowser.open_new_tab(web_url)
     click.echo(f"✨ Opening web UI at {web_url}")
     click.echo(web_url)
+
+
+@cli.port_subcommands.command()
+@click.pass_context
+def desktop(ctx: click.Context) -> None:
+    """Open the web UI in a detached native window."""
+
+    port = ctx.parent.params["port"] if ctx.parent else 0
+    _open_session_webview(port)
 
 
 @cli.port_subcommands.command(name="logs")

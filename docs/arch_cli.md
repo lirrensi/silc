@@ -74,6 +74,7 @@ silc
     ├── logs [--tail]
     ├── tui
     ├── web
+    ├── desktop
     ├── stream-file-render
     ├── stream-file-append
     ├── stream-stop
@@ -123,6 +124,8 @@ Notes:
 
 - `silc manager` opens the manager UI in a browser tab.
 - `silc desktop` opens the same UI in a detached native webview window.
+- `silc <port|name> web` opens the per-session web UI in a browser tab.
+- `silc <port|name> desktop` opens the same per-session UI in a detached native webview window.
 - `--share` restarts or starts the daemon in LAN share mode if needed.
 
 ## Daemon Control

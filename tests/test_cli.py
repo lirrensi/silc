@@ -143,6 +143,7 @@ class TestCLIHelp:
         assert result.exit_code == 0
         assert "Usage: cli 20000 [OPTIONS] COMMAND [ARGS]..." in result.output
         assert "These commands act on an existing session" in result.output
+        assert "desktop" in result.output
 
     def test_sessions_help_is_bulk_only(self):
         """`silc sessions --help` should show only bulk session commands."""
@@ -268,7 +269,7 @@ class TestDesktopLauncher:
         monkeypatch.setattr(
             main_mod,
             "_launch_desktop_webview",
-            lambda url: launched.update({"url": url}),
+            lambda url, title: launched.update({"url": url, "title": title}),
         )
 
         runner = CliRunner()
@@ -276,7 +277,31 @@ class TestDesktopLauncher:
 
         assert result.exit_code == 0
         assert launched["url"] == "http://127.0.0.1:19999/"
+        assert launched["title"] == "SILC Manager"
         assert "desktop manager" in (result.output or "").lower()
+
+    def test_session_desktop_command_spawns_session_webview(self, monkeypatch):
+        """`silc <port> desktop` should launch the per-session webview."""
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        launched: dict[str, object] = {}
+
+        monkeypatch.setattr(main_mod, "_ensure_warm_session", lambda port: True)
+        monkeypatch.setattr(main_mod, "_fetch_session_token", lambda port: "abc123")
+        monkeypatch.setattr(
+            main_mod,
+            "_launch_desktop_webview",
+            lambda url, title: launched.update({"url": url, "title": title}),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["20000", "desktop"])
+
+        assert result.exit_code == 0
+        assert launched["url"] == "http://127.0.0.1:20000/web?token=abc123"
+        assert launched["title"] == "SILC Session 20000"
 
     def test_desktop_window_launches_webview(self, monkeypatch):
         """The hidden desktop helper should open a pywebview window."""

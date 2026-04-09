@@ -208,6 +208,7 @@ You can identify a session by its **port number** (e.g., `20000`) or by its **na
 | `silc <port-or-name> logs [--tail N]` | Show session logs |
 | `silc <port-or-name> tui` | Launch native TUI client |
 | `silc <port-or-name> web` | Open web UI in browser |
+| `silc <port-or-name> desktop` | Open web UI in a native desktop window |
 
 ### Bulk Session Control
 

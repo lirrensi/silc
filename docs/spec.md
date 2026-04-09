@@ -198,6 +198,8 @@ Dormant sessions do not expose a live websocket endpoint.
 - `silc start` and `silc start-enter` default session cwd to the CLI process current working directory when `--cwd` is omitted.
 - `silc manager` opens the manager UI in a browser.
 - `silc desktop` opens the manager UI in a native webview.
+- `silc <port|name> web` opens the per-session web UI in a browser.
+- `silc <port|name> desktop` opens the per-session web UI in a native webview.
 - `silc settings get` reads the daemon-managed shared settings.
 - `silc settings set <path> <value>` merges a single setting path into the daemon-managed shared settings.
 - `silc sessions list` lists the current sessions; `silc list` remains a convenience alias.
