@@ -32,6 +32,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 - **HTTP API** — Full REST API for all shell operations
 - **WebSocket Streaming** — Real-time terminal output
 - **Native TUI** — Terminal UI for interactive sessions
+- **Console picker** — Arrow-key session selector that can start a new session
 - **Web UI** — Browser-based terminal interface
 - **Cross-platform** — Windows, Linux, macOS support
 - **OS context menus** — Install Finder / Explorer / file-manager integrations
@@ -172,6 +173,7 @@ curl -H "Authorization: Bearer <your-token>" \
 | `silc start [--port <n>] [--global] [--no-detach] [--token <t>]` | Start daemon (if not running) and create a new session |
 | `silc manager` | Open session manager web UI (starts daemon if needed) |
 | `silc desktop` | Open the session manager in a native desktop window |
+| `silc pick` | Open a console picker for sessions and new-session launch |
 | `silc os-integration install` | Install OS context-menu integration |
 | `silc os-integration uninstall` | Remove OS context-menu integration |
 | `silc sessions list` | List all active sessions (`silc list` remains a convenience alias) |

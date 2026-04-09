@@ -61,6 +61,7 @@ from silc.stream.cli_commands import (
 from silc.tui.installer import InstallerError, ensure_native_tui_binary
 from silc.utils.names import derive_folder_session_name
 from silc.utils.ports import find_available_port
+from silc.utils.session_picker import run_session_picker
 from silc.utils.session_wake import wake_session_if_dormant
 
 from .utils.shell_detect import detect_shell
@@ -349,6 +350,7 @@ def _render_root_help() -> str:
             "silc",
             "├── start [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]",
             "├── start-enter [name] [--port] [--global] [--no-detach] [--token] [--shell] [--cwd]",
+            "├── pick",
             "├── list",
             "├── manager [--share]",
             "├── desktop [--share]",
@@ -886,6 +888,19 @@ def start_enter(
         cwd,
         launch_native_tui=True,
     )
+
+
+@cli.command(name="pick")
+def pick() -> None:
+    """Open the session picker and attach or create a session."""
+
+    choice = run_session_picker()
+    if choice is None:
+        return
+    if choice.kind == "session" and choice.port is not None:
+        _launch_native_tui_client(choice.port)
+        return
+    start.callback(None, None, False, False, None, None, None, launch_native_tui=True)
 
 
 def _get_daemon_python_executable() -> str:

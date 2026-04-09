@@ -4,9 +4,11 @@ This document describes the native TUI and the CLI TUI launch flow.
 
 ## Overview
 
-SILC currently has one TUI path:
+SILC currently has one runtime TUI path:
 
 1. **Native TUI** — the primary path launched by `silc tui`
+
+`silc pick` is a separate Python console selector. It does not render the runtime terminal; it only chooses an existing session or creates a new one before handing off to the native TUI.
 
 ## Scope Boundary
 

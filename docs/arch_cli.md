@@ -8,7 +8,7 @@ The CLI is a Click-based front end for:
 
 - starting or managing the daemon
 - operating on an existing session by port or name through a daemon-backed adapter or direct daemon route
-- launching the manager UI, desktop webview, TUI, and MCP server
+- launching the manager UI, desktop webview, console picker, TUI, and MCP server
 - installing OS integrations
 
 ## Scope Boundary
@@ -35,6 +35,7 @@ silc
 ├── list
 ├── manager [--share]
 ├── desktop [--share]
+├── pick
 ├── sessions
 │   ├── list
 │   ├── wake <targets...|all>
@@ -124,6 +125,7 @@ Notes:
 
 - `silc manager` opens the manager UI in a browser tab.
 - `silc desktop` opens the same UI in a detached native webview window.
+- `silc pick` opens a terminal-based session selector. The last row starts a new session in the current cwd and then opens the native TUI.
 - `silc <port|name> web` opens the per-session web UI in a browser tab.
 - `silc <port|name> desktop` opens the same per-session UI in a detached native webview window.
 - `--share` restarts or starts the daemon in LAN share mode if needed.

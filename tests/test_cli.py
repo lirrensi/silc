@@ -100,6 +100,7 @@ class TestCLIHelp:
         output = result.stdout or result.stderr
         assert result.returncode == 0
         assert "SILC command tree" in output
+        assert "pick" in output
         assert "sessions" in output
         assert "daemon" in output
         assert "sigint" in output
@@ -110,6 +111,7 @@ class TestCLIHelp:
         assert result.returncode == 0
         output = result.stdout or result.stderr
         assert "Usage:" in output
+        assert "pick" in output
         assert "sessions" in output
         assert "daemon" in output
         assert "Legacy aliases remain available" in output
@@ -1285,6 +1287,7 @@ class TestCLIStartOptions:
             "_fetch_session_status",
             lambda port, timeout=2.0: {"tui_active": True},
         )
+        monkeypatch.setattr(main_mod, "_ensure_warm_session", lambda port: True)
         monkeypatch.setattr(
             main_mod.sys, "stdin", type("_Stdin", (), {"isatty": lambda self: True})()
         )
@@ -1320,6 +1323,7 @@ class TestCLIStartOptions:
             "_fetch_session_status",
             lambda port, timeout=2.0: {"tui_active": True},
         )
+        monkeypatch.setattr(main_mod, "_ensure_warm_session", lambda port: True)
         monkeypatch.setattr(
             main_mod.sys, "stdin", type("_Stdin", (), {"isatty": lambda self: True})()
         )
