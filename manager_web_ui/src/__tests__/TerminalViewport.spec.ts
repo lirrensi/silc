@@ -114,6 +114,56 @@ describe('TerminalViewport', () => {
     expect(wrapper.find('.terminal-host').classes()).not.toContain('terminal-host--restoring')
   })
 
+  it('starts websocket connection before the renderable attach promise resolves', async () => {
+    const ordering: string[] = []
+    let resolveAttach: undefined | (() => void)
+
+    mocks.manager.attach.mockImplementationOnce(() => {
+      ordering.push('attach-start')
+      return new Promise<void>((resolve) => {
+        resolveAttach = () => {
+          ordering.push('attach-resolve')
+          resolve()
+        }
+      })
+    })
+    mocks.connectWebSocket.mockImplementationOnce(() => {
+      ordering.push('connect')
+      return session.ws as WebSocket
+    })
+
+    const wrapper = mount(TerminalViewport, {
+      global: {
+        plugins: [createPinia()],
+      },
+      props: {
+        port: 20000,
+        interactive: true,
+      },
+    })
+
+    await wrapper.vm.$nextTick()
+    await Promise.resolve()
+
+    expect(ordering).toEqual(['attach-start', 'connect'])
+    expect(mocks.manager.applyMeasuredFit).not.toHaveBeenCalled()
+
+    expect(resolveAttach).toBeTypeOf('function')
+    const finishAttach = resolveAttach
+    if (finishAttach) {
+      finishAttach()
+    }
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(ordering).toEqual(['attach-start', 'connect', 'attach-resolve'])
+    expect(mocks.manager.applyMeasuredFit).toHaveBeenCalledWith(20000, {
+      propagate: true,
+      force: true,
+      reason: 'takeover-preconnect',
+    })
+  })
+
   it('shows a dormant placeholder without connecting websockets', async () => {
     session.status = 'dormant'
     session.isRestoring = false

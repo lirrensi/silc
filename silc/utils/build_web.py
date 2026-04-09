@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the manager web UI from source.
+"""Build the manager and session web UIs from source.
 
-This script compiles the Vue.js manager UI and outputs it to static/manager/.
+This script compiles the Vue.js manager and session UIs and outputs them to static/manager/ and static/web/.
 Run this before building the Python package if you've made changes to the web UI.
 
 Automatically detects and uses whichever package manager is available:
@@ -81,14 +81,15 @@ def get_build_command(pkg_mgr: List[str]) -> List[str]:
 
 
 def build_web_ui() -> int:
-    """Build the manager web UI.
+    """Build the manager and session web UIs.
 
     Returns:
         Exit code (0 for success, 1 for failure)
     """
     root = Path(__file__).parent.parent.parent
     manager_ui_dir = root / "manager_web_ui"
-    static_dir = root / "static" / "manager"
+    manager_static_dir = root / "static" / "manager"
+    session_static_dir = root / "static" / "web"
 
     if not manager_ui_dir.exists():
         print(f"[ERROR] manager_web_ui/ not found at {manager_ui_dir}")
@@ -134,18 +135,27 @@ def build_web_ui() -> int:
         )
 
         # Verify build output
-        if not static_dir.exists():
-            print(f"[ERROR] Build succeeded but {static_dir} was not created")
+        for static_dir in (manager_static_dir, session_static_dir):
+            if not static_dir.exists():
+                print(f"[ERROR] Build succeeded but {static_dir} was not created")
+                return 1
+
+        manager_index_html = manager_static_dir / "index.html"
+        if not manager_index_html.exists():
+            print(f"[ERROR] Build succeeded but {manager_index_html} was not found")
             return 1
 
-        index_html = static_dir / "index.html"
-        if not index_html.exists():
-            print(f"[ERROR] Build succeeded but {index_html} was not found")
+        session_index_html = session_static_dir / "index.html"
+        if not session_index_html.exists():
+            print(f"[ERROR] Build succeeded but {session_index_html} was not found")
             return 1
 
         print(f"[SUCCESS] Web UI built successfully!")
-        print(f"   Output: {static_dir.relative_to(root)}")
-        print(f"   Files: {sum(1 for _ in static_dir.rglob('*') if _.is_file())} files")
+        print(f"   Manager output: {manager_static_dir.relative_to(root)}")
+        print(f"   Session output: {session_static_dir.relative_to(root)}")
+        print(
+            f"   Files: {sum(1 for _ in manager_static_dir.rglob('*') if _.is_file()) + sum(1 for _ in session_static_dir.rglob('*') if _.is_file())} files"
+        )
         return 0
 
     except subprocess.CalledProcessError as e:

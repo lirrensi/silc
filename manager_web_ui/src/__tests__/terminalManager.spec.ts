@@ -197,6 +197,68 @@ describe('terminalManager', () => {
     container.remove()
   })
 
+  it('opens the terminal host before the container becomes renderable', async () => {
+    const manager = useTerminalManager()
+    const session = manager.createSession(20002, 'session-3', 'bash')
+    const container = document.createElement('div')
+
+    Object.defineProperty(container, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        width: 0,
+        height: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    })
+    document.body.appendChild(container)
+
+    await manager.attach(20002, container, { propagate: true })
+
+    expect(session.terminal?.open).toHaveBeenCalledWith(container)
+    expect(container.children).toHaveLength(1)
+
+    await manager.applyMeasuredFit(20002, {
+      propagate: true,
+      force: true,
+      reason: 'hidden-before-render',
+    })
+
+    expect(session.terminal?.resize).not.toHaveBeenCalled()
+    expect(mocks.resizeSession).not.toHaveBeenCalledWith(20002, expect.any(Number), expect.any(Number))
+
+    Object.defineProperty(container, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        width: 800,
+        height: 600,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        left: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    })
+
+    await manager.applyMeasuredFit(20002, {
+      propagate: true,
+      force: true,
+      reason: 'visible-after-open',
+    })
+
+    expect(session.terminal?.resize).toHaveBeenCalledWith(80, 24)
+    expect(mocks.resizeSession).toHaveBeenCalledWith(20002, 24, 80)
+
+    container.remove()
+  })
+
   it('does not allocate a terminal while reconciling a dormant daemon session', () => {
     const manager = useTerminalManager()
 

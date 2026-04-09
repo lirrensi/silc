@@ -113,6 +113,122 @@ async def test_session_port_adapter_rewrites_http_to_daemon_routes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_port_adapter_keeps_public_web_path_without_redirect_and_rewrites_assets() -> (
+    None
+):
+    seen: dict[str, object] = {}
+
+    async def daemon_handler(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        header_blob = await reader.readuntil(b"\r\n\r\n")
+        request_line = header_blob.split(b"\r\n", 1)[0].decode("iso-8859-1")
+        seen["request_line"] = request_line
+
+        body = b'<!doctype html><script type="module" src="./assets/main.js"></script>'
+        writer.write(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/html; charset=utf-8\r\n"
+            + f"Content-Length: {len(body)}\r\n".encode("ascii")
+            + b"Connection: close\r\n\r\n"
+            + body
+        )
+        await writer.drain()
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+
+    daemon_server = await asyncio.start_server(daemon_handler, "127.0.0.1", 0)
+    daemon_port = daemon_server.sockets[0].getsockname()[1]
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setblocking(False)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(64)
+    adapter_port = sock.getsockname()[1]
+
+    adapter = SessionPortAdapter(
+        session_port=20480,
+        daemon_host="127.0.0.1",
+        daemon_port=daemon_port,
+    )
+    adapter_task = asyncio.create_task(adapter.serve(sockets=[sock]))
+
+    try:
+        await asyncio.sleep(0.1)
+        async with httpx.AsyncClient(follow_redirects=False) as client:
+            resp = await client.get(f"http://127.0.0.1:{adapter_port}/web")
+
+        assert resp.status_code == 200
+        assert resp.headers.get("location") is None
+        assert "/web/assets/main.js" in resp.text
+        assert "./assets/main.js" not in resp.text
+        assert seen["request_line"] == "GET /sessions/20480/web HTTP/1.1"
+    finally:
+        adapter.should_exit = True
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(adapter_task, timeout=5)
+        daemon_server.close()
+        await daemon_server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_session_port_adapter_keeps_public_web_asset_base_with_trailing_slash() -> (
+    None
+):
+    async def daemon_handler(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+
+        body = b'<!doctype html><script type="module" src="./assets/main.js"></script>'
+        writer.write(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/html; charset=utf-8\r\n"
+            + f"Content-Length: {len(body)}\r\n".encode("ascii")
+            + b"Connection: close\r\n\r\n"
+            + body
+        )
+        await writer.drain()
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+
+    daemon_server = await asyncio.start_server(daemon_handler, "127.0.0.1", 0)
+    daemon_port = daemon_server.sockets[0].getsockname()[1]
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setblocking(False)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(64)
+    adapter_port = sock.getsockname()[1]
+
+    adapter = SessionPortAdapter(
+        session_port=20480,
+        daemon_host="127.0.0.1",
+        daemon_port=daemon_port,
+    )
+    adapter_task = asyncio.create_task(adapter.serve(sockets=[sock]))
+
+    try:
+        await asyncio.sleep(0.1)
+        async with httpx.AsyncClient(follow_redirects=False) as client:
+            resp = await client.get(f"http://127.0.0.1:{adapter_port}/web/")
+
+        assert resp.status_code == 200
+        assert "/web/assets/main.js" in resp.text
+        assert "./assets/main.js" not in resp.text
+    finally:
+        adapter.should_exit = True
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(adapter_task, timeout=5)
+        daemon_server.close()
+        await daemon_server.wait_closed()
+
+
+@pytest.mark.asyncio
 async def test_session_port_adapter_forwards_websocket_frames() -> None:
     def _pick_port() -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:

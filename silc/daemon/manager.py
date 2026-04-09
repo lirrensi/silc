@@ -28,7 +28,13 @@ from typing import Dict
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1266,8 +1272,35 @@ class SilcDaemon:
                     detail=_build_logged_daemon_exception_payload(operation, exc),
                 ) from exc
 
+        @app.get("/sessions/{key}/web/assets/{asset_path:path}")
+        async def session_web_asset(key: str, asset_path: str) -> FileResponse:
+            operation = "session_web"
+            try:
+                entry, runtime = self._resolve_session_target(key, operation=operation)
+                session = runtime.session if runtime else None
+                if session is None:
+                    raise HTTPException(status_code=410, detail="Session has ended")
+
+                static_dir = (
+                    Path(__file__).parent.parent.parent / "static" / "web" / "assets"
+                )
+                file_path = static_dir / asset_path
+                if not file_path.exists():
+                    raise HTTPException(status_code=404, detail="Web asset not found")
+                _ = entry
+                return FileResponse(file_path)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_build_logged_daemon_exception_payload(operation, exc),
+                ) from exc
+
         @app.get("/sessions/{key}/web", response_class=HTMLResponse)
-        async def session_web(key: str) -> HTMLResponse:
+        @app.get("/sessions/{key}/web/", response_class=HTMLResponse)
+        @app.get("/sessions/{key}/web/{path:path}", response_class=HTMLResponse)
+        async def session_web(key: str, path: str = "") -> HTMLResponse:
             operation = "session_web"
             try:
                 entry, runtime = self._resolve_session_target(key, operation=operation)
@@ -1280,7 +1313,7 @@ class SilcDaemon:
                 if index_path.exists():
                     with open(index_path, "r", encoding="utf-8") as f:
                         return HTMLResponse(f.read())
-                _ = entry
+                _ = entry, path
                 return HTMLResponse("<h1>Web UI not found</h1>")
             except HTTPException:
                 raise

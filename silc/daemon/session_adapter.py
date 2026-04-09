@@ -28,6 +28,11 @@ def _rewrite_target(target: str, session_port: int) -> str:
     return f"{path}{query}"
 
 
+def _uses_public_web_asset_base(target: str) -> bool:
+    path, _query = _split_request_target(target)
+    return path in {"/web", "/web/"}
+
+
 def _parse_header_lines(header_blob: bytes) -> tuple[str, list[tuple[str, str]]]:
     text = header_blob.decode("iso-8859-1", errors="replace")
     lines = text.split("\r\n")
@@ -79,6 +84,10 @@ def _replace_or_append_header(
     if not replaced:
         updated.append((name, value))
     return updated
+
+
+def _rewrite_html_asset_paths(body: bytes) -> bytes:
+    return body.replace(b"./assets/", b"/web/assets/")
 
 
 @dataclass(slots=True)
@@ -186,6 +195,10 @@ class SessionPortAdapter:
             daemon_writer.write(outgoing_head)
             await daemon_writer.drain()
 
+            if not is_websocket and _uses_public_web_asset_base(target):
+                await self._forward_public_web_html(daemon_reader, client_writer)
+                return
+
             relay_tasks = [
                 asyncio.create_task(
                     self._relay_stream(client_reader, daemon_writer, close_target=True)
@@ -235,6 +248,33 @@ class SessionPortAdapter:
             if close_target:
                 with contextlib.suppress(Exception):
                     writer.close()
+
+    async def _forward_public_web_html(
+        self,
+        daemon_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+    ) -> None:
+        response_head = await daemon_reader.readuntil(b"\r\n\r\n")
+        status_line, headers = _parse_header_lines(response_head[:-4])
+        content_length = _header_value(headers, "Content-Length")
+
+        body = b""
+        if content_length is not None:
+            remaining = max(int(content_length), 0)
+            if remaining:
+                body = await daemon_reader.readexactly(remaining)
+        else:
+            body = await daemon_reader.read()
+
+        content_type = (_header_value(headers, "Content-Type") or "").lower()
+        if "text/html" in content_type:
+            body = _rewrite_html_asset_paths(body)
+            headers = _replace_or_append_header(
+                headers, "Content-Length", str(len(body))
+            )
+
+        client_writer.write(_format_headers(status_line, headers) + body)
+        await client_writer.drain()
 
     async def _write_gateway_failure(self, writer: asyncio.StreamWriter) -> None:
         body = b"Bad gateway"

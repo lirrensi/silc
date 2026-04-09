@@ -43,6 +43,13 @@ export const useTerminalManager = defineStore('terminalManager', () => {
   const lastAppliedRendererType = new Map<number, RendererType>()
   const historyRefreshWaiters = new Map<number, Array<() => void>>()
 
+  function logTerminalManager(port: number, message: string, extra?: Record<string, unknown>): void {
+    console.info('[TerminalManager]', message, {
+      port,
+      ...extra,
+    })
+  }
+
   function createManagedTerminal(theme: ThemePresetName): {
     terminal: Terminal
     fitAddon: FitAddon
@@ -374,7 +381,11 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
   }
 
-  async function openWhenRenderable(
+  function isConnectedContainer(container: HTMLElement | null): boolean {
+    return Boolean(container && container.isConnected)
+  }
+
+  async function openWhenContainerConnected(
     port: number,
     container: HTMLElement,
     options?: { propagate?: boolean },
@@ -390,6 +401,12 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
 
     session.fitPropagationEnabled = options?.propagate ?? session.fitPropagationEnabled
+    logTerminalManager(port, 'Waiting to open terminal host until container is connected', {
+      propagate: session.fitPropagationEnabled,
+      hasExistingElement: Boolean(terminal.element),
+      containerConnected: isConnectedContainer(container),
+      containerRenderable: isElementRenderable(container),
+    })
 
     session.attachEpoch += 1
     const epoch = session.attachEpoch
@@ -416,7 +433,12 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         }
 
         const currentTerminal = currentSession.terminal
-        if (currentTerminal?.element || isElementRenderable(container)) {
+        if (currentTerminal?.element || isConnectedContainer(container)) {
+          logTerminalManager(port, 'Connected attach gate satisfied', {
+            alreadyOpen: Boolean(currentTerminal?.element),
+            containerConnected: isConnectedContainer(container),
+            containerRenderable: isElementRenderable(container),
+          })
           clearPendingLayoutWork(currentSession)
           resolve()
           return
@@ -447,13 +469,27 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     currentSession.pendingOpen = false
 
     const currentTerminal = currentSession.terminal
-    if (!currentTerminal || currentTerminal.element || !isElementRenderable(container)) {
+    if (!currentTerminal || currentTerminal.element || !isConnectedContainer(container)) {
+      logTerminalManager(port, 'Attach gate resolved without opening terminal host', {
+        hasTerminal: Boolean(currentTerminal),
+        alreadyOpen: Boolean(currentTerminal?.element),
+        connected: isConnectedContainer(container),
+        renderable: isElementRenderable(container),
+      })
       return
     }
 
+    logTerminalManager(port, 'Opening terminal host as soon as connected container is available', {
+      connected: isConnectedContainer(container),
+      renderable: isElementRenderable(container),
+    })
     currentTerminal.open(container)
     setupBrowserEventHandlers(currentSession)
 
+    logTerminalManager(port, 'Terminal host open finished; scheduling render-gated fit', {
+      connected: isConnectedContainer(container),
+      renderable: isElementRenderable(container),
+    })
     await enableRenderer(currentSession)
     scheduleFit(port, {
       immediate: true,
@@ -506,10 +542,17 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     }
 
     session.fitPropagationEnabled = options?.propagate ?? true
+    logTerminalManager(port, 'Attach requested for terminal session', {
+      propagate: session.fitPropagationEnabled,
+      terminalDisposed: session.terminalDisposed,
+      hasTerminal: Boolean(session.terminal),
+      hasElement: Boolean(session.terminal?.element),
+    })
 
     if (session.terminalDisposed || !session.terminal || !session.fitAddon) {
       initializeSessionTerminal(session)
       session.isRestoring = true
+      logTerminalManager(port, 'Initialized terminal instance before renderable attach gate')
     }
 
     const terminal = session.terminal
@@ -520,7 +563,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const element = terminal.element
 
     if (!element) {
-      return openWhenRenderable(port, container, options)
+      return openWhenContainerConnected(port, container, options)
     }
 
     if (element.parentElement !== container) {
@@ -642,9 +685,32 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     const terminalElement = terminal?.element
     const container = terminalElement?.parentElement
 
-    if (!session || !terminal || !fitAddon || !terminalElement || !container || !isElementRenderable(container)) {
+    if (!session || !terminal || !fitAddon || !terminalElement || !container) {
+      logTerminalManager(port, 'Skipping measured fit because fit prerequisites are missing', {
+        reason: options?.reason ?? 'unknown',
+        hasSession: Boolean(session),
+        hasTerminal: Boolean(terminal),
+        hasFitAddon: Boolean(fitAddon),
+        hasTerminalElement: Boolean(terminalElement),
+        hasContainer: Boolean(container),
+      })
       return
     }
+
+    if (!isElementRenderable(container)) {
+      logTerminalManager(port, 'Skipping measured fit because container is not renderable yet', {
+        reason: options?.reason ?? 'unknown',
+        containerConnected: isConnectedContainer(container),
+        hasTerminalElement: Boolean(terminalElement),
+      })
+      return
+    }
+
+    logTerminalManager(port, 'Applying measured fit after terminal host open', {
+      reason: options?.reason ?? 'unknown',
+      containerConnected: isConnectedContainer(container),
+      containerRenderable: true,
+    })
 
     const geometry = proposeTerminalGeometry(terminal, fitAddon, container, {
       maxCols: MAX_COLS,

@@ -75,7 +75,7 @@ def get_build_command(cmd: List[str], manager_name: str) -> List[str]:
 
 
 class WebUIBuildHook(BuildHookInterface):
-    """Build hook that compiles the Vue.js manager UI before packaging."""
+    """Build hook that compiles the Vue.js manager and session UIs before packaging."""
 
     PLUGIN_NAME = "custom"
 
@@ -83,7 +83,8 @@ class WebUIBuildHook(BuildHookInterface):
         """Build the manager web UI before the wheel is packaged."""
         root = Path(self.root)
         manager_ui_dir = root / "manager_web_ui"
-        static_dir = root / "static" / "manager"
+        manager_static_dir = root / "static" / "manager"
+        session_static_dir = root / "static" / "web"
 
         # Skip if manager_web_ui doesn't exist (e.g., in CI for pure Python builds)
         if not manager_ui_dir.exists():
@@ -91,9 +92,14 @@ class WebUIBuildHook(BuildHookInterface):
             return
 
         # Skip if already built (for editable installs)
-        if static_dir.exists() and any(static_dir.glob("assets/*.js")):
+        if (
+            manager_static_dir.exists()
+            and any(manager_static_dir.glob("assets/*.js"))
+            and session_static_dir.exists()
+            and any(session_static_dir.glob("assets/*.js"))
+        ):
             self.app.display_info(
-                f"[INFO] Web UI already built in {static_dir.relative_to(root)}, skipping rebuild"
+                f"[INFO] Web UIs already built in {manager_static_dir.relative_to(root)} and {session_static_dir.relative_to(root)}, skipping rebuild"
             )
             return
 
@@ -134,9 +140,15 @@ class WebUIBuildHook(BuildHookInterface):
                 capture_output=False,
                 shell=use_shell,
             )
+            if not manager_static_dir.exists() or not session_static_dir.exists():
+                raise RuntimeError("Web UI build did not create both static outputs")
             self.app.display_info(
-                f"[SUCCESS] Web UI built successfully to {static_dir.relative_to(root)}"
+                "[SUCCESS] Web UI built successfully to "
+                f"{manager_static_dir.relative_to(root)} and {session_static_dir.relative_to(root)}"
             )
         except subprocess.CalledProcessError as e:
             self.app.display_error(f"Failed to build web UI: {e}")
+            sys.exit(1)
+        except Exception as e:
+            self.app.display_error(f"Failed to verify web UI build: {e}")
             sys.exit(1)

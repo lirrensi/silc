@@ -36,6 +36,14 @@ const hostClass = computed(() => {
 
 let resizeObserver: ResizeObserver | null = null
 
+function logViewport(message: string, extra?: Record<string, unknown>): void {
+  console.info('[SessionShell]', message, {
+    port: props.port,
+    interactive: props.interactive === true,
+    ...extra,
+  })
+}
+
 function scheduleViewportFit(immediate: boolean, reason: string): void {
   manager.scheduleFit(props.port, {
     immediate,
@@ -55,11 +63,19 @@ watch(
     const previousStatus = previous as SessionStatus | undefined
 
     if (nextStatus === 'dormant') {
+      logViewport('Viewport detached because session became dormant', {
+        previousStatus,
+        nextStatus,
+      })
       manager.detach(props.port)
       return
     }
 
     if (String(previousStatus) === 'dormant' && nextStatus) {
+      logViewport('Viewport reattaching after dormant session woke up', {
+        previousStatus,
+        nextStatus,
+      })
       void attachAndConnect()
       scheduleViewportFit(true, 'resurrected')
     }
@@ -67,6 +83,11 @@ watch(
 )
 
 onMounted(() => {
+  logViewport('TerminalViewport mounted', {
+    hasContainer: containerRef.value !== null,
+    existingSessionStatus: session.value?.status ?? null,
+  })
+
   if (containerRef.value) {
     resizeObserver = new ResizeObserver(() => {
       scheduleViewportFit(false, 'resize-observer')
@@ -76,21 +97,27 @@ onMounted(() => {
 
   window.addEventListener('resize', handleWindowResize)
 
-  const session = manager.getSession(props.port)
-  if (!session) {
+  const currentSession = manager.getSession(props.port)
+  if (!currentSession) {
+    logViewport('No local session found on mount; fetching daemon session list')
     void fetchAndCreateSession()
     return
   }
 
-  if (session.status === 'dormant') {
+  if (currentSession.status === 'dormant') {
+    logViewport('Mount skipped websocket attach because session is dormant')
     return
   }
 
+  logViewport('Mount attaching existing session terminal and websocket', {
+    status: currentSession.status,
+  })
   void attachAndConnect()
   scheduleViewportFit(true, 'mounted')
 })
 
 onUnmounted(() => {
+  logViewport('TerminalViewport unmounted; detaching terminal host')
   resizeObserver?.disconnect()
   resizeObserver = null
   window.removeEventListener('resize', handleWindowResize)
@@ -98,12 +125,16 @@ onUnmounted(() => {
 })
 
 watch(() => props.port, (newPort, oldPort) => {
+  logViewport('Viewport port prop changed', { newPort, oldPort })
   if (oldPort) {
     manager.detach(oldPort)
   }
 
   const currentSession = manager.getSession(newPort)
   if (currentSession?.status === 'dormant') {
+    logViewport('Port-change attach skipped because target session is dormant', {
+      newPort,
+    })
     return
   }
 
@@ -117,43 +148,80 @@ watch(() => props.port, (newPort, oldPort) => {
 
 async function fetchAndCreateSession(): Promise<void> {
   try {
+    logViewport('Fetching daemon session list for missing viewport session')
     const sessions = await listSessions()
+    logViewport('Daemon session list fetched for viewport', {
+      count: sessions.length,
+      found: sessions.some((s) => s.port === props.port),
+    })
     manager.reconcileSessions(sessions)
     const daemonSession = sessions.find((s) => s.port === props.port)
 
     if (daemonSession && !daemonSession.dormant) {
+      logViewport('Daemon session is interactive; attaching viewport', {
+        runtimeState: daemonSession.runtime_state,
+      })
       void attachAndConnect()
       scheduleViewportFit(true, 'mounted')
+      return
     }
+
+    logViewport('Viewport fetch completed without an interactive session', {
+      dormant: daemonSession?.dormant ?? null,
+    })
   } catch (err) {
     console.error('[TerminalViewport] Failed to fetch session:', err)
   }
 }
 
 async function attachAndConnect(): Promise<void> {
-  if (!containerRef.value) return
+  if (!containerRef.value) {
+    logViewport('Early return: attach skipped because container is missing')
+    return
+  }
 
   const currentSession = manager.getSession(props.port)
-  if (!currentSession) return
+  if (!currentSession) {
+    logViewport('Early return: attach skipped because local session is missing')
+    return
+  }
 
-  if (currentSession.status === 'dormant') return
+  if (currentSession.status === 'dormant') {
+    logViewport('Early return: attach skipped because session is dormant')
+    return
+  }
 
-  await manager.attach(props.port, containerRef.value, {
+  logViewport('Attaching terminal host and opening websocket', {
+    status: currentSession.status,
+    hasTerminal: currentSession.terminal !== null,
+  })
+
+  logViewport('Starting terminal attach before websocket connect', {
+    status: currentSession.status,
+  })
+  const attachPromise = manager.attach(props.port, containerRef.value, {
     propagate: props.interactive === true,
   })
 
+  logViewport('Attempting websocket connect without waiting for renderability gate')
+  const ws = connectWebSocket(props.port, { force: true })
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    logViewport('Websocket was already open while attach is still in flight; requesting history immediately')
+    requestHistoryFrame(ws)
+  }
+
+  logViewport('Waiting for terminal attach to finish after websocket connect attempt')
+  await attachPromise
+
+  logViewport('Terminal attach finished; applying measured fit behind renderability gate')
   await manager.applyMeasuredFit(props.port, {
     propagate: props.interactive === true,
     force: true,
     reason: 'takeover-preconnect',
   })
 
-  const ws = connectWebSocket(props.port, { force: true })
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    requestHistoryFrame(ws)
-  }
-
   if (props.interactive) {
+    logViewport('Setting focused terminal session after attach')
     manager.setFocused(props.port)
   }
 }
