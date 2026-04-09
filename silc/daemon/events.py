@@ -26,6 +26,21 @@ def _iso8601_z(value: object) -> str | None:
     return f"{value.isoformat()}Z"
 
 
+def _command_payload(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    text = value.get("text")
+    source = value.get("source")
+    start_ts = value.get("start_ts")
+    if (
+        not isinstance(text, str)
+        or not isinstance(source, str)
+        or not isinstance(start_ts, str)
+    ):
+        return None
+    return {"text": text, "source": source, "start_ts": start_ts}
+
+
 def encode_ws_frame(header: dict[str, object], payload: bytes = b"") -> bytes:
     """Encode a websocket frame using the shared SILC binary envelope."""
 
@@ -54,6 +69,12 @@ def serialize_session_snapshot(
     if status is not None and status.get("cwd") is not None:
         cwd = status["cwd"]
 
+    command = None
+    if status is not None and "command" in status:
+        command = _command_payload(status.get("command"))
+    elif getattr(entry, "command", None) is not None:
+        command = _command_payload(getattr(entry, "command", None))
+
     runtime_state = runtime.state.value if runtime else "dormant"
     dormant = runtime is None or runtime_state == "dormant"
 
@@ -64,6 +85,7 @@ def serialize_session_snapshot(
         "session_id": entry.session_id,
         "shell": entry.shell_type,
         "cwd": cwd,
+        "command": command,
         "title_updated_at": _iso8601_z(entry.title_updated_at),
         "idle_seconds": status.get("idle_seconds") if status is not None else None,
         "alive": bool(status and status.get("alive")),

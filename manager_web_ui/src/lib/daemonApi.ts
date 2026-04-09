@@ -5,6 +5,7 @@
 // DOCS: agent_chat/plan_daemon_manager_events_2026-04-05.md
 
 import type { ThemePresetName } from '@/lib/themePresets'
+import type { SessionCommand } from '@/types/session'
 
 function getPageProtocol(): string {
   return window.location.protocol === 'https:' ? 'https:' : 'http:'
@@ -34,6 +35,7 @@ export interface DaemonSession {
   shell: string
   cwd: string | null
   title_updated_at: string | null
+  command?: SessionCommand | null
   idle_seconds: number
   alive: boolean
   runtime_state: string | null
@@ -100,6 +102,7 @@ export interface RenameSessionResponse {
   shell: string
   cwd: string | null
   title_updated_at: string | null
+  command?: SessionCommand | null
   idle_seconds: number
   alive: boolean
   runtime_state: string | null

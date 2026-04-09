@@ -2,7 +2,7 @@
 
 # FILE: silc/utils/session_picker.py
 # PURPOSE: Build and run the prompt_toolkit session picker for `silc pick`.
-# OWNS: Session roster normalization, picker row construction, selection math, and the interactive prompt_toolkit app.
+# OWNS: Session roster normalization, picker row construction, selection math, command summaries, and the interactive prompt_toolkit app.
 # EXPORTS: SessionRow - normalized session data; PickerRow - rendered menu row; PickerChoice - picker result; fetch_session_rows - daemon roster fetch; build_picker_rows - menu rows; move_selection - index navigation; run_session_picker - public picker entrypoint; run_session_picker_app - injectable app runner.
 # DOCS: docs/spec.md, docs/arch_cli.md, docs/arch_tui.md
 
@@ -32,6 +32,7 @@ class SessionRow:
     shell: str | None
     cwd: str | None
     alive: bool
+    command: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,10 +79,22 @@ def fetch_session_rows(timeout: float = 5.0) -> tuple[list[SessionRow], str | No
                 shell=str(item.get("shell")) if item.get("shell") is not None else None,
                 cwd=str(item.get("cwd")) if item.get("cwd") is not None else None,
                 alive=bool(item.get("alive")),
+                command=_session_command_text(item.get("command")),
             )
         )
 
     return rows, None
+
+
+def _session_command_text(command: object) -> str | None:
+    if not isinstance(command, dict):
+        return None
+
+    text = command.get("text")
+    if not isinstance(text, str):
+        return None
+
+    return text
 
 
 def build_picker_rows(session_rows: Sequence[SessionRow]) -> list[PickerRow]:
@@ -101,7 +114,11 @@ def format_session_label(session: SessionRow) -> str:
     state = "alive" if session.alive else "ended"
     shell = session.shell or "?"
     cwd = _shorten_text(session.cwd or "?", 44)
-    return f"{session.name}  •  port {session.port}  •  {shell}  •  {state}  •  {cwd}"
+    command = _shorten_text(" ".join((session.command or "").split()), 28)
+    parts = [session.name, f"port {session.port}", shell, state, cwd]
+    if command:
+        parts.append(f"cmd {command}")
+    return "  •  ".join(parts)
 
 
 def move_selection(current: int, key: str, total_rows: int) -> int:

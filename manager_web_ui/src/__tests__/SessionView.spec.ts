@@ -31,6 +31,7 @@ const session = {
   name: 'demo',
   shell: 'bash',
   cwd: null as string | null,
+  command: null as { text: string; source: string; start_ts: string } | null,
   disconnectReason: null as string | null,
   terminal: { reset: vi.fn(), scrollToBottom: vi.fn() },
 }
@@ -102,6 +103,7 @@ describe('SessionView', () => {
     localStorage.clear()
     session.status = 'idle'
     session.ws = null
+    session.command = null
     mockListSessions.mockResolvedValue([
       {
         port: 1234,
@@ -111,6 +113,7 @@ describe('SessionView', () => {
         shell: 'bash',
         cwd: null,
         title_updated_at: null,
+        command: null,
         idle_seconds: 0,
         alive: true,
         runtime_state: 'running',
@@ -209,6 +212,7 @@ describe('SessionView', () => {
         shell: 'bash',
         cwd: null,
         title_updated_at: null,
+        command: null,
         idle_seconds: 0,
         alive: false,
         runtime_state: 'dormant',
@@ -224,6 +228,7 @@ describe('SessionView', () => {
         shell: 'bash',
         cwd: null,
         title_updated_at: null,
+        command: null,
         idle_seconds: 0,
         alive: true,
         runtime_state: 'running',
@@ -241,6 +246,7 @@ describe('SessionView', () => {
   it('renders the requested command labels', async () => {
     session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
+    session.command = { text: 'npm run dev', source: 'shell', start_ts: '2026-04-09T00:00:00Z' }
 
     const { wrapper } = await mountView()
     const text = wrapper.text()
@@ -253,6 +259,7 @@ describe('SessionView', () => {
     expect(text).toContain('SIGINT')
     expect(text).toContain('SIGTERM')
     expect(text).toContain('SIGKILL')
+    expect(text).toContain('npm run dev')
   })
 
   it('invokes the new single-session command helpers', async () => {

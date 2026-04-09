@@ -415,6 +415,7 @@ function handlePanelToggle(): void {
 }
 
 onMounted(() => {
+  void fetchSessions()
   void fetchDefaults()
 })
 

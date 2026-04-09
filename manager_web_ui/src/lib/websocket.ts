@@ -80,12 +80,23 @@ export function connectWebSocket(port: number, options?: { force?: boolean }): W
   }
 
   const existingWs = session.ws
-  if (existingWs && !options?.force && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) {
-    logWebSocket(port, 'Reusing existing websocket connection', {
-      readyState: existingWs.readyState,
-    })
-    bindTerminalInput(port, existingWs)
-    return existingWs
+  if (existingWs && !options?.force) {
+    if (existingWs.readyState === WebSocket.OPEN) {
+      logWebSocket(port, 'Reusing existing websocket connection', {
+        readyState: existingWs.readyState,
+      })
+      bindTerminalInput(port, existingWs)
+      return existingWs
+    }
+
+    if (existingWs.readyState === WebSocket.CONNECTING && session.status === 'connecting') {
+      logWebSocket(port, 'Reusing in-flight websocket connection for current connect attempt', {
+        readyState: existingWs.readyState,
+        sessionStatus: session.status,
+      })
+      bindTerminalInput(port, existingWs)
+      return existingWs
+    }
   }
 
   if (existingWs) {

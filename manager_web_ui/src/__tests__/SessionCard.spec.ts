@@ -9,16 +9,17 @@ import { mount } from '@vue/test-utils'
 import SessionCard from '../components/SessionCard.vue'
 
 vi.mock('@/stores/terminalManager', () => ({
-  useTerminalManager: () => ({
-    getSession: () => ({
-      port: 22001,
-      name: 'sleepy',
-      title: 'Bash',
-      shell: 'bash',
-      cwd: '/work/sleepy',
-      status: 'dormant',
+    useTerminalManager: () => ({
+      getSession: () => ({
+        port: 22001,
+        name: 'sleepy',
+        title: 'Bash',
+        shell: 'bash',
+        cwd: '/work/sleepy',
+        command: { text: 'npm run dev', source: 'shell', start_ts: '2026-04-09T00:00:00Z' },
+        status: 'dormant',
+      }),
     }),
-  }),
 }))
 
 describe('SessionCard', () => {
@@ -41,6 +42,7 @@ describe('SessionCard', () => {
     })
 
     expect(wrapper.text()).not.toContain('sleeping')
+    expect(wrapper.text()).toContain('npm run dev')
     expect(wrapper.find('.session-card').classes()).toContain('grayscale')
   })
 })

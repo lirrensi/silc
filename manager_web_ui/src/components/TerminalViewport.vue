@@ -204,7 +204,7 @@ async function attachAndConnect(): Promise<void> {
   })
 
   logViewport('Attempting websocket connect without waiting for renderability gate')
-  const ws = connectWebSocket(props.port, { force: true })
+  const ws = connectWebSocket(props.port)
   if (ws && ws.readyState === WebSocket.OPEN) {
     logViewport('Websocket was already open while attach is still in flight; requesting history immediately')
     requestHistoryFrame(ws)

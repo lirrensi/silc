@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // FILE: manager_web_ui/src/components/SessionShell.vue
 // PURPOSE: Render the shared single-session terminal shell with recovery actions and lifecycle controls.
-// OWNS: Session terminal layout, action bar, reconnect/takeover state, and session bootstrapping.
+// OWNS: Session terminal layout, action bar, reconnect/takeover state, command summary, and session bootstrapping.
 // EXPORTS: SessionShell - reusable single-session terminal surface.
 // DOCS: agent_chat/plan_web_shell_split_2026-04-09.md, agent_chat/plan_session_end_splash_2026-04-09.md
 
@@ -52,6 +52,15 @@ const {
   () => emit('exit'),
   (port) => emit('port-change', port),
 )
+
+function summarizeCommand(commandText: string): string {
+  return commandText.replace(/\s+/g, ' ').trim().slice(0, 72)
+}
+
+const commandSummary = computed(() => {
+  const text = session.value?.command?.text?.trim()
+  return text ? summarizeCommand(text) : ''
+})
 </script>
 
 <template>
@@ -71,6 +80,13 @@ const {
           {{ session.cwd }}
         </span>
         <span class="truncate text-xs text-[var(--color-text-muted)]">{{ session?.title || '—' }}</span>
+        <span
+          v-if="commandSummary"
+          class="truncate text-xs text-[var(--color-text-muted)]"
+          :title="session?.command?.text || undefined"
+        >
+          {{ commandSummary }}
+        </span>
       </div>
       <div
         class="bar-actions bar-actions-session-lifecycle shrink-0 border-l border-[var(--color-border)]"

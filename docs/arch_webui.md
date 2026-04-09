@@ -155,6 +155,7 @@ interface Session {
   name: string
   shell: string
   cwd: string | null
+  command?: { text: string; source: 'manual' | 'run'; start_ts: string } | null
   terminal: Terminal           // xterm.js instance
   fitAddon: FitAddon           // xterm fit addon
   ws: WebSocket | null         // WebSocket connection
@@ -410,6 +411,7 @@ port: number  // From route params
 - Port number (gray, monospace)
 - Shell type in brackets
 - Working directory with folder icon (truncated if needed)
+- Optional command summary after the cwd row, truncated if too long
 
 **Features:**
 - Interactive terminal with keyboard input
@@ -458,7 +460,7 @@ Session list navigation.
 - **Collapsed rail** — Desktop sidebar collapses to a thin visible icon rail instead of disappearing
 - **Micro sessions** — Collapsed session list becomes compact icon buttons with status indicators
 - **Home button** — Navigate to home view
-- **Session list** — Name, color indicator, and port number
+- **Session list** — Name, color indicator, port number, and optional command summary when available
 - **Active session highlighting** — Current session highlighted
 
 **New Session Modal:**
@@ -483,6 +485,7 @@ Preview card for a session in the grid view.
 - Scaled terminal preview (2x) with padding for live sessions only
 - Status indicator
 - Session name, port, shell
+- Optional command summary in the compact row stack when available
 - Dormant card state uses gray/desaturated styling and omits preview content
 - Click to open session view and wake if dormant
 

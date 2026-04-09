@@ -16,7 +16,14 @@ from silc.utils.session_picker import (
 
 def test_build_picker_rows_keeps_create_last():
     rows = [
-        SessionRow(name="alpha", port=20001, shell="bash", cwd="/tmp/a", alive=True),
+        SessionRow(
+            name="alpha",
+            port=20001,
+            shell="bash",
+            cwd="/tmp/a",
+            alive=True,
+            command="echo alpha",
+        ),
         SessionRow(name="beta", port=20002, shell="zsh", cwd="/tmp/b", alive=False),
     ]
 
@@ -24,6 +31,7 @@ def test_build_picker_rows_keeps_create_last():
 
     assert [row.kind for row in menu_rows] == ["session", "session", "create"]
     assert menu_rows[-1].label == "Create new session here"
+    assert "cmd echo alpha" in menu_rows[0].label
 
 
 def test_move_selection_supports_navigation():

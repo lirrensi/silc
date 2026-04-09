@@ -13,8 +13,18 @@ from silc.utils.shell_detect import ShellInfo
 @pytest.mark.parametrize(
     ("shell_type", "expected_snippets"),
     [
-        ("bash", ["bootstrap.sh", "--rcfile", "__silc_exec() {", "PROMPT_COMMAND"]),
-        ("zsh", ["precmd", "__silc_exec() {"]),
+        (
+            "bash",
+            [
+                "bootstrap.sh",
+                "--rcfile",
+                "__silc_exec() {",
+                "PROMPT_COMMAND",
+                "__silc_emit_command",
+                "cmd=",
+            ],
+        ),
+        ("zsh", ["precmd", "preexec", "__silc_emit_command", "__silc_exec() {"]),
         ("sh", ["__silc_exec() {"]),
         (
             "pwsh",
@@ -25,6 +35,9 @@ from silc.utils.shell_detect import ShellInfo
                 "function global:prompt {",
                 "function global:__silc_exec($cmd, $token) {",
                 "633;cwd=",
+                "CommandValidationHandler",
+                "ValidateAndAcceptLine",
+                "633;cmd=",
             ],
         ),
         (
@@ -36,6 +49,9 @@ from silc.utils.shell_detect import ShellInfo
                 "function global:prompt {",
                 "function global:__silc_exec($cmd, $token) {",
                 "633;cwd=",
+                "CommandValidationHandler",
+                "ValidateAndAcceptLine",
+                "633;cmd=",
             ],
         ),
         ("cmd", ["bootstrap.cmd", "doskey __silc_exec", "__silc_exec.bat", "/k"]),

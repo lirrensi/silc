@@ -8,6 +8,8 @@ import {
   bulkSendSigtermSessions,
   clearSession,
   getDaemonSessionUrl,
+  getSessionStatus,
+  listSessions,
   resizeSession,
   sendInterrupt,
   sendSigkill,
@@ -95,5 +97,53 @@ describe('daemon-routed session HTTP clients', () => {
       expect.stringContaining('/sessions/20000/snapshot'),
       expect.objectContaining({ cache: 'no-store' }),
     )
+  })
+
+  it('accepts command metadata in daemon session payloads', async () => {
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ([
+        {
+          port: 20000,
+          name: 'alpha',
+          title: 'Bash',
+          session_id: 'sess-1',
+          shell: 'bash',
+          cwd: '/work/alpha',
+          title_updated_at: null,
+          command: { text: 'npm run dev', source: 'shell', start_ts: '2026-04-09T00:00:00Z' },
+          idle_seconds: 0,
+          alive: true,
+          runtime_state: 'running',
+          dormant: false,
+        },
+      ]),
+    } as Response)
+
+    const sessions = await listSessions()
+
+    expect(sessions[0].command?.text).toBe('npm run dev')
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        port: 20000,
+        name: 'alpha',
+        title: 'Bash',
+        session_id: 'sess-1',
+        shell: 'bash',
+        cwd: '/work/alpha',
+        title_updated_at: null,
+        command: { text: 'npm run dev', source: 'shell', start_ts: '2026-04-09T00:00:00Z' },
+        idle_seconds: 0,
+        alive: true,
+        runtime_state: 'running',
+        dormant: false,
+      }),
+    } as Response)
+
+    const status = await getSessionStatus(20000)
+    expect(status.command?.text).toBe('npm run dev')
   })
 })

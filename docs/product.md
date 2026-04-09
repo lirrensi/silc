@@ -43,7 +43,7 @@ Unlike tmux, screen, or SSH, SILC provides:
 - **Named Sessions** — Docker-style names for easy session identification (e.g., `happy-fox-42`)
 - **Session Management** — Multiple concurrent sessions with dormant restore mode
 - **Output Buffering** — Configurable output history
-- **Command History** — Track executed commands
+- **Command History** — Track the last entered command for recovery context
 - **Logging** — Comprehensive session and daemon logs
 - **Stream-to-File** — Export terminal output to files
 - **Daemon-owned preferences** — Shared UI/theme/terminal settings live in the daemon, not in one browser tab

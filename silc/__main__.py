@@ -306,6 +306,27 @@ def _format_idle_seconds(value: object) -> str:
         return "?"
 
 
+def _shorten_text(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    return "..." + value[-(max_length - 3) :]
+
+
+def _format_command_text(command: object, max_length: int = 60) -> str:
+    if not isinstance(command, dict):
+        return ""
+
+    text = command.get("text")
+    if not isinstance(text, str):
+        return ""
+
+    compact = " ".join(text.split())
+    if not compact:
+        return ""
+
+    return _shorten_text(compact, max_length)
+
+
 def _get_error_detail(response: requests.Response | None) -> str:
     if response is None:
         return "unknown error"
@@ -1183,10 +1204,13 @@ def status(ctx: click.Context) -> None:
         click.echo(f"Idle: {status_info.get('idle_seconds')}s")
         waiting_for_input = status_info.get("waiting_for_input")
         last_line = status_info.get("last_line") or ""
+        command_display = _format_command_text(status_info.get("command"), 72)
         click.echo(f"Waiting for input: {waiting_for_input}")
         if last_line:
             label = "⚠️  Waiting for input" if waiting_for_input else "Last line"
             click.echo(f"{label}: {last_line}")
+        if command_display:
+            click.echo(f"Command: {command_display}")
     except requests.RequestException:
         click.echo(f"❌ Session on port {port} does not exist", err=True)
 
@@ -1358,6 +1382,7 @@ def _list_sessions_helper() -> None:
         for s in sessions:
             status_icon = "✓" if s["alive"] else "✗"
             cwd_display = s.get("cwd") or "?"
+            command_display = _format_command_text(s.get("command"), 48)
             # Truncate cwd if too long
             if len(cwd_display) > 40:
                 cwd_display = "..." + cwd_display[-37:]
@@ -1367,6 +1392,8 @@ def _list_sessions_helper() -> None:
                 f"  port: {s['port']} | shell: {s['shell']} | alive: {status_icon}"
             )
             click.echo(f"  cwd: {cwd_display}")
+            if command_display:
+                click.echo(f"  cmd: {command_display}")
             click.echo(
                 f"  idle: {_format_idle_seconds(s.get('idle_seconds'))} | session: {s['session_id']}"
             )

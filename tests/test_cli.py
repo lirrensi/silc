@@ -1186,6 +1186,141 @@ class TestCLIMiscCommands:
         # MCP is a valid command
         assert "mcp" in result.stdout.lower() or result.returncode == 0
 
+    def test_list_renders_command_summary_and_skips_missing_command(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        sessions = [
+            {
+                "port": 20001,
+                "name": "alpha",
+                "title": "Bash",
+                "session_id": "sess-1",
+                "shell": "bash",
+                "cwd": "/work/alpha",
+                "title_updated_at": None,
+                "command": {
+                    "text": "echo build",
+                    "source": "shell",
+                    "start_ts": "2026-04-09T00:00:00Z",
+                },
+                "idle_seconds": 0,
+                "alive": True,
+                "runtime_state": "running",
+                "dormant": False,
+            },
+            {
+                "port": 20002,
+                "name": "beta",
+                "title": "Bash",
+                "session_id": "sess-2",
+                "shell": "bash",
+                "cwd": "/work/beta",
+                "title_updated_at": None,
+                "command": None,
+                "idle_seconds": 0,
+                "alive": True,
+                "runtime_state": "running",
+                "dormant": False,
+            },
+        ]
+
+        monkeypatch.setattr(
+            main_mod.requests,
+            "get",
+            lambda *args, **kwargs: type(
+                "Resp",
+                (),
+                {
+                    "status_code": 200,
+                    "ok": True,
+                    "json": lambda self=None: sessions,
+                    "raise_for_status": lambda self=None: None,
+                },
+            )(),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["list"])
+
+        assert result.exit_code == 0
+        assert "cmd: echo build" in result.output
+        assert result.output.count("cmd:") == 1
+
+    def test_status_renders_optional_command(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        monkeypatch.setattr(main_mod, "_ensure_warm_session", lambda port: True)
+        monkeypatch.setattr(
+            main_mod.requests,
+            "get",
+            lambda url, timeout=5: type(
+                "Resp",
+                (),
+                {
+                    "status_code": 200,
+                    "ok": True,
+                    "json": lambda self=None: {
+                        "session_id": "sess-1",
+                        "alive": True,
+                        "idle_seconds": 12,
+                        "waiting_for_input": False,
+                        "last_line": "ready>",
+                        "command": {
+                            "text": "npm run dev",
+                            "source": "shell",
+                            "start_ts": "2026-04-09T00:00:00Z",
+                        },
+                    },
+                    "raise_for_status": lambda self=None: None,
+                },
+            )(),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["20001", "status"])
+
+        assert result.exit_code == 0
+        assert "npm run dev" in result.output
+        assert "Command:" in result.output or "cmd" in result.output.lower()
+
+    def test_status_omits_command_when_absent(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from silc import __main__ as main_mod
+
+        monkeypatch.setattr(main_mod, "_ensure_warm_session", lambda port: True)
+        monkeypatch.setattr(
+            main_mod.requests,
+            "get",
+            lambda url, timeout=5: type(
+                "Resp",
+                (),
+                {
+                    "status_code": 200,
+                    "ok": True,
+                    "json": lambda self=None: {
+                        "session_id": "sess-2",
+                        "alive": True,
+                        "idle_seconds": 4,
+                        "waiting_for_input": True,
+                        "last_line": "ready>",
+                        "command": None,
+                    },
+                    "raise_for_status": lambda self=None: None,
+                },
+            )(),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main_mod.cli, ["20002", "status"])
+
+        assert result.exit_code == 0
+        assert "Command:" not in result.output
+
 
 class TestCLIStartOptions:
     """Tests for `silc start` command options."""

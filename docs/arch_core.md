@@ -49,6 +49,7 @@ shell_info: ShellInfo
 session_id: str
 api_token: str | None
 cwd: str | None
+command: dict[str, str] | None
 title: str
 title_updated_at: datetime
 buffer: RawByteBuffer
@@ -74,8 +75,9 @@ current_run_cmd: str | None
 ## Read Loop
 
 - The read loop pulls bytes from the PTY and appends them to the ring buffer.
-- OSC title and hidden-cwd sequences are parsed from the raw stream.
+- OSC title, hidden-cwd, and hidden-command sequences are parsed from the raw stream.
 - Live title/cwd listeners are notified when those values change.
+- Live command listeners are notified when the last entered command changes.
 - Status metadata caches the latest visible line and a heuristic `waiting_for_input` flag.
 - Session output is written to the per-session log file.
 
@@ -113,6 +115,7 @@ current_run_cmd: str | None
 - `name`
 - `title`
 - `cwd`
+- `command`
 - `title_updated_at`
 - `alive`
 - `idle_seconds`
@@ -128,6 +131,7 @@ The session supports live listeners for:
 
 - title changes
 - cwd changes
+- command changes
 - raw output chunks
 
 The daemon uses these listeners to persist updates back into the registry.

@@ -1,6 +1,6 @@
 <!-- FILE: manager_web_ui/src/components/SessionCard.vue -->
 <!-- PURPOSE: Present a clickable session card shell for Home dashboard preview content. -->
-<!-- OWNS: Session card chrome, route navigation, and slot framing for Home-only cards. -->
+<!-- OWNS: Session card chrome, route navigation, command summary, and slot framing for Home-only cards. -->
 <!-- DOCS: agent_chat/plan_home_grid_frozen_previews_2026-04-04.md -->
 
 <script setup lang="ts">
@@ -20,6 +20,12 @@ const session = computed(() => manager.getSession(props.port))
 function liveTitle(): string {
   if (!session.value) return '—'
   return session.value.title || '—'
+}
+
+function liveCommand(): string {
+  const text = session.value?.command?.text?.trim()
+  if (!text) return ''
+  return text.replace(/\s+/g, ' ').trim().slice(0, 48)
 }
 
 function handleClick(): void {
@@ -50,6 +56,9 @@ function statusColor(status: string): string {
             </div>
             <p class="mt-1 text-xs font-mono text-[var(--color-text-muted)]">:{{ port }}</p>
             <p class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">{{ liveTitle() }}</p>
+            <p v-if="liveCommand()" class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" :title="session?.command?.text || undefined">
+              {{ liveCommand() }}
+            </p>
           </div>
       </div>
     </div>
@@ -68,6 +77,9 @@ function statusColor(status: string): string {
         </div>
         <div class="absolute left-0 right-0 top-[2.5rem] z-10 px-3 text-[11px] text-[var(--color-text-secondary)]">
           <div class="truncate text-[11px] font-medium text-[var(--color-text-muted)]">{{ liveTitle() }}</div>
+          <div v-if="liveCommand()" class="truncate text-[11px] text-[var(--color-text-muted)]" :title="session?.command?.text || undefined">
+            {{ liveCommand() }}
+          </div>
         </div>
 
       <div class="preview-container">

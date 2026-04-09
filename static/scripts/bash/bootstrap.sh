@@ -53,6 +53,17 @@ __silc_emit_cwd() {
   printf '\033]633;cwd=%s\033\\' "$PWD"
 }
 
+__silc_emit_command() {
+  local _silc_command
+  _silc_command="$(builtin fc -ln -1 2>/dev/null)"
+  case "$_silc_command" in
+    ''|__silc_* )
+      return
+      ;;
+  esac
+  printf '\033]633;cmd=%s\033\\' "$_silc_command"
+}
+
 __silc_exec() {
   printf '__SILC_BEGIN_%s__\n' "$2"
   eval "$1"
@@ -60,9 +71,9 @@ __silc_exec() {
 }
 
 if [ -n "${PROMPT_COMMAND-}" ]; then
-  PROMPT_COMMAND="__silc_emit_cwd; ${PROMPT_COMMAND}"
+  PROMPT_COMMAND="__silc_emit_command; __silc_emit_cwd; ${PROMPT_COMMAND}"
 else
-  PROMPT_COMMAND="__silc_emit_cwd"
+  PROMPT_COMMAND="__silc_emit_command; __silc_emit_cwd"
 fi
 
 __silc_emit_cwd

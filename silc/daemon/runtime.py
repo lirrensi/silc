@@ -2,7 +2,7 @@
 
 # FILE: silc/daemon/runtime.py
 # PURPOSE: Track mutable daemon runtime state for a desired session record without conflating it with persistence.
-# OWNS: Session runtime state, generation tracking, backoff timing, and logging/status formatting helpers.
+# OWNS: Session runtime state, generation tracking, live command metadata, backoff timing, and logging/status formatting helpers.
 # EXPORTS: SessionState (runtime lifecycle labels), SessionRuntime (per-record runtime state), create_runtime_for_record, bump_runtime_generation, record_runtime_failure, runtime_backoff_expired, format_runtime_state.
 # DOCS: docs/arch_daemon.md
 
@@ -46,6 +46,7 @@ class SessionRuntime:
     cwd: str | None = None
     api_token: str | None = None
     title: str = ""
+    command: dict[str, str] | None = None
     is_global: bool = False
 
 
@@ -67,6 +68,7 @@ def create_runtime_for_record(
         shell_type=entry.shell_type,
         cwd=entry.cwd,
         title=entry.title if title is None else title,
+        command=None if entry.command is None else dict(entry.command),
         is_global=entry.is_global,
         api_token=api_token,
     )

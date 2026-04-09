@@ -174,6 +174,9 @@ async def test_run_command_brackets_between_markers(monkeypatch) -> None:
         assert "final line" in result["output"]
         assert "__SILC_BEGIN" not in result["output"]
         assert "__SILC_END" not in result["output"]
+        assert session.command is not None
+        assert session.command["text"] == "echo ignored"
+        assert session.command["source"] == "run"
     finally:
         await session.close()
 
@@ -197,3 +200,47 @@ def test_get_status_uses_incremental_metadata(monkeypatch) -> None:
 
     assert status["last_line"] == "ready]"
     assert status["waiting_for_input"] is True
+
+
+def test_command_listener_updates_status_and_notifies(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "silc.core.session.create_pty", lambda *args, **kwargs: _DummyPTY()
+    )
+
+    shell_info = ShellInfo("bash", "bash", re.compile(r".*"))
+    session = SilcSession(port=20004, name="command-test", shell_info=shell_info)
+    seen: list[dict[str, str] | None] = []
+    session.add_command_listener(lambda updated: seen.append(updated.command))
+
+    session._apply_command(
+        "echo hidden command",
+        source="shell",
+        start_ts="2026-04-09T00:00:00Z",
+    )
+
+    status = session.get_status()
+
+    assert seen[-1] == session.command
+    assert status["command"] == {
+        "text": "echo hidden command",
+        "source": "shell",
+        "start_ts": "2026-04-09T00:00:00Z",
+    }
+
+
+def test_status_metadata_strips_osc_text_sequences(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "silc.core.session.create_pty", lambda *args, **kwargs: _DummyPTY()
+    )
+
+    shell_info = ShellInfo("bash", "bash", re.compile(r".*"))
+    session = SilcSession(port=20005, name="osc-status-test", shell_info=shell_info)
+
+    session._update_status_metadata(
+        b"prompt> \x1b]633;cmd=python%20sleep.py\x1b\\ready]"
+    )
+
+    status = session.get_status()
+
+    assert "633;cmd" not in status["last_line"]
+    assert status["last_line"] == "prompt> ready]"

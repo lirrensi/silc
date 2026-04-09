@@ -9,6 +9,7 @@ import { encodeWsFrame } from '../lib/websocketFrame'
 
 const session = {
   ws: null as WebSocket | null,
+  status: 'idle' as 'idle' | 'connecting' | 'active' | 'dead' | 'restarting' | 'dormant',
   title: '',
   cwd: null as string | null,
   titleUpdatedAt: null as string | null,
@@ -80,6 +81,7 @@ describe('connectWebSocket', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     session.ws = null
+    session.status = 'idle'
     session.title = ''
     session.cwd = null
     session.titleUpdatedAt = null
@@ -174,6 +176,22 @@ describe('connectWebSocket', () => {
     expect(reopened).toBe(ws)
     expect(dispose).toHaveBeenCalled()
     expect(session.terminal.onData).toHaveBeenCalled()
+  })
+
+  it('replaces a stale connecting websocket when the session is no longer connecting', () => {
+    const first = connectWebSocket(20000) as MockWebSocket | null
+    expect(first).toBeTruthy()
+    if (first) {
+      Object.defineProperty(first, 'readyState', { value: MockWebSocket.CONNECTING })
+    }
+
+    session.status = 'dead'
+
+    const second = connectWebSocket(20000) as MockWebSocket | null
+    expect(second).toBeTruthy()
+    expect(second).not.toBe(first)
+    expect(first?.close).toHaveBeenCalled()
+    expect(manager.setWs).toHaveBeenCalledWith(20000, null)
   })
 
   it('swallows terminal DA probes before they reach the backend', () => {

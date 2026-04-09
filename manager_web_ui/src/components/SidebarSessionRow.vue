@@ -1,6 +1,6 @@
 <!-- FILE: manager_web_ui/src/components/SidebarSessionRow.vue -->
 <!-- PURPOSE: Render one draggable sidebar session row with click, rename, and drop-target behavior. -->
-<!-- OWNS: Session row chrome, drag handle wiring, and compact/full row presentation. -->
+<!-- OWNS: Session row chrome, drag handle wiring, command summary, and compact/full row presentation. -->
 <!-- EXPORTS: SidebarSessionRow - reusable manager session row. -->
 <!-- DOCS: agent_chat/plan_manager_qol_2026-04-05.md -->
 
@@ -55,8 +55,17 @@ const shellLabel = computed(() => props.session.shell || 'shell')
 const sessionName = computed(() => props.session.name || 'unnamed')
 const sessionTitle = computed(() => props.session.title || '—')
 const sessionCwd = computed(() => props.session.cwd || 'Home directory')
+const sessionCommand = computed(() => {
+  const text = props.session.command?.text?.trim()
+  if (!text) return ''
+  return text.replace(/\s+/g, ' ').trim().slice(0, 44)
+})
 const sessionTooltip = computed(() => {
-  return [sessionName.value, `:${props.session.port}`, shellLabel.value, sessionCwd.value, sessionTitle.value]
+  return [
+    sessionName.value,
+    `:${props.session.port}`, shellLabel.value, sessionCwd.value, sessionTitle.value,
+    sessionCommand.value,
+  ]
     .filter(Boolean)
     .join(' · ')
 })
@@ -117,6 +126,9 @@ function handleRename(): void {
           <span class="shrink-0 uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{{ shellLabel }}</span>
         </div>
         <div class="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">{{ sessionTitle }}</div>
+        <div v-if="sessionCommand" class="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">
+          {{ sessionCommand }}
+        </div>
       </div>
     </div>
 

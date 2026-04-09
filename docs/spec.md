@@ -72,6 +72,29 @@ SILC manages shell sessions through a daemon, lightweight per-port adapters, and
 
 Dormant sessions MAY have a frozen raw terminal snapshot persisted from a prior graceful shutdown or restart.
 
+## Command Metadata
+
+- A session MAY persist an optional `command` object that represents the last entered command captured for recovery context.
+- The `command` object, when present, MUST have the shape:
+
+  ```json
+  {
+    "text": "python sleep.py",
+    "source": "manual",
+    "start_ts": "2026-04-09T12:34:56Z"
+  }
+  ```
+
+- `command` MUST be `null` when no command metadata is available.
+- `source` MUST be either `manual` or `run`.
+- `start_ts` MUST be an ISO-8601 UTC timestamp when present.
+- Manual shell commands SHOULD be captured through the same hidden terminal metadata channel used for cwd/title updates.
+- `run` commands MAY be recorded directly by SILC runtime logic.
+- Command capture MUST be best-effort and MUST NOT alter command semantics or block shell execution.
+- Invalid, partial, or unsupported command metadata MUST be ignored safely.
+- User-facing surfaces MAY truncate or omit command text that exceeds their display budget.
+- If `command` is absent, user-facing surfaces MUST omit the command row rather than render placeholder noise.
+
 ## Daemon API
 
 The daemon listens on `19999` and exposes:
@@ -117,6 +140,8 @@ The daemon also exposes session control on the same public port using a resolved
 - `GET /sessions/{key}/token` — local helper token exposure
 
 These routes resolve `{key}` with the shared port-first/name-second rule. WebSocket is not required for remote programmatic control, but the daemon must provide it for adapter-forwarded interactive clients.
+
+Session metadata responses MAY include the optional `command` object alongside `cwd`, `title`, and liveness fields.
 
 ## Session Adapters
 

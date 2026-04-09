@@ -4,11 +4,17 @@ import type { WebglAddon } from '@xterm/addon-webgl'
 
 // FILE: manager_web_ui/src/types/session.ts
 // PURPOSE: Define shared manager session types for terminal lifecycle, renderer state, and daemon session metadata.
-// OWNS: Type contracts for frontend terminal sessions.
-// EXPORTS: Session - terminal session state shape; DaemonSession - daemon-reported session metadata; SessionStatus - lifecycle status union.
+// OWNS: Type contracts for frontend terminal sessions and optional command metadata.
+// EXPORTS: Session - terminal session state shape; DaemonSession - daemon-reported session metadata; SessionCommand - last-entered command shape; SessionStatus - lifecycle status union.
 // DOCS: agent_chat/plan_ws_binary_framing_2026-04-05.md
 
 export type SessionStatus = 'active' | 'connecting' | 'idle' | 'dead' | 'restarting' | 'dormant'
+
+export interface SessionCommand {
+  text: string
+  source: string
+  start_ts: string
+}
 
 export interface Session {
   port: number
@@ -18,6 +24,7 @@ export interface Session {
   shell: string
   cwd: string | null
   titleUpdatedAt: string | null
+  command?: SessionCommand | null
   terminal: Terminal | null
   fitAddon: FitAddon | null
   ws: WebSocket | null
@@ -52,6 +59,7 @@ export interface DaemonSession {
   shell: string
   cwd: string | null
   title_updated_at: string | null
+  command?: SessionCommand | null
   idle_seconds: number
   alive: boolean
   runtime_state: string | null

@@ -4,10 +4,21 @@ __silc_emit_cwd() {
   printf '\033]633;cwd=%s\033\\' "$PWD"
 }
 
+__silc_emit_command() {
+  case "$1" in
+    ''|__silc_* )
+      return
+      ;;
+  esac
+  printf '\033]633;cmd=%s\033\\' "$1"
+}
+
 autoload -Uz add-zsh-hook 2>/dev/null
 if (( $+functions[add-zsh-hook] )); then
+  add-zsh-hook preexec __silc_emit_command
   add-zsh-hook precmd __silc_emit_cwd
 else
+  preexec_functions+=(__silc_emit_command)
   precmd_functions+=(__silc_emit_cwd)
 fi
 

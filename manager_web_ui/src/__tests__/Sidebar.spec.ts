@@ -18,6 +18,7 @@ type MockSession = {
   title: string
   shell: string
   cwd: string
+  command?: { text: string; source: string; start_ts: string } | null
   status: string
 }
 
@@ -93,6 +94,7 @@ describe('Sidebar', () => {
         title: 'Bash',
         shell: 'bash',
         cwd: '/work/alpha',
+        command: { text: 'echo alpha', source: 'shell', start_ts: '2026-04-09T00:00:00Z' },
         status: 'active',
       },
       {
@@ -101,6 +103,7 @@ describe('Sidebar', () => {
         title: 'Shell',
         shell: 'bash',
         cwd: '/work/beta',
+        command: null,
         status: 'dormant',
       },
       {
@@ -109,6 +112,7 @@ describe('Sidebar', () => {
         title: 'Shell',
         shell: 'bash',
         cwd: '/work/gamma',
+        command: null,
         status: 'idle',
       },
     ]
@@ -331,6 +335,7 @@ describe('Sidebar', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('sleeping')
+    expect(wrapper.text()).toContain('echo alpha')
   })
 
   it('prompts to rename a session on double click', async () => {

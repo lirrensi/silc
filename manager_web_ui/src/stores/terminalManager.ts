@@ -163,6 +163,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     cwd: string | null = null,
     title: string = '',
     titleUpdatedAt: string | null = null,
+    command: Session['command'] = null,
     status: SessionStatus = 'idle',
   ): Session {
     const session: Session = {
@@ -173,6 +174,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
       shell,
       cwd,
       titleUpdatedAt,
+      command,
       terminal: null,
       fitAddon: null,
       ws: null,
@@ -216,6 +218,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
     session.shell = daemonSession.shell
     session.cwd = daemonSession.cwd
     session.titleUpdatedAt = daemonSession.title_updated_at
+    session.command = daemonSession.command ?? null
 
     if (daemonSession.dormant) {
       session.status = 'dormant'
@@ -235,6 +238,7 @@ export const useTerminalManager = defineStore('terminalManager', () => {
         daemonSession.cwd,
         daemonSession.title,
         daemonSession.title_updated_at,
+        daemonSession.command ?? null,
         daemonSession.dormant ? 'dormant' : 'idle',
       )
       return session

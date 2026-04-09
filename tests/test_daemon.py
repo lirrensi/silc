@@ -57,6 +57,7 @@ class _EventTestSession:
         self.session_id = session_id
         self.title = ""
         self.cwd = None
+        self.command = None
         self.title_updated_at = datetime.utcnow()
         self.api_token = None
         self.closed = False
@@ -94,6 +95,7 @@ class _RouteTestSession(_EventTestSession):
             "name": self.name,
             "title": self.title,
             "cwd": self.cwd,
+            "command": self.command,
             "title_updated_at": self.title_updated_at.isoformat() + "Z",
             "alive": True,
             "tui_active": False,
@@ -325,7 +327,18 @@ def test_registry_timeout_cleanup() -> None:
 
 def test_daemon_events_websocket_sends_initial_snapshot() -> None:
     daemon = SilcDaemon(enable_hard_exit=False)
-    daemon.registry.add(20000, "alpha", "sess-1", "bash", cwd="/tmp")
+    daemon.registry.add(
+        20000,
+        "alpha",
+        "sess-1",
+        "bash",
+        cwd="/tmp",
+        command={
+            "text": "echo snapshot",
+            "source": "shell",
+            "start_ts": "2026-04-09T00:00:00Z",
+        },
+    )
 
     client = TestClient(daemon._create_daemon_api())
     with client.websocket_connect("/events") as websocket:
@@ -335,6 +348,7 @@ def test_daemon_events_websocket_sends_initial_snapshot() -> None:
     assert payload == b""
     assert header["type"] == "session/snapshot"
     assert header["sessions"][0]["port"] == 20000
+    assert header["sessions"][0]["command"]["text"] == "echo snapshot"
 
 
 def test_list_sessions_marks_dormant_records() -> None:
@@ -366,6 +380,11 @@ def test_daemon_session_routes_use_shared_key_resolution() -> None:
     daemon = SilcDaemon(enable_hard_exit=False)
     entry = daemon.registry.add(20024, "alpha", "sess-route", "bash")
     session = _RouteTestSession(entry.port, entry.name, entry.session_id)
+    session.command = {
+        "text": "echo route",
+        "source": "shell",
+        "start_ts": "2026-04-09T00:00:00Z",
+    }
     daemon.runtime_by_port[entry.port] = SimpleNamespace(
         session=session, state=SessionState.RUNNING
     )
@@ -375,6 +394,7 @@ def test_daemon_session_routes_use_shared_key_resolution() -> None:
     status = client.get("/sessions/alpha/status")
     assert status.status_code == 200
     assert status.json()["name"] == "alpha"
+    assert status.json()["command"]["text"] == "echo route"
 
     status_by_port = client.get("/sessions/20024/status")
     assert status_by_port.status_code == 200
@@ -407,7 +427,17 @@ def test_daemon_session_snapshot_and_logs_fallback_without_live_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     daemon = SilcDaemon(enable_hard_exit=False)
-    entry = daemon.registry.add(20025, "sleepy", "sess-snapshot", "bash")
+    entry = daemon.registry.add(
+        20025,
+        "sleepy",
+        "sess-snapshot",
+        "bash",
+        command={
+            "text": "echo dormant",
+            "source": "shell",
+            "start_ts": "2026-04-09T00:00:00Z",
+        },
+    )
 
     monkeypatch.setattr(
         "silc.daemon.manager.read_session_snapshot",
@@ -423,6 +453,7 @@ def test_daemon_session_snapshot_and_logs_fallback_without_live_runtime(
     status = client.get("/sessions/sleepy/status")
     assert status.status_code == 200
     assert status.json()["dormant"] is True
+    assert status.json()["command"]["text"] == "echo dormant"
 
     snapshot = client.get("/sessions/20025/snapshot")
     assert snapshot.status_code == 200

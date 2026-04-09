@@ -1,6 +1,6 @@
 # FILE: silc/core/session.py
 # PURPOSE: Orchestrate PTY reads, prompt parsing, and live session state updates.
-# OWNS: Session lifecycle, prompt-driven metadata updates, and output retrieval.
+# OWNS: Session lifecycle, prompt-driven metadata updates, command capture, and output retrieval.
 # EXPORTS: SilcSession - runtime shell session controller.
 # DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md, docs/arch_api.md
 
@@ -29,13 +29,14 @@ else:
 
 from ..core.cleaner import clean_output
 from ..core.constants import DEFAULT_SCREEN_COLUMNS, DEFAULT_SCREEN_ROWS
-from ..core.osc import OscHiddenCwdParser, OscTitleParser
+from ..core.osc import OscHiddenCommandParser, OscHiddenCwdParser, OscTitleParser
 from ..core.pty_manager import PTYBase, create_pty
 from ..core.raw_buffer import RawByteBuffer
 from ..utils.persistence import rotate_session_log, write_session_log
 from ..utils.shell_detect import ShellInfo
 
 OSC_BYTE_PATTERN = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+OSC_TEXT_PATTERN = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 SILC_SENTINEL_PATTERN = re.compile(r"__SILC_(?:BEGIN|END)_\w+__")
 HELPER_ECHO_FRAGMENTS = (
     "__silc_exec",
@@ -76,8 +77,10 @@ class SilcSession:
         api_token: str | None = None,
         cwd: str | None = None,
         title: str | None = None,
+        command: dict[str, str] | None = None,
         on_title_change: Callable[["SilcSession"], None] | None = None,
         on_cwd_change: Callable[["SilcSession"], None] | None = None,
+        on_command_change: Callable[["SilcSession"], None] | None = None,
     ):
         self.port = port
         self.name = name
@@ -87,12 +90,16 @@ class SilcSession:
         self.cwd = cwd
         self.title = "" if title is None else title
         self.title_updated_at = datetime.utcnow()
+        self.command: dict[str, str] | None = None if command is None else dict(command)
         self._title_listeners: list[Callable[["SilcSession"], None]] = []
         if on_title_change:
             self._title_listeners.append(on_title_change)
         self._cwd_listeners: list[Callable[["SilcSession"], None]] = []
         if on_cwd_change:
             self._cwd_listeners.append(on_cwd_change)
+        self._command_listeners: list[Callable[["SilcSession"], None]] = []
+        if on_command_change:
+            self._command_listeners.append(on_command_change)
         self._output_listeners: list[Callable[["SilcSession", bytes], None]] = []
         launch_spec = shell_info.build_launch_spec()
         pty_env = os.environ.copy()
@@ -125,6 +132,7 @@ class SilcSession:
         self.tui_active = False
         self._osc_title_parser = OscTitleParser()
         self._osc_cwd_parser = OscHiddenCwdParser()
+        self._osc_command_parser = OscHiddenCommandParser()
 
     async def start(self) -> None:
         if self._read_task is not None:
@@ -146,6 +154,8 @@ class SilcSession:
                         self._apply_title(title)
                     for cwd in self._osc_cwd_parser.feed(data):
                         self._apply_cwd(cwd)
+                    for command in self._osc_command_parser.feed(data):
+                        self._apply_command(command)
                     self.buffer.append(data)
                     self._update_status_metadata(data)
                     if self._output_event is not None:
@@ -317,6 +327,32 @@ class SilcSession:
             except Exception as exc:
                 write_session_log(self.port, f"Cwd update callback error: {exc}")
 
+    def _apply_command(
+        self,
+        command_text: str,
+        *,
+        source: str = "shell",
+        start_ts: str | None = None,
+    ) -> None:
+        if not command_text:
+            return
+
+        command = {
+            "text": command_text,
+            "source": source,
+            "start_ts": start_ts or (datetime.utcnow().isoformat() + "Z"),
+        }
+        if self.command == command:
+            return
+
+        self.command = command
+
+        for listener in list(self._command_listeners):
+            try:
+                listener(self)
+            except Exception as exc:
+                write_session_log(self.port, f"Command update callback error: {exc}")
+
     def add_title_listener(self, listener: Callable[["SilcSession"], None]) -> None:
         """Register a callback for live title updates."""
         self._title_listeners.append(listener)
@@ -324,6 +360,10 @@ class SilcSession:
     def add_cwd_listener(self, listener: Callable[["SilcSession"], None]) -> None:
         """Register a callback for live cwd updates."""
         self._cwd_listeners.append(listener)
+
+    def add_command_listener(self, listener: Callable[["SilcSession"], None]) -> None:
+        """Register a callback for live command updates."""
+        self._command_listeners.append(listener)
 
     def remove_title_listener(self, listener: Callable[["SilcSession"], None]) -> None:
         """Unregister a live title update callback."""
@@ -336,6 +376,15 @@ class SilcSession:
         """Unregister a live cwd update callback."""
         try:
             self._cwd_listeners.remove(listener)
+        except ValueError:
+            pass
+
+    def remove_command_listener(
+        self, listener: Callable[["SilcSession"], None]
+    ) -> None:
+        """Unregister a live command update callback."""
+        try:
+            self._command_listeners.remove(listener)
         except ValueError:
             pass
 
@@ -375,6 +424,8 @@ class SilcSession:
             run_token = str(uuid.uuid4())[:8]
             cursor = self.buffer.cursor
             newline = "\r\n" if sys.platform == "win32" else "\n"
+
+            self._apply_command(cmd, source="run")
 
             invocation = self.shell_info.build_helper_invocation(cmd, run_token)
             data = (invocation + newline).encode("utf-8", errors="replace")
@@ -499,6 +550,7 @@ class SilcSession:
             "name": self.name,
             "title": self.title,
             "cwd": self.cwd,
+            "command": None if self.command is None else dict(self.command),
             "title_updated_at": self.title_updated_at.isoformat() + "Z",
             "alive": self._read_task is not None and not self._read_task.done(),
             "tui_active": self.tui_active,
@@ -534,6 +586,7 @@ class SilcSession:
             return
 
         self._status_tail_text += decoded
+        self._status_tail_text = OSC_TEXT_PATTERN.sub("", self._status_tail_text)
         if len(self._status_tail_text) > STATUS_TAIL_LIMIT:
             self._status_tail_text = self._status_tail_text[-STATUS_TAIL_LIMIT:]
 

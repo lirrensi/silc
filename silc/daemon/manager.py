@@ -2,7 +2,7 @@
 
 # FILE: silc/daemon/manager.py
 # PURPOSE: Run the daemon API and contain request, watcher, and session failures so they do not crash the daemon.
-# OWNS: Daemon API routes, shared settings persistence, session server lifecycle, restart/shutdown watchers, and daemon-level failure boundaries.
+# OWNS: Daemon API routes, shared settings persistence, session metadata listeners, session server lifecycle, restart/shutdown watchers, and daemon-level failure boundaries.
 # EXPORTS: SilcDaemon (daemon lifecycle manager), DAEMON_PORT (default daemon API port).
 # DOCS: docs/arch_api.md, docs/arch_daemon.md, agent_chat/plan_daemon_settings_store_2026-04-08.md
 
@@ -1945,6 +1945,7 @@ class SilcDaemon:
         runtime.name = entry.name
         runtime.shell_type = entry.shell_type
         runtime.cwd = entry.cwd
+        runtime.command = None if entry.command is None else dict(entry.command)
         runtime.is_global = entry.is_global
         if api_token is not None:
             runtime.api_token = api_token
@@ -2111,6 +2112,7 @@ class SilcDaemon:
                 shell_type = str(record["shell"])
                 cwd = record.get("cwd")
                 title = str(record.get("title") or "")
+                command = record.get("command")
                 is_global = bool(record.get("is_global", False) or self._share_mode)
 
                 if self.registry.get(port) or self.registry.name_exists(name):
@@ -2123,6 +2125,7 @@ class SilcDaemon:
                     shell_type,
                     cwd=cwd,
                     title=title,
+                    command=command if isinstance(command, dict) else None,
                     is_global=is_global,
                 )
                 result["loaded"].append({"port": port, "name": name})
@@ -2167,6 +2170,7 @@ class SilcDaemon:
                 api_token=launch_context["api_token"],
                 cwd=launch_context["cwd"],
                 title=launch_context["title"],
+                command=entry.command,
             )
             if preserve_session_id:
                 session.session_id = preserve_session_id
@@ -2281,6 +2285,10 @@ class SilcDaemon:
             if not materialize_missing:
                 return
             runtime = self._get_or_create_runtime(entry)
+            await self._realize_runtime(
+                entry, runtime, preserve_session_id=entry.session_id
+            )
+            return
         if runtime.state == SessionState.STARTING:
             return
         if runtime.state in {SessionState.STOPPING, SessionState.STOPPED}:
@@ -2378,6 +2386,20 @@ class SilcDaemon:
         self._persist_desired_sessions()
         asyncio.create_task(self._publish_session_event("session/cwd_changed", entry))
 
+    def _handle_session_command_change(self, session: SilcSession) -> None:
+        """Persist a live command change from a running session."""
+        entry = self.registry.update_command(session.port, session.command)
+        runtime = self.runtime_by_port.get(session.port)
+        if runtime is not None:
+            runtime.command = None if session.command is None else dict(session.command)
+        if not entry:
+            return
+
+        self._persist_desired_sessions()
+        asyncio.create_task(
+            self._publish_session_event("session/command_changed", entry)
+        )
+
     def _attach_session_task(
         self, port: int, generation: int, task: asyncio.Task[None]
     ) -> None:
@@ -2394,6 +2416,7 @@ class SilcDaemon:
         api_token: str | None = None,
         cwd: str | None = None,
         title: str | None = None,
+        command: dict[str, str] | None = None,
     ) -> SilcSession:
         return await asyncio.wait_for(
             asyncio.to_thread(
@@ -2401,11 +2424,13 @@ class SilcDaemon:
                 port,
                 name,
                 shell_info,
-                api_token,
-                cwd,
-                title,
-                self._handle_session_title_change,
-                self._handle_session_cwd_change,
+                api_token=api_token,
+                cwd=cwd,
+                title=title,
+                command=command,
+                on_title_change=self._handle_session_title_change,
+                on_cwd_change=self._handle_session_cwd_change,
+                on_command_change=self._handle_session_command_change,
             ),
             timeout=SESSION_START_TIMEOUT_SECONDS,
         )

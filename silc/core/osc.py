@@ -1,7 +1,7 @@
 # FILE: silc/core/osc.py
-# PURPOSE: Parse OSC title and hidden cwd markers from PTY output.
-# OWNS: OSC payload framing, title extraction, and hidden cwd decoding.
-# EXPORTS: OscTitleParser - extract OSC 0/2 titles; OscHiddenCwdParser - extract OSC 633 cwd markers.
+# PURPOSE: Parse OSC title, hidden cwd, and hidden command markers from PTY output.
+# OWNS: OSC payload framing, title extraction, and hidden metadata decoding.
+# EXPORTS: OscTitleParser - extract OSC 0/2 titles; OscHiddenCwdParser - extract OSC 633 cwd markers; OscHiddenCommandParser - extract OSC 633 command markers.
 # DOCS: agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
 
 """OSC control-sequence parsers used by the PTY read loop."""
@@ -109,4 +109,19 @@ class OscHiddenCwdParser(_OscSequenceParser):
         return unquote(encoded_path)
 
 
-__all__ = ["OscTitleParser", "OscHiddenCwdParser"]
+@dataclass
+class OscHiddenCommandParser(_OscSequenceParser):
+    """Extract hidden command markers from OSC 633;cmd payloads."""
+
+    def _parse_payload(self, payload: str) -> str | None:
+        if not payload.startswith("633;cmd="):
+            return None
+
+        command_text = payload.removeprefix("633;cmd=")
+        if not command_text:
+            return None
+
+        return unquote(command_text)
+
+
+__all__ = ["OscTitleParser", "OscHiddenCwdParser", "OscHiddenCommandParser"]

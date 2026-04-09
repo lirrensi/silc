@@ -76,6 +76,7 @@ class SessionEntry:
     session_id: str
     shell_type: str
     cwd: str | None
+    command: dict[str, str] | None
     title: str
     created_at: datetime
     is_global: bool = False
@@ -106,6 +107,7 @@ class SessionRuntime:
     name: str
     shell_type: str
     cwd: str | None
+    command: dict[str, str] | None
     api_token: str | None
     title: str
     is_global: bool
@@ -149,6 +151,7 @@ _daemon_api_app: FastAPI
 - Shutdown does **not** delete records.
 - Shared settings writes use the same daemon metadata lock discipline as registry writes.
 - Daemon startup restoration garbage-collects orphaned snapshot files whose `session_id` is not present in the desired registry.
+- Desired records MAY persist optional command metadata for the last entered command.
 
 ## Runtime Model
 
@@ -201,6 +204,8 @@ API routes:
 - `GET /events` — manager websocket event stream
 
 Session control routes are also available on the daemon port using a shared `{key}` resolver. Lightweight loopback adapters may forward port-based traffic into these daemon routes so client URLs stay stable.
+
+Session list snapshots, status responses, and manager events MAY include the optional command metadata object; absent command metadata is represented as `null`.
 
 ## Session Creation Rules
 

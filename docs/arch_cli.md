@@ -126,6 +126,7 @@ Notes:
 - `silc manager` opens the manager UI in a browser tab.
 - `silc desktop` opens the same UI in a detached native webview window.
 - `silc pick` opens a terminal-based session selector. The last row starts a new session in the current cwd and then opens the native TUI.
+- `silc pick` and `sessions list` MAY surface the optional last-command summary when available; long command text is truncated or omitted instead of breaking the layout.
 - `silc <port|name> web` opens the per-session web UI in a browser tab.
 - `silc <port|name> desktop` opens the same per-session UI in a detached native webview window.
 - `--share` restarts or starts the daemon in LAN share mode if needed.
@@ -154,6 +155,7 @@ Legacy aliases remain available but are omitted from the canonical tree.
 - `sessions <port|name> out` reads rendered output from `/out`.
 - `sessions <port|name> in` posts raw input bytes to `/in`.
 - `sessions <port|name> status` reads `/status` and prints session metadata.
+- `sessions <port|name> status` prints the optional command summary when present and short enough to fit the display.
 - `sessions <port|name> wake` activates a dormant session without changing its record.
 - `sessions <port|name> unload` stops the live runtime but keeps the session record dormant.
 - `sessions <port|name> restart` replaces the runtime while preserving the record.

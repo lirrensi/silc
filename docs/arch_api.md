@@ -133,6 +133,8 @@ def _client_is_local(host: str | None) -> bool:
 
 Returns session status.
 
+The response MAY include an optional `command` object representing the last entered command captured for recovery context.
+
 **Response:**
 ```json
 {
@@ -140,6 +142,11 @@ Returns session status.
   "port": 20000,
   "title": "my-project",
   "title_updated_at": "2025-01-15T10:30:00Z",
+  "command": {
+    "text": "python sleep.py",
+    "source": "manual",
+    "start_ts": "2025-01-15T10:29:58Z"
+  },
   "alive": true,
   "idle_seconds": 5,
   "waiting_for_input": false,

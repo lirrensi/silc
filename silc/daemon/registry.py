@@ -1,6 +1,6 @@
 # FILE: silc/daemon/registry.py
 # PURPOSE: Persist daemon-visible session metadata and support live record updates.
-# OWNS: In-memory session entries, lookups, and serialized record shapes.
+# OWNS: In-memory session entries, lookups, command/cwd/title persistence, and serialized record shapes.
 # EXPORTS: SessionEntry, SessionRegistry.
 # DOCS: docs/arch_daemon.md, agent_chat/plan_hidden_cwd_prompt_2026-04-05.md
 
@@ -24,6 +24,7 @@ class SessionEntry:
     cwd: str | None
     title: str
     created_at: datetime
+    command: dict[str, str] | None = None
     is_global: bool = False
     last_access: datetime = field(default_factory=datetime.utcnow)
     title_updated_at: datetime = field(default_factory=datetime.utcnow)
@@ -41,6 +42,10 @@ class SessionEntry:
         """Update the persisted working directory."""
         self.cwd = cwd
 
+    def update_command(self, command: dict[str, str] | None) -> None:
+        """Update the persisted last-entered command."""
+        self.command = None if command is None else dict(command)
+
     def to_json(self) -> dict:
         """Serialize session entry for persistence."""
         return {
@@ -50,6 +55,7 @@ class SessionEntry:
             "session_id": self.session_id,
             "shell": self.shell_type,
             "cwd": self.cwd,
+            "command": None if self.command is None else dict(self.command),
             "is_global": self.is_global,
             "created_at": self.created_at.isoformat() + "Z",
             "title_updated_at": self.title_updated_at.isoformat() + "Z",
@@ -71,6 +77,7 @@ class SessionRegistry:
         shell_type: str,
         cwd: str | None = None,
         title: str | None = None,
+        command: dict[str, str] | None = None,
         is_global: bool = False,
     ) -> SessionEntry:
         """Add a new session entry.
@@ -88,6 +95,7 @@ class SessionRegistry:
             shell_type=shell_type,
             cwd=cwd,
             title="" if title is None else title,
+            command=None if command is None else dict(command),
             created_at=datetime.utcnow(),
             is_global=is_global,
         )
@@ -113,6 +121,17 @@ class SessionRegistry:
             return None
 
         entry.update_cwd(cwd)
+        return entry
+
+    def update_command(
+        self, port: int, command: dict[str, str] | None
+    ) -> SessionEntry | None:
+        """Update the stored last command for a session."""
+        entry = self._sessions.get(port)
+        if not entry:
+            return None
+
+        entry.update_command(command)
         return entry
 
     def rename(self, port: int, name: str) -> SessionEntry | None:
