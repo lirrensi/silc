@@ -1,6 +1,6 @@
 [package]
 name = "silc_tui"
-version = "0.5.8"
+version = "0.5.9"
 edition = "2021"
 
 [[bin]]
