@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import platform
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -48,6 +49,12 @@ def _rust_binary_name() -> str:
 
 def _run(cmd: list[str], *, cwd: Path | None = None) -> None:
     subprocess.run(cmd, cwd=cwd, check=True)
+
+
+def _ensure_rust_target(target: str) -> None:
+    if shutil.which("rustup") is None:
+        return
+    _run(["rustup", "target", "add", target], cwd=ROOT / "tui_client")
 
 
 def _build_web_ui() -> None:
@@ -94,8 +101,10 @@ def _build_rust_tui(target: str) -> Path:
     cargo_manifest = ROOT / "tui_client" / "Cargo.toml"
     if not cargo_manifest.is_file():
         raise SystemExit(f"Missing Rust manifest: {cargo_manifest}")
+    if shutil.which("cargo") is None:
+        raise SystemExit("cargo not found; install the Rust toolchain first")
 
-    _run(["rustup", "target", "add", target], cwd=ROOT / "tui_client")
+    _ensure_rust_target(target)
     _run(
         [
             "cargo",

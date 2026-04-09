@@ -43,7 +43,12 @@ Default repo/API:
 - `lirrensi/silc`
 - `https://api.github.com/repos/lirrensi/silc/releases/latest`
 
-The fallback installer selects an asset by platform + architecture keywords, extracts or copies `silc-tui` / `silc-tui.exe`, and marks it executable.
+Release assets are split into two families:
+
+- `silc-*` — standalone Nuitka app binaries
+- `silc-tui-*` — native Rust TUI binaries used by source installs
+
+The fallback installer only selects the `silc-tui-*` family by platform + architecture keywords, extracts or copies `silc-tui` / `silc-tui.exe`, and marks it executable.
 
 ### Launching
 

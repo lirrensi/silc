@@ -1,6 +1,6 @@
 [project]
 name = "silc"
-version = "0.5.0"
+version = "0.5.5"
 description = "SILC - powerful tmux alternative | Shared interactive linked cmd that lets agents and humans peer into the same shell."
 readme = "README.md"
 requires-python = ">=3.12"

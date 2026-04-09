@@ -358,19 +358,31 @@ silc mcp
 
 ## 🛠️ Installation
 
-### Recommended: Install from git with uv
+### 1) Source install (Python app + downloaded Rust TUI)
 
 ```bash
-# Install from git (fast and recommended)
 uv tool install git+https://github.com/lirrensi/silc.git
 ```
 
-### Alternative installations
-
 ```bash
-# With pipx (global install from git)
 pipx install git+https://github.com/lirrensi/silc.git
 ```
+
+This path builds the web UI and downloads the native Rust TUI from GitHub Releases the first time you run `silc tui`.
+
+### 2) Standalone install (Nuitka release binary)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install.sh | sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install.ps1 | iex
+```
+
+This path installs the full packaged binary from GitHub Releases; no extra downloads are needed.
+
+GitHub Releases also publish separate `silc-tui-*` assets so source installs can fetch the native TUI on demand.
 
 ### For development: Editable install from folder
 
@@ -392,16 +404,6 @@ uv run python scripts/build_nuitka.py
 The build script compiles the Python CLI into a onefile binary, bundles `static/web`, `static/manager`, `static/scripts`, and stages the Rust TUI binary into `dist/`.
 
 On Windows, Nuitka uses MinGW64 here, so you do not need MSVC Build Tools.
-
-### Installing from a release asset
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install.sh | sh
-```
-
-```powershell
-irm https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install.ps1 | iex
-```
 
 ### Building the Web UI
 

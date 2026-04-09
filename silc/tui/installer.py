@@ -86,6 +86,8 @@ def _choose_asset_for_platform(release: dict) -> dict:
         if not name:
             continue
         lower = name.lower()
+        if "tui" not in lower:
+            continue
         if not any(keyword in lower for keyword in platform_keywords):
             continue
         if not any(keyword in lower for keyword in arch_keywords):
