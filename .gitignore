@@ -33,8 +33,11 @@ htmlcov/
 private/
 docs/archive/
 static/manager/
+static/web/
 docs/CODEMAP.*.md
 
 .kanban
 cancan.lock
 agent_chat/
+
+static/web/
