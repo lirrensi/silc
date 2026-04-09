@@ -1,7 +1,7 @@
 // FILE: manager_web_ui/src/__tests__/SessionView.spec.ts
 // PURPOSE: Verify the session route keeps its command controls and terminal actions wired to the daemon helpers.
 // OWNS: Session route command-label coverage and single-session command dispatch assertions.
-// DOCS: agent_chat/plan_manager_interface_commands_2026-04-08.md
+// DOCS: agent_chat/plan_manager_interface_commands_2026-04-08.md, agent_chat/plan_session_end_splash_2026-04-09.md
 
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
@@ -22,6 +22,7 @@ const mockKillSession = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockSendInterrupt = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockSendSigterm = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockSendSigkill = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockApplyMeasuredFit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 
 const session = {
   status: 'idle' as SessionStatus,
@@ -62,6 +63,7 @@ vi.mock('@/stores/terminalManager', () => ({
     flushWrites: vi.fn().mockResolvedValue(undefined),
     waitForHistoryRefresh: vi.fn().mockResolvedValue(undefined),
     resolveHistoryRefresh: vi.fn(),
+    applyMeasuredFit: mockApplyMeasuredFit,
     refreshTerminalSurface: vi.fn(),
     forceRedraw: vi.fn(),
     removeSession: mockRemoveSession,
@@ -82,7 +84,7 @@ async function mountView() {
   await router.push('/1234')
   await router.isReady()
 
-  return mount(SessionView, {
+  const wrapper = mount(SessionView, {
     global: {
       plugins: [createPinia(), router],
       stubs: {
@@ -91,6 +93,8 @@ async function mountView() {
       },
     },
   })
+
+  return { wrapper, router }
 }
 
 describe('SessionView', () => {
@@ -145,7 +149,7 @@ describe('SessionView', () => {
     session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
 
-    const wrapper = await mountView()
+    const { wrapper } = await mountView()
 
     expect(wrapper.text()).not.toContain('2x2')
     expect(wrapper.text()).not.toContain('3x3')
@@ -156,7 +160,7 @@ describe('SessionView', () => {
     session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
 
-    const wrapper = await mountView()
+    const { wrapper } = await mountView()
     const buttons = wrapper.findAll('button')
     const bottomButton = buttons.find((button) => button.text() === 'Bottom')
     const upButton = buttons.find((button) => button.text() === '↑')
@@ -175,7 +179,7 @@ describe('SessionView', () => {
     session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
 
-    const wrapper = await mountView()
+    const { wrapper } = await mountView()
 
     const pasteButton = wrapper.findAll('button').find((button) => button.text() === 'Paste')
     await pasteButton?.trigger('click')
@@ -227,7 +231,7 @@ describe('SessionView', () => {
       },
     ])
 
-    const wrapper = await mountView()
+    const { wrapper } = await mountView()
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(mockRestartSession).toHaveBeenCalledWith(1234)
@@ -238,7 +242,7 @@ describe('SessionView', () => {
     session.status = 'active'
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
 
-    const wrapper = await mountView()
+    const { wrapper } = await mountView()
     const text = wrapper.text()
 
     expect(text).toContain('Unload')
@@ -256,7 +260,7 @@ describe('SessionView', () => {
     session.ws = { readyState: WebSocket.OPEN } as WebSocket
 
     const triggerAction = async (label: string): Promise<void> => {
-      const wrapper = await mountView()
+      const { wrapper } = await mountView()
       await wrapper.findAll('button').find((button) => button.text() === label)?.trigger('click')
       await flushPromises()
       await new Promise((resolve) => window.setTimeout(resolve, 260))
@@ -278,5 +282,50 @@ describe('SessionView', () => {
     expect(mockSendInterrupt).toHaveBeenCalledWith(1234)
     expect(mockSendSigterm).toHaveBeenCalledWith(1234)
     expect(mockSendSigkill).toHaveBeenCalledWith(1234)
+  })
+
+  it('routes home for manager destructive actions without showing the standalone splash', async () => {
+    session.status = 'active'
+    session.ws = { readyState: WebSocket.OPEN } as WebSocket
+
+    const actions = [
+      {
+        label: 'Unload',
+        expectApiCall: () => expect(mockUnloadSession).toHaveBeenCalledWith(1234),
+        expectRemoval: false,
+      },
+      {
+        label: 'Close Session',
+        expectApiCall: () => expect(mockCloseSession).toHaveBeenCalledWith(1234),
+        expectRemoval: true,
+      },
+      {
+        label: 'Close Forcefully',
+        expectApiCall: () => expect(mockKillSession).toHaveBeenCalledWith(1234),
+        expectRemoval: true,
+      },
+    ]
+
+    for (const action of actions) {
+      mockRemoveSession.mockClear()
+      const { wrapper, router } = await mountView()
+
+      await wrapper.findAll('button').find((button) => button.text() === action.label)?.trigger('click')
+      await flushPromises()
+      await new Promise((resolve) => window.setTimeout(resolve, 260))
+
+      action.expectApiCall()
+      expect(router.currentRoute.value.path).toBe('/')
+      expect(wrapper.text()).not.toContain('Session ended')
+      expect(wrapper.text()).not.toContain('Close Window')
+
+      if (action.expectRemoval) {
+        expect(mockRemoveSession).toHaveBeenCalledWith(1234)
+      } else {
+        expect(mockRemoveSession).not.toHaveBeenCalledWith(1234)
+      }
+
+      wrapper.unmount()
+    }
   })
 })

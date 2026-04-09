@@ -3,7 +3,7 @@
 // PURPOSE: Render the shared single-session terminal shell with recovery actions and lifecycle controls.
 // OWNS: Session terminal layout, action bar, reconnect/takeover state, and session bootstrapping.
 // EXPORTS: SessionShell - reusable single-session terminal surface.
-// DOCS: agent_chat/plan_web_shell_split_2026-04-09.md
+// DOCS: agent_chat/plan_web_shell_split_2026-04-09.md, agent_chat/plan_session_end_splash_2026-04-09.md
 
 import { computed } from 'vue'
 import { useSessionShell } from '@/composables/useSessionShell'
@@ -11,6 +11,7 @@ import TerminalViewport from '@/components/TerminalViewport.vue'
 
 const props = defineProps<{
   port: number
+  surface: 'manager' | 'standalone'
 }>()
 
 const emit = defineEmits<{
@@ -25,6 +26,7 @@ const {
   isRestarting,
   reconnecting,
   activeOperation,
+  terminalEndState,
   hasConnectionProblem,
   controlsDisabled,
   disconnectReason,
@@ -36,6 +38,7 @@ const {
   handleKill,
   handleRestart,
   handleReconnect,
+  closeWindow,
   handleInterrupt,
   handleSigterm,
   handleSigkill,
@@ -45,6 +48,7 @@ const {
   sendArrowKey,
 } = useSessionShell(
   computed(() => props.port),
+  props.surface,
   () => emit('exit'),
   (port) => emit('port-change', port),
 )
@@ -196,6 +200,27 @@ const {
               :disabled="reconnecting || isRestarting"
             >
               {{ isRestarting ? 'Restarting...' : 'Restart' }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div
+        v-if="terminalEndState"
+        class="absolute inset-0 z-10 flex items-center justify-center bg-[color-mix(in_srgb,var(--color-bg-primary)_74%,transparent)] px-4"
+      >
+        <div class="glass-panel flex w-full max-w-md flex-col gap-3 p-4 text-center">
+          <p class="text-sm font-medium text-[var(--color-text-primary)]">{{ terminalEndState.title }}</p>
+          <p class="text-xs text-[var(--color-text-secondary)]">{{ terminalEndState.detail }}</p>
+          <p class="text-xs text-[var(--color-text-secondary)]">
+            The session ended on port `:{{ port }}` and this page can now be closed.
+          </p>
+          <div class="mx-auto toolbar-strip">
+            <button
+              @click="closeWindow"
+              class="bar-button text-sm"
+              :title="tip('Close this window', 'Closes the standalone session page after the shell ends.')"
+            >
+              Close Window
             </button>
           </div>
         </div>

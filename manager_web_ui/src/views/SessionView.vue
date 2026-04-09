@@ -3,7 +3,7 @@
 // PURPOSE: Adapt the shared session shell to the manager router and keep session navigation local.
 // OWNS: Route-param to port resolution and session-shell exit/port-change routing.
 // EXPORTS: SessionView - routed manager-session page wrapper.
-// DOCS: agent_chat/plan_web_shell_split_2026-04-09.md
+// DOCS: agent_chat/plan_web_shell_split_2026-04-09.md, agent_chat/plan_session_end_splash_2026-04-09.md
 
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -35,5 +35,5 @@ function handlePortChange(port: number): void {
 </script>
 
 <template>
-  <SessionShell :port="sessionPort" @exit="handleExit" @port-change="handlePortChange" />
+  <SessionShell :port="sessionPort" surface="manager" @exit="handleExit" @port-change="handlePortChange" />
 </template>

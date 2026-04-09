@@ -2,7 +2,7 @@
 // PURPOSE: Hold the shared session-shell lifecycle, recovery, and terminal command logic.
 // OWNS: Session bootstrap, reconnect/wake flows, terminal actions, and session exit notifications.
 // EXPORTS: useSessionShell - composable for single-session terminal behavior.
-// DOCS: agent_chat/plan_web_shell_split_2026-04-09.md
+// DOCS: agent_chat/plan_web_shell_split_2026-04-09.md, agent_chat/plan_session_end_splash_2026-04-09.md
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useTerminalManager } from '@/stores/terminalManager'
@@ -18,14 +18,24 @@ interface ActiveOperation {
   tone: OperationTone
 }
 
+type SessionShellSurface = 'manager' | 'standalone'
+
+interface TerminalEndState {
+  title: string
+  detail: string
+  cause: 'unload' | 'close' | 'kill' | 'disappear'
+}
+
 export function useSessionShell(
   port: ComputedRef<number>,
+  surface: SessionShellSurface,
   onExit: () => void,
   onPortChange: (port: number) => void,
 ) {
   const manager = useTerminalManager()
   const reconnecting = ref(false)
   const activeOperation = ref<ActiveOperation | null>(null)
+  const terminalEndState = ref<TerminalEndState | null>(null)
   const sessionBootstrapped = ref(false)
 
   const session = computed(() => manager.getSession(port.value))
@@ -34,8 +44,10 @@ export function useSessionShell(
     () => session.value?.status === 'active' && session.value?.ws?.readyState === WebSocket.OPEN,
   )
   const isRestarting = computed(() => session.value?.status === 'restarting')
-  const hasConnectionProblem = computed(() => !isActive.value && !isDormant.value)
-  const controlsDisabled = computed(() => hasConnectionProblem.value || activeOperation.value !== null)
+  const hasConnectionProblem = computed(() => terminalEndState.value === null && !isActive.value && !isDormant.value)
+  const controlsDisabled = computed(
+    () => terminalEndState.value !== null || hasConnectionProblem.value || activeOperation.value !== null,
+  )
   const disconnectReason = computed(() => session.value?.disconnectReason ?? '')
 
   function logSessionShell(message: string, extra?: Record<string, unknown>): void {
@@ -56,6 +68,37 @@ export function useSessionShell(
     return new Promise((resolve) => window.setTimeout(resolve, ms))
   }
 
+  function clearTerminalEndState(): void {
+    terminalEndState.value = null
+  }
+
+  function showStandaloneTerminalEndState(cause: TerminalEndState['cause']): void {
+    terminalEndState.value = {
+      title: 'Session ended',
+      detail: 'This session is no longer interactive. You can now close this page or window.',
+      cause,
+    }
+  }
+
+  function handleTerminalEnd(cause: TerminalEndState['cause'], options?: { removeLocalSession?: boolean }): void {
+    sessionBootstrapped.value = false
+
+    if (options?.removeLocalSession) {
+      manager.removeSession(port.value)
+    }
+
+    if (surface === 'standalone') {
+      showStandaloneTerminalEndState(cause)
+      return
+    }
+
+    onExit()
+  }
+
+  function closeWindow(): void {
+    window.close()
+  }
+
   async function ensureCurrentSessionVisible(): Promise<boolean> {
     try {
       logSessionShell('Fetching daemon session list to verify current session visibility')
@@ -67,10 +110,8 @@ export function useSessionShell(
       manager.reconcileSessions(daemonSessions)
 
       if (!daemonSessions.some((daemonSession) => daemonSession.port === port.value)) {
-        logSessionShell('Current session disappeared from daemon list; exiting shell view')
-        sessionBootstrapped.value = false
-        manager.removeSession(port.value)
-        onExit()
+        logSessionShell('Current session disappeared from daemon list; ending shell view')
+        handleTerminalEnd('disappear', { removeLocalSession: true })
         return false
       }
 
@@ -446,10 +487,12 @@ export function useSessionShell(
         },
         {
           stage: 'Updating the UI',
-          detail: 'Removing the session locally and returning home.',
+          detail:
+            surface === 'standalone'
+              ? 'Ending the standalone session page in place.'
+              : 'Removing the session locally and returning home.',
           run: async () => {
-            manager.removeSession(currentPort)
-            onExit()
+            handleTerminalEnd('close', { removeLocalSession: true })
           },
         },
       ])
@@ -473,11 +516,14 @@ export function useSessionShell(
         },
         {
           stage: 'Refreshing manager state',
-          detail: 'Reconciling the session list so the unloaded shell returns to its dormant state.',
+          detail:
+            surface === 'standalone'
+              ? 'Ending the standalone page after the live shell is released.'
+              : 'Reconciling the session list so the unloaded shell returns to its dormant state.',
           run: async () => {
             const daemonSessions = await listSessions()
             manager.reconcileSessions(daemonSessions)
-            onExit()
+            handleTerminalEnd('unload')
           },
         },
       ])
@@ -500,10 +546,12 @@ export function useSessionShell(
         },
         {
           stage: 'Updating the UI',
-          detail: 'Removing the dead session locally and returning home.',
+          detail:
+            surface === 'standalone'
+              ? 'Ending the standalone session page in place.'
+              : 'Removing the dead session locally and returning home.',
           run: async () => {
-            manager.removeSession(currentPort)
-            onExit()
+            handleTerminalEnd('kill', { removeLocalSession: true })
           },
         },
       ])
@@ -527,6 +575,7 @@ export function useSessionShell(
             stage: 'Stopping the current shell',
             detail: 'The current PTY is being replaced with a fresh shell instance.',
             run: async () => {
+              clearTerminalEndState()
               manager.setStatus(port.value, 'restarting')
               const result = await restartSession(port.value)
               logSessionShell('Daemon restart request completed', {
@@ -737,6 +786,7 @@ export function useSessionShell(
       logSessionShell('Starting session bootstrap flow')
       manager.setFocused(port.value)
       sessionBootstrapped.value = false
+      clearTerminalEndState()
 
       const isVisible = await ensureCurrentSessionVisible()
       if (!isVisible) {
@@ -766,6 +816,7 @@ export function useSessionShell(
       }
 
       sessionBootstrapped.value = true
+      clearTerminalEndState()
       logSessionShell('Session bootstrap marked complete; refreshing terminal history')
       await refreshTerminal()
     } catch (err) {
@@ -778,9 +829,8 @@ export function useSessionShell(
       return
     }
 
-    logSessionShell('Observed active session removal after bootstrap; exiting shell view')
-    sessionBootstrapped.value = false
-    onExit()
+    logSessionShell('Observed active session removal after bootstrap; ending shell view')
+    handleTerminalEnd('disappear')
   })
 
   watch(port, () => {
@@ -806,6 +856,7 @@ export function useSessionShell(
     isRestarting,
     reconnecting,
     activeOperation,
+    terminalEndState,
     hasConnectionProblem,
     controlsDisabled,
     disconnectReason,
@@ -838,6 +889,7 @@ export function useSessionShell(
     handleKill,
     handleRestart,
     handleReconnect,
+    closeWindow,
     handleInterrupt,
     handleSigterm,
     handleSigkill,

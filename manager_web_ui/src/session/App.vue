@@ -3,7 +3,7 @@
 // PURPOSE: Host the standalone session web surface and expose a QR-friendly session header.
 // OWNS: Session-page chrome, URL copy/QR affordances, and session URL handoff behavior.
 // EXPORTS: SessionApp - standalone session-page root component.
-// DOCS: agent_chat/plan_web_shell_split_2026-04-09.md
+// DOCS: agent_chat/plan_web_shell_split_2026-04-09.md, agent_chat/plan_session_end_splash_2026-04-09.md
 
 import { computed, onMounted, ref } from 'vue'
 import QRCode from 'qrcode'
@@ -99,7 +99,7 @@ onMounted(async () => {
       <div v-if="!canRender" class="glass-panel h-full p-4 text-sm text-[var(--color-text-secondary)]">
         Session port unavailable.
       </div>
-      <SessionShell v-else :port="sessionPort" @port-change="handlePortChange" />
+      <SessionShell v-else :port="sessionPort" surface="standalone" @port-change="handlePortChange" />
     </main>
   </div>
 </template>
