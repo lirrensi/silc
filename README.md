@@ -59,10 +59,7 @@ The manager panel ties it all together:
 
 ```bash
 # Install (recommended)
-uv tool install git+https://github.com/lirrensi/silc.git
-
-# Or with pipx
-pipx install git+https://github.com/lirrensi/silc.git
+./scripts/install.sh
 
 # Start the daemon and create a session
 silc start
@@ -358,56 +355,89 @@ silc mcp
 
 ## 🛠️ Installation
 
-### 1) Source install (Python app + downloaded Rust TUI)
+SILC now has **three supported install paths**.
 
-```bash
-uv tool install git+https://github.com/lirrensi/silc.git
-```
+### 1) Default install: prebuilt repo-mirror zip via GitHub script
 
-```bash
-pipx install git+https://github.com/lirrensi/silc.git
-```
+This is the easiest path for most users.
 
-This path builds the web UI and downloads the native Rust TUI from GitHub Releases the first time you run `silc tui`.
-
-### 2) Standalone install (Nuitka release binary)
+**Unix/macOS**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install.sh | sh
 ```
 
+**Windows PowerShell**
+
 ```powershell
 irm https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install.ps1 | iex
 ```
 
-This path installs the full packaged binary from GitHub Releases; no extra downloads are needed.
+What it does:
+- downloads the latest `silc-*.zip` release asset for your OS
+- unpacks the repo-mirror folder to a managed location
+- runs `uv tool install --force --editable <unpacked-folder>`
+- leaves UV managing the `silc` shim while SILC keeps its repo-style layout
 
-GitHub Releases also publish separate `silc-tui-*` assets so source installs can fetch the native TUI on demand.
+The unpacked tree already contains built web assets and `tui_client/dist/silc-tui[.exe]`.
 
-### For development: Editable install from folder
+### 2) Guided source install: GitHub script that builds the tree for you
+
+Use this when you want the “clone and build it” path automated for you.
+
+**Unix/macOS**
 
 ```bash
-# Clone repository first, then install in editable mode
+curl -fsSL https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install-source.sh | sh
+```
+
+**Windows PowerShell**
+
+```powershell
+irm https://raw.githubusercontent.com/lirrensi/silc/main/scripts/install-source.ps1 | iex
+```
+
+What it does:
+- downloads the GitHub source tree when needed
+- builds the web UI in place
+- downloads the matching raw `silc-tui-*` asset into `tui_client/dist/`
+- runs `uv tool install --force --editable <source-tree>`
+
+This path behaves like a guided “clone it and prepare it for me” install.
+
+### 3) Manual developer install: clone and do everything yourself
+
+Use this when you want full local control.
+
+```bash
 git clone https://github.com/lirrensi/silc.git
 cd silc
-pip install -e .
+uv tool install --force --editable .
+python -m silc.utils.build_web
 ```
 
-**Note:** PyPI package coming soon. For production use, install from git (recommended uv or pipx).
+Then place the native TUI into `tui_client/dist/`.
 
-### Building the packaged executable
+For example:
 
 ```bash
-uv run python scripts/build_nuitka.py
+curl -fsSL https://github.com/lirrensi/silc/releases/latest/download/silc-tui-linux-x86_64 -o tui_client/dist/silc-tui
+chmod +x tui_client/dist/silc-tui
 ```
 
-The build script compiles the Python CLI into a onefile binary, bundles `static/web`, `static/manager`, `static/scripts`, and stages the Rust TUI binary into `dist/`.
+GitHub Releases publish two supported asset families:
+- `silc-tui-*` — raw native Rust TUI binaries
+- `silc-*.zip` — prebuilt repo-mirror folders used by the default installer
 
-On Windows, Nuitka uses MinGW64 here, so you do not need MSVC Build Tools.
+Runtime launch reads only `tui_client/dist/` inside the active tree.
+
+### Legacy Nuitka packaging
+
+Nuitka standalone packaging is not part of the supported release flow. GitHub Releases publish only the native `silc-tui-*` assets used by the installer; any Nuitka work is local-only and currently unsupported as a distribution path.
 
 ### Building the Web UI
 
-The Web UI is a Vue 3 + Vite application. It builds automatically when packaging, but for development:
+The Web UI is a Vue 3 + Vite application. It builds automatically in the installer, but for development:
 
 ```bash
 # Build once (auto-detects pnpm, npm, or yarn)

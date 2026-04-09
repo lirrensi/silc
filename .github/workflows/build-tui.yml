@@ -10,97 +10,97 @@ permissions:
   contents: write
 
 jobs:
-  build-app:
-    name: Build packaged app on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    env:
-      NUITKA_CACHE_DIR: ${{ github.workspace }}/.cache/nuitka
-      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            rust_target: x86_64-unknown-linux-gnu
-            artifact_name: silc-linux-x86_64
-          - os: macos-13
-            rust_target: x86_64-apple-darwin
-            artifact_name: silc-darwin-x86_64
-          - os: macos-14
-            rust_target: aarch64-apple-darwin
-            artifact_name: silc-darwin-aarch64
-          - os: windows-latest
-            rust_target: x86_64-pc-windows-msvc
-            artifact_name: silc-windows-x86_64.exe
+  # build-app:
+  #   name: Build packaged app on ${{ matrix.os }}
+  #   runs-on: ${{ matrix.os }}
+  #   env:
+  #     NUITKA_CACHE_DIR: ${{ github.workspace }}/.cache/nuitka
+  #     CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       include:
+  #         - os: ubuntu-latest
+  #           rust_target: x86_64-unknown-linux-gnu
+  #           artifact_name: silc-linux-x86_64
+  #         - os: macos-13
+  #           rust_target: x86_64-apple-darwin
+  #           artifact_name: silc-darwin-x86_64
+  #         - os: macos-14
+  #           rust_target: aarch64-apple-darwin
+  #           artifact_name: silc-darwin-aarch64
+  #         - os: windows-latest
+  #           rust_target: x86_64-pc-windows-msvc
+  #           artifact_name: silc-windows-x86_64.exe
 
-    steps:
-      - uses: actions/checkout@v4
+  #   steps:
+  #     - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+  #         cache: pip
 
-      - name: Install project package
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install nuitka zstandard
+  #     - name: Install project package
+  #       shell: bash
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         python -m pip install -e .
+  #         python -m pip install nuitka zstandard
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
+  #     - name: Set up pnpm
+  #       uses: pnpm/action-setup@v4
+  #       with:
+  #         version: 10
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: pnpm
-          cache-dependency-path: manager_web_ui/pnpm-lock.yaml
+  #     - name: Set up Node
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '22'
+  #         cache: pnpm
+  #         cache-dependency-path: manager_web_ui/pnpm-lock.yaml
 
-      - name: Install web dependencies
-        shell: bash
-        working-directory: manager_web_ui
-        run: pnpm install --frozen-lockfile
+  #     - name: Install web dependencies
+  #       shell: bash
+  #       working-directory: manager_web_ui
+  #       run: pnpm install --frozen-lockfile
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
+  #     - name: Install Rust toolchain
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         targets: ${{ matrix.rust_target }}
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            tui_client/target
-          key: ${{ runner.os }}-cargo-${{ matrix.rust_target }}-${{ hashFiles('tui_client/Cargo.lock') }}
+  #     - name: Cache cargo registry
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~/.cargo/registry
+  #           ~/.cargo/git
+  #           tui_client/target
+  #         key: ${{ runner.os }}-cargo-${{ matrix.rust_target }}-${{ hashFiles('tui_client/Cargo.lock') }}
 
-      - name: Cache Nuitka compile artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/.cache/nuitka
-            ${{ github.workspace }}/.cache/ccache
-          key: ${{ runner.os }}-nuitka-${{ hashFiles('main.py', 'silc/**/*.py', 'scripts/build_nuitka.py') }}
-          restore-keys: |
-            ${{ runner.os }}-nuitka-
+  #     - name: Cache Nuitka compile artifacts
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ${{ github.workspace }}/.cache/nuitka
+  #           ${{ github.workspace }}/.cache/ccache
+  #         key: ${{ runner.os }}-nuitka-${{ hashFiles('main.py', 'silc/**/*.py', 'scripts/build_nuitka.py') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-nuitka-
 
-      - name: Build Nuitka binary
-        shell: bash
-        run: |
-          python scripts/build_nuitka.py --target "${{ matrix.rust_target }}" --output-name "${{ matrix.artifact_name }}"
+  #     - name: Build Nuitka binary
+  #       shell: bash
+  #       run: |
+  #         python scripts/build_nuitka.py --target "${{ matrix.rust_target }}" --output-name "${{ matrix.artifact_name }}"
 
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.artifact_name }}
-          retention-days: 1
+  #     - name: Upload binary artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ matrix.artifact_name }}
+  #         path: dist/${{ matrix.artifact_name }}
+  #         retention-days: 1
 
   build-tui:
     name: Build native TUI on ${{ matrix.os }}
@@ -151,11 +151,88 @@ jobs:
           path: tui_client/dist/${{ matrix.artifact_name }}
           retention-days: 1
 
+  build-release:
+    name: Build repo-mirror zip on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            tui_asset_name: silc-tui-linux-x86_64
+            zip_asset_name: silc-linux-x86_64.zip
+          - os: macos-13
+            rust_target: x86_64-apple-darwin
+            tui_asset_name: silc-tui-darwin-x86_64
+            zip_asset_name: silc-darwin-x86_64.zip
+          - os: macos-14
+            rust_target: aarch64-apple-darwin
+            tui_asset_name: silc-tui-darwin-aarch64
+            zip_asset_name: silc-darwin-aarch64.zip
+          - os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            tui_asset_name: silc-tui-windows-x86_64.exe
+            zip_asset_name: silc-windows-x86_64.zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: manager_web_ui/pnpm-lock.yaml
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install web dependencies
+        shell: bash
+        working-directory: manager_web_ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web assets
+        shell: bash
+        working-directory: manager_web_ui
+        run: pnpm build
+
+      - name: Build native TUI for zip package
+        shell: bash
+        run: |
+          bash scripts/build_tui.sh --target "${{ matrix.rust_target }}" --output-name "${{ matrix.tui_asset_name }}"
+
+      - name: Package repo-mirror zip
+        shell: bash
+        run: |
+          python scripts/package_release.py --output-name "${{ matrix.zip_asset_name }}" --tui-asset-name "${{ matrix.tui_asset_name }}"
+
+      - name: Upload repo-mirror zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.zip_asset_name }}
+          path: dist/${{ matrix.zip_asset_name }}
+          retention-days: 1
+
   release:
     name: Publish GitHub Release
     needs:
-      - build-app
+      # - build-app
       - build-tui
+      - build-release
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 

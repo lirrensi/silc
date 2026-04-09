@@ -1,36 +1,43 @@
-"""Tests for native TUI release asset selection."""
+"""Tests for native TUI binary discovery."""
+
+# FILE: tests/test_tui_installer.py
+# PURPOSE: Verify native TUI lookup uses only the repo-style tui_client/dist contract.
+# OWNS: Positive and negative coverage for ensure_native_tui_binary.
+# EXPORTS: test_finds_binary_from_tui_client_dist, test_missing_binary_in_tui_client_dist_raises_installer_error.
+# DOCS: agent_chat/plan_zip_distribution_2026-04-10.md, docs/arch_tui.md
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 from silc.tui import installer
 
 
-def _patch_platform(monkeypatch: pytest.MonkeyPatch, system: str, machine: str) -> None:
-    monkeypatch.setattr(installer.platform, "system", lambda: system)
-    monkeypatch.setattr(installer.platform, "machine", lambda: machine)
+def test_finds_binary_from_tui_client_dist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    project_root = tmp_path / "project"
+    dist_dir = project_root / "tui_client" / "dist"
+    dist_dir.mkdir(parents=True)
+    binary = dist_dir / (
+        "silc-tui.exe" if installer.sys.platform.startswith("win") else "silc-tui"
+    )
+    binary.write_text("echo silc", encoding="utf-8")
+    binary.chmod(0o755)
+
+    monkeypatch.setattr(installer, "PROJECT_ROOT", project_root)
+
+    resolved = installer.ensure_native_tui_binary()
+
+    assert resolved == binary.resolve()
 
 
-def test_choose_asset_prefers_tui_asset(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_platform(monkeypatch, "Linux", "x86_64")
-
-    release = {
-        "assets": [
-            {"name": "silc-linux-x86_64", "browser_download_url": "app"},
-            {"name": "silc-tui-linux-x86_64", "browser_download_url": "tui"},
-        ]
-    }
-
-    asset = installer._choose_asset_for_platform(release)
-
-    assert asset["name"] == "silc-tui-linux-x86_64"
-
-
-def test_choose_asset_rejects_non_tui_assets(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_platform(monkeypatch, "Linux", "x86_64")
-
-    release = {"assets": [{"name": "silc-linux-x86_64", "browser_download_url": "app"}]}
+def test_missing_binary_in_tui_client_dist_raises_installer_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(installer, "PROJECT_ROOT", Path("C:/missing/project"))
 
     with pytest.raises(installer.InstallerError):
-        installer._choose_asset_for_platform(release)
+        installer.ensure_native_tui_binary()

@@ -28,27 +28,18 @@ Does not own:
 
 ### Installer
 
-`ensure_native_tui_binary()` resolves the bundled binary first, then falls back to a cached or downloaded release binary when SILC is running from source.
+The bootstrap flows are now split:
 
-Environment variables:
+1. `scripts/install.sh` / `scripts/install.ps1` are the default remote bootstrap scripts. They are intended to be run directly from GitHub raw URLs, download a prebuilt repo-mirror zip from Releases, unpack it, and run `uv tool install --force --editable <folder>`.
+2. `scripts/install-source.sh` / `scripts/install-source.ps1` are the guided source-bootstrap scripts. They are also intended to be runnable from GitHub raw URLs, prepare a source tree, build the web UI in place, place the matching `silc-tui-*` asset into `tui_client/dist/`, and then run `uv tool install --force --editable <folder>`.
+3. Manual developer installs may clone the repo and prepare the same layout by hand.
 
-| Variable | Purpose |
-|---|---|
-| `SILC_TUI_BIN_DIR` | Override install cache directory |
-| `SILC_TUI_RELEASE_REPO` | Override release repo (`owner/repo`) |
-| `SILC_TUI_RELEASE_API` | Override release API URL |
+`ensure_native_tui_binary()` is now a local resolver only. It never downloads anything and never reads user-global cache directories.
 
-Default repo/API:
+The resolver only looks for local `silc-tui` / `silc-tui.exe` binaries in these in-tree locations:
 
-- `lirrensi/silc`
-- `https://api.github.com/repos/lirrensi/silc/releases/latest`
-
-Release assets are split into two families:
-
-- `silc-*` — standalone Nuitka app binaries
-- `silc-tui-*` — native Rust TUI binaries used by source installs
-
-The fallback installer only selects the `silc-tui-*` family by platform + architecture keywords, extracts or copies `silc-tui` / `silc-tui.exe`, and marks it executable.
+- `tui_client/dist/` inside the active editable-install tree
+- `tui_client/dist/` inside a local source checkout
 
 ### Launching
 
@@ -76,5 +67,5 @@ The Rust client ignores websocket ping/pong frames, reports close code/reason on
 
 ## Error Handling
 
-- If the native binary cannot be resolved, the CLI prints a manual-install hint.
+- If the native binary cannot be resolved, the CLI tells the user to rerun the installer script or restore the binary inside the installed SILC tree.
 - If `pywebview` is missing, desktop launch fails with a clear error.

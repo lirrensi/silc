@@ -1850,45 +1850,11 @@ def daemon_logs(tail: int) -> None:
     _daemon_logs_helper(tail)
 
 
-def _tui_dist_dir() -> Path | None:
-    potential_dirs = (
-        BASE_DIR / "bin",
-        BASE_DIR / "tui_client" / "dist",
-        Path.cwd() / "tui_client" / "dist",
-    )
-    for dist_dir in potential_dirs:
-        if dist_dir.is_dir():
-            return dist_dir
-    return None
-
-
-def _native_tui_binary_path(dist_dir: Path) -> Path | None:
-    if sys.platform.startswith("win"):
-        filenames = ("silc-tui.exe", "silc-tui-windows.exe")
-    elif sys.platform.startswith("linux"):
-        filenames = ("silc-tui", "silc-tui-linux")
-    elif sys.platform == "darwin":
-        filenames = ("silc-tui", "silc-tui-macos")
-    else:
-        return None
-    for filename in filenames:
-        candidate = dist_dir / filename
-        if candidate.exists():
-            return candidate
-    return dist_dir / filenames[0]
-
-
 def _find_native_tui_binary() -> Path | None:
-    dist_dir = _tui_dist_dir()
-    if dist_dir is not None:
-        candidate = _native_tui_binary_path(dist_dir)
-        if candidate is not None and candidate.exists():
-            return candidate
-
     try:
         return ensure_native_tui_binary(progress=lambda msg: click.echo(msg, err=True))
     except InstallerError as exc:
-        click.echo(f"⚠️  Native TUI installer failed: {exc}", err=True)
+        click.echo(f"⚠️  Native TUI lookup failed: {exc}", err=True)
         return None
 
 
@@ -1912,8 +1878,8 @@ def _launch_native_tui_client(port: int) -> None:
     executable = _find_native_tui_binary()
     if executable is None or not executable.exists():
         click.echo(
-            "⚠️  Native TUI binary could not be found or installed. "
-            "Run `tui_client` manually or revisit the release metadata.",
+            "⚠️  Native TUI binary could not be found. "
+            "Run the installer script again so SILC can repopulate tui_client/dist in the installed tree, or place silc-tui in tui_client/dist inside that tree.",
             err=True,
         )
         return
