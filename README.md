@@ -1,15 +1,11 @@
 # SILC - Shared Interactive Linked Cmd
 
-(bruh)
-
-(v5 with cool features underway, just a lil longer...)
-
 [![PyPI version](https://badge.fury.io/py/silc.svg)](https://badge.fury.io/py/silc)
 [![Python Version](https://img.shields.io/pypi/pyversions/silc.svg)](https://pypi.org/project/silc/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/lirrensi/silc/workflows/CI/badge.svg)](https://github.com/lirrensi/silc/actions)
 
-**SILC is a shell-first terminal platform with shared state.** Part terminal tool, part manager panel, part shared session workspace — combining the best parts of tmux-like workflows, browser-based control, and persistent sessions into one place.
+**SILC is a terminal session manager for real shells.** Think tmux-style session control, plus shared access, persistence, and multiple frontends for humans and agents.
 
 ---
 
@@ -28,17 +24,18 @@ Most AI coding agents (Claude, GPT-4, Cursor, etc.) spawn isolated shells with n
 
 ### What SILC is
 
-- **Shell-first**: Run commands in your actual shell with all your tools and aliases
-- **Shared sessions**: Every session is accessible via CLI and HTTP, and fully controllable from both
-- **Control center**: A manager panel (Web UI / desktop / TUI) where you see and direct every terminal
-- **Persistent state**: Sessions survive restarts and resurrect automatically — they stay until you delete them
+- **Session manager first**: Create, name, list, open, close, and resurrect shells from one place
+- **Your real shell**: Run commands in your actual environment with your tools, aliases, and config
+- **Shared access**: Every session is reachable from CLI, HTTP, WebSocket, MCP, and the UI surfaces
+- **Multiple control panels**: Browser, desktop app, and native TUI for managing active terminals
+- **Persistent state**: Sessions survive restarts and stay available until you delete them
 
 ### At a glance
 
 | Pillar | What it gives you |
 |--------|------------------|
-| **Run commands** | Full shell access, TUI apps, agent-first CLI, MCP integration |
-| **Manage centrally** | Manager panel to create, monitor, open/close, and resurrect sessions |
+| **Run in real shells** | Full shell access, TUI apps, agent-first CLI, MCP integration |
+| **Manage sessions centrally** | Create, monitor, open/close, and resurrect shells from one panel |
 | **Persist and resurrect** | Sessions live across restarts with metadata (name, port, cwd, shell) retained |
 
 ### Shared sessions and live access
@@ -49,11 +46,34 @@ Every session is shared, addressable, and controllable via CLI or HTTP:
 - **Live terminal views** (Web UI, desktop, TUI, xterm.js) are for humans and real-time collaboration — this is where you watch changes as they happen
 - Sessions live until you explicitly close or kill them; automatic restart and resurrect keep them available across daemon restarts
 
-The manager panel ties it all together:
+The manager panel ties it all together, tmux-style:
 
 - See every session in one place (names, ports, cwd, state)
 - Open, monitor, and control terminals from the browser, desktop app, or TUI
-- Use HTTP access and UI controls side-by-side with the shell-first workflow
+- Use HTTP access and UI controls side-by-side with the shell workflow
+
+### Manager features at a glance
+
+- **Attach / detach** sessions from multiple surfaces without losing state
+- **Multi-login access** so more than one person or agent can observe and work in the same session
+- **Live path tracking** — the manager remembers and displays the current working directory
+- **Crash and restart recovery** — resurrect sessions after daemon restarts with metadata intact
+- **Theme controls** — tweak the manager look and feel with built-in theme presets
+- **Session hygiene** — rename, reopen, interrupt, resize, close, and kill from one place
+- **Agent-friendly controls** — output, streaming, WebSocket, MCP, and REST API all point at the same sessions
+
+Compared to tmux, SILC keeps the same session-centric spirit but adds a dedicated manager layer, shared access, and UI surfaces for browsers and desktops.
+
+| Capability | SILC manager | tmux |
+|------------|--------------|------|
+| Session list / switch | ✅ | ✅ |
+| Browser / desktop UI | ✅ | ❌ |
+| Native TUI manager | ✅ | ❌ |
+| Shared multi-user access | ✅ | Limited |
+| Live cwd tracking | ✅ | ❌ |
+| Crash / restart recovery | ✅ | Partial |
+| Theme presets | ✅ | ❌ |
+| HTTP / WebSocket / MCP | ✅ | ❌ |
 
 ## 🚀 Quick Start
 
@@ -199,7 +219,7 @@ silc my-project run "git status"
 
 ## 💡 How It Works
 
-SILC transforms your terminal into a **manageable VI** with multiple interfaces:
+SILC turns your terminal fleet into a **manageable VI** with multiple interfaces:
 
 ```bash
 # Start SILC daemon (manages all sessions)
@@ -219,7 +239,7 @@ silc 20000 in "vim main.py"
 silc 20000 out
 ```
 
-**The CLI is the primary interface** — simple for humans, perfect for agents. But SILC v3 offers so much more:
+**The CLI is the primary interface** — simple for humans, perfect for agents. But SILC offers much more than a shared session layer:
 
 | Interface | Use Case |
 |-----------|----------|
@@ -337,7 +357,7 @@ silc mcp
 
 ## 📊 SILC vs. Alternatives
 
-| Feature | SILC v3 | Agent Shells | tmux/screen |
+| Feature | SILC | Agent Shells | tmux/screen |
 |---------|---------|--------------|-------------|
 | Your Environment | ✅ Full access | ❌ Isolated | ✅ |
 | TUI Apps (vim, htop) | ✅ | ❌ | ✅ |
@@ -537,7 +557,7 @@ docker run -d -p 19999:19999 -p 20000-20010:20000-20010 silc:latest
 
 ## 🎮 The Manageable VI — All Interfaces
 
-SILC v3 unifies all terminal interaction into one manageable VI:
+SILC unifies all terminal interaction into one manageable VI:
 
 ### CLI (Primary Interface)
 
@@ -797,7 +817,7 @@ silc desktop [--share]      # Opens the same UI in a native desktop window
 ## ❓ FAQ
 
 **Q: What's a "manageable VI"?**
-A: VI = Virtual Interface. SILC is your single place to work with terminals — not just tmux alternatives, but a unified interface with REST API, WebSocket, TUI, Web UI, and MCP integration.
+A: VI = Virtual Interface. SILC is your single place to manage terminal sessions — tmux-like control, plus REST API, WebSocket, TUI, Web UI, and MCP integration.
 
 **Q: Why is CLI the primary interface?**
 A: The CLI is simple and intuitive for both humans and AI agents. It provides a consistent interface that works seamlessly with agent workflows. The HTTP API is available for programmatic access.
